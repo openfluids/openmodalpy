@@ -128,6 +128,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DMD and SPOD agree on the shedding frequency without reference to the metadata.
 
 ### Changed
+- POD energy percentages now report a share of total field energy (pre-truncation),
+  so regenerated figures will read lower than before for any truncated spectrum.
 - mPOD figure files now use `_mpod_` in their names (from `analysis_type`) instead of the hard-coded `_pod_` inherited from PODAnalyzer. Anything that still looks for the old `_pod_` figure names after an mPOD run must update. POD figure names are unchanged.
 - `openmodalpy analyze` rejects an unknown method when it parses the command
   line, instead of accepting it and failing later. The accepted set is derived

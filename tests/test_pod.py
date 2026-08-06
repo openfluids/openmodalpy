@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from openmodalpy import PODAnalyzer
+from openmodalpy import MPODAnalyzer, PODAnalyzer
 from openmodalpy.core.base import get_robust_clim, subset_volume_focus_3d
 
 
@@ -470,6 +470,100 @@ def test_pod_energy_captured_fraction_two_truncation_levels(small_pod_field, tmp
     with h5py.File(tmp_path / "one" / "pod_energy.hdf5", "r") as handle:
         assert "energy_captured_fraction" in handle.attrs
         assert abs(float(handle.attrs["energy_captured_fraction"]) - expected_one) < 1e-10
+
+
+def test_pod_cumulative_percentage_below_100_when_truncated(small_pod_field, tmp_path):
+    """With n_modes_save below full rank, cumulative energy share is < 100%.
+
+    Under the retained-sum denominator this was exactly 100 by construction.
+    """
+    analyzer = _make_pod_analyzer(small_pod_field, tmp_path, n_modes_save=1)
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+
+    denom, suffix = analyzer._energy_denominator()
+    assert suffix == ""
+    assert denom > 0.0
+    cum_pct = 100.0 * float(np.sum(analyzer.eigenvalues)) / denom
+    assert cum_pct < 100.0
+
+
+def test_pod_mode_percentage_uses_pretruncation_total(small_pod_field, tmp_path):
+    """A mode percentage is 100 * lambda_i / total_energy, not / sum(retained)."""
+    analyzer = _make_pod_analyzer(small_pod_field, tmp_path, n_modes_save=1)
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+
+    lambda_i = float(analyzer.eigenvalues[0])
+    total = float(analyzer.total_energy)
+    retained = float(np.sum(analyzer.eigenvalues))
+    assert total > retained > 0.0
+
+    pct_true = 100.0 * lambda_i / total
+    pct_retained = 100.0 * lambda_i / retained
+    denom, suffix = analyzer._energy_denominator()
+    assert suffix == ""
+    assert abs(100.0 * lambda_i / denom - pct_true) < 1e-12
+    assert pct_true < pct_retained
+
+
+def test_pod_energy_denominator_falls_back_with_honest_label(small_pod_field, tmp_path):
+    """When total_energy is unknown, denominator is retained sum and suffix is set."""
+    analyzer = _make_pod_analyzer(small_pod_field, tmp_path, n_modes_save=2)
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+    analyzer.total_energy = float("nan")
+
+    denom, suffix = analyzer._energy_denominator()
+    assert abs(denom - float(np.sum(analyzer.eigenvalues))) < 1e-12
+    assert suffix  # non-empty — a silent fallback would hide the missing total
+    assert "retained modes only" in suffix
+
+
+def test_mpod_energy_label_says_retained_only(tmp_path):
+    """mPOD never sets total_energy, so percentages must carry the fallback label.
+
+    Uses multi-band edges so perform_mpod takes its own eigenvalue path
+    (mpod.py band POD), not the single-full-band shortcut into perform_pod.
+    """
+    dt = 0.05
+    ns = 200
+    t = np.arange(ns) * dt
+    phi_low = np.array([1.0, 0.0, 0.0, 1.0])
+    phi_low = phi_low / np.linalg.norm(phi_low)
+    phi_high = np.array([0.0, 1.0, 1.0, 0.0])
+    phi_high = phi_high / np.linalg.norm(phi_high)
+    q = (
+        np.sin(2 * np.pi * 1.0 * t)[:, None] * phi_low[None, :]
+        + 0.7 * np.sin(2 * np.pi * 4.0 * t)[:, None] * phi_high[None, :]
+    )
+    data = {
+        "q": q,
+        "x": np.arange(4, dtype=float),
+        "y": np.array([0.0]),
+        "dt": dt,
+        "Nx": 4,
+        "Ny": 1,
+        "Ns": ns,
+    }
+    analyzer = MPODAnalyzer(
+        file_path="mpod_energy_label",
+        results_dir=tmp_path,
+        figures_dir=tmp_path,
+        data_loader=lambda _: data,
+        spatial_weight_type="uniform",
+        n_modes_save=2,
+        band_edges=[0.0, 2.0, 5.0],
+        use_parallel=False,
+    )
+    analyzer.load_and_preprocess()
+    analyzer.perform_mpod()
+
+    assert not np.isfinite(getattr(analyzer, "total_energy", float("nan")))
+    denom, suffix = analyzer._energy_denominator()
+    assert abs(denom - float(np.sum(analyzer.eigenvalues))) < 1e-12
+    assert suffix
+    assert "retained modes only" in suffix
 
 
 def test_unknown_spatial_weight_type_raises_at_construction():

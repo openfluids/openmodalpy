@@ -135,6 +135,8 @@ class PODAnalyzer(BaseAnalyzer):
         self.eigenvalues = np.array([])  # Eigenvalues (lambda)
         self.time_coefficients = np.array([])  # Temporal coefficients (Psi)
         self.temporal_mean = np.array([])  # Temporal mean of the data
+        # Pre-truncation total energy (sum of all eigenvalues); nan until perform/load.
+        self.total_energy = float("nan")
         # Truncated energy / pre-truncation total; set in perform_pod.
         self.energy_captured_fraction = float("nan")
 
@@ -244,7 +246,7 @@ class PODAnalyzer(BaseAnalyzer):
 
         # Capture pre-truncation total before slicing eigenvalues (the ratio
         # cannot be recovered after truncation).
-        total_energy = float(np.sum(self.eigenvalues))
+        self.total_energy = float(np.sum(self.eigenvalues))
 
         # Truncate to requested number of modes
         n_available_modes = len(self.eigenvalues)
@@ -265,8 +267,8 @@ class PODAnalyzer(BaseAnalyzer):
         logger.info("Computed %d POD modes.", self.modes.shape[1])
 
         # Fraction of pre-truncation energy retained by the saved modes.
-        if total_energy > 0:
-            self.energy_captured_fraction = float(np.sum(self.eigenvalues) / total_energy)
+        if self.total_energy > 0:
+            self.energy_captured_fraction = float(np.sum(self.eigenvalues) / self.total_energy)
             logger.info(
                 "Energy captured by %d modes: %.2f%%",
                 self.n_modes_save,
@@ -274,6 +276,19 @@ class PODAnalyzer(BaseAnalyzer):
             )
         else:
             self.energy_captured_fraction = 0.0
+
+    def _energy_denominator(self) -> tuple[float, str]:
+        """Denominator for energy percentages and an optional label suffix.
+
+        Prefer the true pre-truncation total when known. Result files written
+        before that attribute was stored fall back to the sum of retained
+        eigenvalues; the label suffix says so so titles stay honest.
+        """
+        total = getattr(self, "total_energy", float("nan"))
+        if np.isfinite(total) and total > 0:
+            return float(total), ""
+        retained = float(self.eigenvalues.sum()) if self.eigenvalues.size else 0.0
+        return retained, " (retained modes only)"
 
     def _get_algorithm_metadata(self) -> dict:
         """Describe the current POD contract."""
@@ -284,6 +299,8 @@ class PODAnalyzer(BaseAnalyzer):
             "uses_spatial_metric_in_second_order_operator": True,
             "eigenvalue_normalization": "snapshot_average",
         }
+        if np.isfinite(self.total_energy):
+            meta["total_energy"] = float(self.total_energy)
         if np.isfinite(self.energy_captured_fraction):
             meta["energy_captured_fraction"] = float(self.energy_captured_fraction)
         return meta
@@ -352,6 +369,15 @@ class PODAnalyzer(BaseAnalyzer):
             self.data["Ny"] = int(res.attrs["Ny"])
         if "Nz" in res.attrs:
             self.data["Nz"] = int(res.attrs["Nz"])
+        # Reset first: a file without these attrs means "unknown", and a
+        # stale total from an earlier run on other data would otherwise be
+        # used as the denominator with no "retained modes only" label.
+        self.total_energy = float("nan")
+        self.energy_captured_fraction = float("nan")
+        if "total_energy" in res.attrs:
+            self.total_energy = float(res.attrs["total_energy"])
+        if "energy_captured_fraction" in res.attrs:
+            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
         logger.info("POD results loaded.")
 
     def save_results(self, filename: str | None = None) -> None:
@@ -409,7 +435,8 @@ class PODAnalyzer(BaseAnalyzer):
         fig, ax = plt.subplots(figsize=(8, 5))
         try:
             mode_indices = np.arange(1, len(self.eigenvalues) + 1)
-            normalized_eigenvals = self.eigenvalues / np.sum(self.eigenvalues) * 100
+            denom, label_suffix = self._energy_denominator()
+            normalized_eigenvals = (self.eigenvalues / denom * 100) if denom > 0 else np.zeros_like(self.eigenvalues)
 
             ax.plot(mode_indices, normalized_eigenvals, "o-", linewidth=2, markersize=6)
 
@@ -423,7 +450,7 @@ class PODAnalyzer(BaseAnalyzer):
 
             ax.set_yscale("log")
             ax.set_xlabel("Mode Number")
-            ax.set_ylabel("Normalized Eigenvalue (Energy Percentage %)")
+            ax.set_ylabel(f"Normalized Eigenvalue (Energy Percentage %){label_suffix}")
             ax.set_title("POD Eigenvalue Spectrum")
             ax.grid(True, which="both", ls="--")
 
@@ -534,10 +561,13 @@ class PODAnalyzer(BaseAnalyzer):
                 ax.grid(True, linestyle="--", alpha=0.3)
                 # Calculate energy and cumulative energy
                 if self.eigenvalues is not None and len(self.eigenvalues) > mode_idx:
-                    total_energy = np.sum(self.eigenvalues)
-                    energy_pct = 100.0 * self.eigenvalues[mode_idx] / total_energy
-                    cum_energy_pct = 100.0 * np.sum(self.eigenvalues[: mode_idx + 1]) / total_energy
-                    title_str = f"POD Mode {mode_idx + 1} [{var_name}] | Energy: {energy_pct:.2f}% | Cumulative: {cum_energy_pct:.2f}%"
+                    denom, label_suffix = self._energy_denominator()
+                    energy_pct = 100.0 * self.eigenvalues[mode_idx] / denom if denom > 0 else 0.0
+                    cum_energy_pct = 100.0 * np.sum(self.eigenvalues[: mode_idx + 1]) / denom if denom > 0 else 0.0
+                    title_str = (
+                        f"POD Mode {mode_idx + 1} [{var_name}] | Energy: {energy_pct:.2f}% | "
+                        f"Cumulative: {cum_energy_pct:.2f}%{label_suffix}"
+                    )
                 else:
                     title_str = f"POD Mode {mode_idx + 1} [{var_name}]"
                 ax.set_title(title_str)
@@ -590,7 +620,7 @@ class PODAnalyzer(BaseAnalyzer):
                 1, ncols, figsize=(4 * ncols * fig_aspect, 4), squeeze=False, constrained_layout=True
             )
 
-            total_energy = np.sum(self.eigenvalues)
+            denom, label_suffix = self._energy_denominator()
             for idx, mode_idx in enumerate(range(start, end)):
                 # ------------------ Only plot top row: raw mode ------------------
                 ax = axes[0, idx]
@@ -634,13 +664,13 @@ class PODAnalyzer(BaseAnalyzer):
                     ticklabels=[f"{vmin:.2f}", "0", f"{vmax:.2f}"],
                 )
 
-                energy_pct = 100.0 * self.eigenvalues[mode_idx] / total_energy
-                cum_pct = 100.0 * np.sum(self.eigenvalues[: mode_idx + 1]) / total_energy
+                energy_pct = 100.0 * self.eigenvalues[mode_idx] / denom if denom > 0 else 0.0
+                cum_pct = 100.0 * np.sum(self.eigenvalues[: mode_idx + 1]) / denom if denom > 0 else 0.0
                 ax.set_title(
                     format_mode_title(
                         self.data,
                         mode_idx,
-                        default=f"Mode {mode_idx + 1}\nE={energy_pct:.2f}%  Cum={cum_pct:.2f}%",
+                        default=f"Mode {mode_idx + 1}\nE={energy_pct:.2f}%  Cum={cum_pct:.2f}%{label_suffix}",
                     ),
                     fontsize=8,
                     pad=20,
@@ -677,13 +707,13 @@ class PODAnalyzer(BaseAnalyzer):
         if plot_n_modes is not None:
             n_modes = min(plot_n_modes, n_modes, self.n_modes_save)
 
-        total_energy = np.sum(self.eigenvalues) if self.eigenvalues.size else None
+        denom, label_suffix = self._energy_denominator()
         items = []
         for mode_idx in range(n_modes):
             mode_3d = reshape_mode_to_volume(self.modes[:, mode_idx], self.data)
-            if total_energy:
-                energy_pct = 100.0 * self.eigenvalues[mode_idx] / total_energy
-                title = f"POD Mode {mode_idx + 1} | E={energy_pct:.2f}%"
+            if denom > 0:
+                energy_pct = 100.0 * self.eigenvalues[mode_idx] / denom
+                title = f"POD Mode {mode_idx + 1} | E={energy_pct:.2f}%{label_suffix}"
             else:
                 title = f"POD Mode {mode_idx + 1}"
             output_path = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{mode_idx + 1}_{kind}.png")
@@ -707,8 +737,10 @@ class PODAnalyzer(BaseAnalyzer):
             logger.warning("No POD modes/eigenvalues to plot. Run perform_pod() first.")
             return
 
-        total_energy = np.sum(self.eigenvalues)
-        cumulative_pct = np.cumsum(self.eigenvalues) / total_energy * 100.0
+        denom, label_suffix = self._energy_denominator()
+        cumulative_pct = (
+            np.cumsum(self.eigenvalues) / denom * 100.0 if denom > 0 else np.zeros_like(self.eigenvalues)
+        )
         # Number of modes needed to reach threshold (inclusive)
         n_modes_plot = int(np.searchsorted(cumulative_pct, energy_threshold, side="right")) + 1
         n_modes_plot = min(n_modes_plot, self.n_modes_save, self.modes.shape[1])
@@ -787,13 +819,13 @@ class PODAnalyzer(BaseAnalyzer):
                 )
 
                 # Add title with energy information
-                energy_pct = 100.0 * self.eigenvalues[k] / total_energy
+                energy_pct = 100.0 * self.eigenvalues[k] / denom if denom > 0 else 0.0
                 cum_pct = cumulative_pct[k]
                 ax.set_title(
                     format_mode_title(
                         self.data,
                         k,
-                        default=f"Mode {k + 1}\nE={energy_pct:.2f}%  Cum={cum_pct:.2f}%",
+                        default=f"Mode {k + 1}\nE={energy_pct:.2f}%  Cum={cum_pct:.2f}%{label_suffix}",
                     ),
                     fontsize=8,
                     pad=20,
@@ -1000,7 +1032,10 @@ class PODAnalyzer(BaseAnalyzer):
             logger.warning("No eigenvalues to plot. Run perform_pod() first.")
             return
 
-        cumulative_energy = np.cumsum(self.eigenvalues) / np.sum(self.eigenvalues) * 100
+        denom, label_suffix = self._energy_denominator()
+        cumulative_energy = (
+            np.cumsum(self.eigenvalues) / denom * 100 if denom > 0 else np.zeros_like(self.eigenvalues)
+        )
         mode_indices = np.arange(1, len(self.eigenvalues) + 1)
 
         plt.figure(figsize=(8, 5))
@@ -1009,7 +1044,7 @@ class PODAnalyzer(BaseAnalyzer):
         for idx, (x, y) in enumerate(zip(mode_indices, cumulative_energy)):
             plt.text(x, y, f" {idx + 1}", fontsize=7, va="bottom")
         plt.xlabel("Number of Modes")
-        plt.ylabel("Cumulative Energy (%)")
+        plt.ylabel(f"Cumulative Energy (%){label_suffix}")
         plt.title("Cumulative Energy of POD Modes")
         plt.grid(True, which="both", ls="--")
         plt.ylim(0, 105)  # Show up to 100% or slightly more
