@@ -77,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Added
+- Opt-in randomized (Halko) SVD: `randomized_svd` and
+  `compute_reduced_svd(..., method="randomized")`. Accuracy tracks spectral
+  decay, so `"auto"` never selects it.
 - Analyzer argument `spatial_weights=` (type `"prescribed"`) and construction-time
   validation of `spatial_weight_type` to `{"auto", "uniform", "polar", "prescribed"}`.
 - Case config key `energy_fraction` for DMD `rank="energy"` (float in `(0, 1]`;
