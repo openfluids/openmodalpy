@@ -382,6 +382,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- `compute_reduced_svd` no longer routes near-full-rank requests to ARPACK.
+  The gate is now `use_iterative_svd(min_dim, rank)`: iterative only when
+  `rank < 0.05 * min_dim` and `min_dim >= 256`. Callers that ask for
+  `k = n_min - 1` (POD SVD route, ST-POD) stay on dense SVD, which is the
+  faster path once rank is a large fraction of the smaller dimension.
 - `canonicalize_modes` accepts an integer-dtype `modes` array instead of failing
   with numpy's `UFuncOutputCastingError`. The scale factor it applies is not an
   integer, so integer input is now promoted to `float64` before scaling; `float`

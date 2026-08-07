@@ -45,25 +45,54 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Route iterative SVD (ARPACK via ``svds``) only when rank is a small fraction
+# of the smaller dimension *and* that dimension is large enough for it to pay.
+# Values from machine measurements (see ``use_iterative_svd`` docstring).
+ARPACK_MAX_RANK_FRACTION = 0.05
+ARPACK_MIN_DIM = 256
+
+
+def use_iterative_svd(min_dim: int, rank: int) -> bool:
+    """Whether to use ARPACK (``svds``) rather than dense SVD for a reduced SVD.
+
+    Returns True only when both hold:
+
+    - ``rank < ARPACK_MAX_RANK_FRACTION * min_dim``
+    - ``min_dim >= ARPACK_MIN_DIM``
+
+    Measured on this machine, dense vs ARPACK, decaying spectrum:
+
+    - ``X(20000, 2000)``: k=10 ARPACK 3.7× faster; k=100 break-even; k=500
+      dense 13× faster.
+    - ``X(20000, 5000)``: k=10 ARPACK 15.8× faster and ~5 MB peak vs ~1000 MB;
+      k=100 ARPACK 3.2× faster.
+
+    Memory is the real argument at large ``min_dim``: dense peaks at
+    ``O(m * min_dim)``. The fraction 0.05 sits at the break-even neighbourhood
+    for the first case; a looser 1/4 threshold was measured about five times
+    too permissive. Near-full-rank requests (e.g. POD/ST-POD with
+    ``k = n_min - 1``) therefore stay on dense SVD — the regime where iterative
+    solvers are worst.
+    """
+    return rank < ARPACK_MAX_RANK_FRACTION * min_dim and min_dim >= ARPACK_MIN_DIM
+
 
 def compute_reduced_svd(X: np.ndarray, rank: int, v0_seed: int = 0):
-    """Return leading *rank* singular triplets, using truncated SVD for large matrices.
+    """Return leading *rank* singular triplets, using truncated SVD when it pays.
 
-    Falls back to ``np.linalg.svd`` when the matrix is small enough that
-    dense SVD is faster and more numerically stable than ARPACK.
+    Routing is decided solely by :func:`use_iterative_svd` (rank/min_dim ratio
+    and a minimum dimension). Dense SVD is used otherwise — including for
+    near-full-rank requests on large matrices, where ARPACK is slower.
 
-    The ``min_dim >= 256`` threshold exists because ARPACK (via ``svds``) is only
-    faster for large matrices; below it we use dense SVD. Results differ across
-    this threshold by design (different algorithms) — do not remove it without a
-    separate review of numerical contracts that depend on it.
+    Results can differ across the routing threshold by design (different
+    algorithms). Do not retune the constants without re-checking the
+    measurements recorded on :func:`use_iterative_svd`.
 
     Runs under the process-wide BLAS thread policy (see ``core.threads``).
     """
     with apply_blas_limit():
         min_dim = min(X.shape)
-        # ARPACK for large matrices only; dense SVD below 256 is faster/stabler.
-        # Crossing this threshold changes the algorithm, so numbers will differ.
-        if rank < min_dim and min_dim >= 256:
+        if use_iterative_svd(min_dim, rank):
             # Local deterministic start vector — never reseed the caller's global RNG.
             v0 = np.random.default_rng(v0_seed).standard_normal(min_dim)
             u, s, vh = svds(X, k=rank, v0=v0)

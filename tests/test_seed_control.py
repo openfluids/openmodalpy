@@ -9,21 +9,26 @@ from __future__ import annotations
 import h5py
 import numpy as np
 
-from openmodalpy.core.base import compute_reduced_svd, generate_dummy_data_like_jetles
+from openmodalpy.core.base import (
+    compute_reduced_svd,
+    generate_dummy_data_like_jetles,
+    use_iterative_svd,
+)
 
 
 def test_arpack_path_bit_identical():
     """Two ARPACK-branch SVDs on the same input must be bit-identical.
 
-    Size is chosen so ``rank < min_dim and min_dim >= 256`` — the structural
-    condition for the ``svds`` path. If this precondition ever stops holding,
-    the assertion fails instead of silently testing the dense fallback.
+    Size is chosen so ``use_iterative_svd`` is True (small rank fraction on a
+    large enough matrix). If this precondition ever stops holding, the
+    assertion fails instead of silently testing the dense fallback.
     """
     rank = 10
     rng = np.random.default_rng(12345)
+    # min_dim=300, rank=10 → 10 < 0.05*300 and min_dim >= 256 → iterative
     X = rng.standard_normal((300, 300))
     min_dim = min(X.shape)
-    assert rank < min_dim and min_dim >= 256, (
+    assert use_iterative_svd(min_dim, rank), (
         f"test no longer exercises the ARPACK branch (rank={rank}, min_dim={min_dim})"
     )
 
