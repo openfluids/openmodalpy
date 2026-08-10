@@ -77,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Added
+- SPOD warns when it saves FFT blocks that carry no cache stamp. The stamp is
+  derived from the source snapshots, so a save without them in memory leaves
+  blocks the next run cannot validate and must recompute. The behaviour is
+  unchanged; the run now says why.
 - Opt-in randomized (Halko) SVD: `randomized_svd` and
   `compute_reduced_svd(..., method="randomized")`. Accuracy tracks spectral
   decay, so `"auto"` never selects it.
