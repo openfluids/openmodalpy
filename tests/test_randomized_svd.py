@@ -47,9 +47,7 @@ def test_randomized_improves_with_power_iterations():
     _, s8, _ = randomized_svd(X, k, n_power_iterations=8, seed=0)
     err0 = float(np.max(np.abs(s0 - s_true) / s_true))
     err8 = float(np.max(np.abs(s8 - s_true) / s_true))
-    assert err8 * 100 <= err0, (
-        f"power iterations did not improve enough: err0={err0:.3e}, err8={err8:.3e}"
-    )
+    assert err8 * 100 <= err0, f"power iterations did not improve enough: err0={err0:.3e}, err8={err8:.3e}"
 
 
 def test_randomized_is_inaccurate_on_slow_decay():
@@ -64,9 +62,7 @@ def test_randomized_is_inaccurate_on_slow_decay():
     s_true = spectrum[:k]
     _, s, _ = randomized_svd(X, k, n_power_iterations=2, seed=0)
     err = float(np.max(np.abs(s - s_true) / s_true))
-    assert err > 1e-2, (
-        f"slow-decay error {err:.3e} is better than 1e-2 — update docstring numbers"
-    )
+    assert err > 1e-2, f"slow-decay error {err:.3e} is better than 1e-2 — update docstring numbers"
 
 
 def test_auto_never_selects_randomized():
@@ -98,10 +94,7 @@ def test_auto_never_selects_randomized():
         _, s_r, _ = randomized_svd(X, rank, seed=0)
         # Compare leading rank singular values; dense may return a longer s.
         if np.array_equal(s_auto[:rank], s_r[:rank]):
-            pytest.fail(
-                f"auto returned bit-identical singular values to randomized "
-                f"(m={m}, n={n}, rank={rank})"
-            )
+            pytest.fail(f"auto returned bit-identical singular values to randomized (m={m}, n={n}, rank={rank})")
 
 
 def test_randomized_shapes_and_ordering():

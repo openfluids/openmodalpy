@@ -576,7 +576,9 @@ class PODAnalyzer(BaseAnalyzer):
 
             fig.tight_layout()
             # Save figure as PNG with dpi=FIG_DPI
-            plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{start + 1}_to_{end}.png")
+            plot_filename = os.path.join(
+                self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{start + 1}_to_{end}.png"
+            )
             plt.savefig(plot_filename, dpi=FIG_DPI)
             plt.close(fig)
             logger.info("Saving figure %s", plot_filename)
@@ -675,7 +677,9 @@ class PODAnalyzer(BaseAnalyzer):
                     fontsize=8,
                     pad=20,
                 )
-            plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{start + 1}_to_{end}.png")
+            plot_filename = os.path.join(
+                self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{start + 1}_to_{end}.png"
+            )
             plt.savefig(plot_filename, dpi=FIG_DPI)
             plt.close(fig)
             logger.info("Saving figure %s", plot_filename)
@@ -716,7 +720,9 @@ class PODAnalyzer(BaseAnalyzer):
                 title = f"POD Mode {mode_idx + 1} | E={energy_pct:.2f}%{label_suffix}"
             else:
                 title = f"POD Mode {mode_idx + 1}"
-            output_path = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{mode_idx + 1}_{kind}.png")
+            output_path = os.path.join(
+                self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{mode_idx + 1}_{kind}.png"
+            )
             items.append({"mode_3d": mode_3d, "output_path": output_path, "title_prefix": title})
         plot_modes_3d(kind, items, x_coords, y_coords, z_coords, data=self.data)
 
@@ -738,9 +744,7 @@ class PODAnalyzer(BaseAnalyzer):
             return
 
         denom, label_suffix = self._energy_denominator()
-        cumulative_pct = (
-            np.cumsum(self.eigenvalues) / denom * 100.0 if denom > 0 else np.zeros_like(self.eigenvalues)
-        )
+        cumulative_pct = np.cumsum(self.eigenvalues) / denom * 100.0 if denom > 0 else np.zeros_like(self.eigenvalues)
         # Number of modes needed to reach threshold (inclusive)
         n_modes_plot = int(np.searchsorted(cumulative_pct, energy_threshold, side="right")) + 1
         n_modes_plot = min(n_modes_plot, self.n_modes_save, self.modes.shape[1])
@@ -1033,9 +1037,7 @@ class PODAnalyzer(BaseAnalyzer):
             return
 
         denom, label_suffix = self._energy_denominator()
-        cumulative_energy = (
-            np.cumsum(self.eigenvalues) / denom * 100 if denom > 0 else np.zeros_like(self.eigenvalues)
-        )
+        cumulative_energy = np.cumsum(self.eigenvalues) / denom * 100 if denom > 0 else np.zeros_like(self.eigenvalues)
         mode_indices = np.arange(1, len(self.eigenvalues) + 1)
 
         plt.figure(figsize=(8, 5))
@@ -1091,7 +1093,9 @@ class PODAnalyzer(BaseAnalyzer):
         plt.title("Data Reconstruction Error vs. Number of POD Modes")
         plt.grid(True, which="both", ls="--")
         plt.yscale("log")  # Error often drops off exponentially
-        plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_reconstruction_error.png")
+        plot_filename = os.path.join(
+            self.figures_dir, f"{self.data_root}_{self.analysis_type}_reconstruction_error.png"
+        )
         plt.savefig(plot_filename, dpi=FIG_DPI)
         plt.close()
         logger.info("Saving figure %s", plot_filename)
@@ -1209,7 +1213,9 @@ class PODAnalyzer(BaseAnalyzer):
                     ax_recon.set_title(f"Recon. k={n_modes_recon}")
 
         plt.tight_layout()
-        plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_reconstruction_comparison.png")
+        plot_filename = os.path.join(
+            self.figures_dir, f"{self.data_root}_{self.analysis_type}_reconstruction_comparison.png"
+        )
         plt.savefig(plot_filename, dpi=FIG_DPI)
         plt.close()
         logger.info("Saving figure %s", plot_filename)
@@ -1337,9 +1343,7 @@ class PODAnalyzer(BaseAnalyzer):
         if is_pseudo_orthogonal:
             logger.info("Temporal coefficients appear to satisfy (1/Ns) * Psi.T @ Psi = diag(Lambda).")
         else:
-            logger.warning(
-                "Temporal coefficients may not perfectly satisfy (1/Ns) * Psi.T @ Psi = diag(Lambda)."
-            )
+            logger.warning("Temporal coefficients may not perfectly satisfy (1/Ns) * Psi.T @ Psi = diag(Lambda).")
 
         # Optional: Plot the computed matrix and the expected diagonal matrix
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -1367,7 +1371,9 @@ class PODAnalyzer(BaseAnalyzer):
         axes[1].set_ylabel("Mode Index")
 
         plt.tight_layout()
-        plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_temporal_ortho_check.png")
+        plot_filename = os.path.join(
+            self.figures_dir, f"{self.data_root}_{self.analysis_type}_temporal_ortho_check.png"
+        )
         plt.savefig(plot_filename, dpi=FIG_DPI)
         plt.close()
         logger.info("Saving figure %s", plot_filename)

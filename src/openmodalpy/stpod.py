@@ -51,7 +51,6 @@ from openmodalpy.core.config import (
     RESULTS_DIR_STPOD,
 )
 
-
 logger = logging.getLogger(__name__)
 
 

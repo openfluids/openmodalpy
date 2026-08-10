@@ -35,7 +35,6 @@ from openmodalpy.core.welch import welch_nblocks, windowed_block_fft
 try:
     from openmodalpy.core.parallel import (
         PARALLEL_AVAILABLE,
-        blocksfft_optimized,
         calculate_polar_weights_optimized,
         get_threadpool_summary,
         spod_single_frequency_optimized,
@@ -115,9 +114,7 @@ def randomized_svd(
     if rank < 1:
         raise ValueError(f"rank must be >= 1, got {rank}")
     if rank > min(m, n):
-        raise ValueError(
-            f"rank={rank} exceeds min(X.shape)={min(m, n)}"
-        )
+        raise ValueError(f"rank={rank} exceeds min(X.shape)={min(m, n)}")
     n_random = min(rank + n_oversamples, min(m, n))
 
     with apply_blas_limit():
@@ -167,21 +164,14 @@ def compute_reduced_svd(
     Runs under the process-wide BLAS thread policy (see ``core.threads``).
     """
     if method not in ("auto", "dense", "iterative", "randomized"):
-        raise ValueError(
-            f"Unknown method {method!r}. Accepted: "
-            f"'auto', 'dense', 'iterative', 'randomized'."
-        )
+        raise ValueError(f"Unknown method {method!r}. Accepted: 'auto', 'dense', 'iterative', 'randomized'.")
 
     if method == "randomized":
         return randomized_svd(X, rank, seed=v0_seed)
 
     with apply_blas_limit():
         min_dim = min(X.shape)
-        use_iter = (
-            use_iterative_svd(min_dim, rank)
-            if method == "auto"
-            else method == "iterative"
-        )
+        use_iter = use_iterative_svd(min_dim, rank) if method == "auto" else method == "iterative"
         if use_iter:
             # Local deterministic start vector — never reseed the caller's global RNG.
             v0 = np.random.default_rng(v0_seed).standard_normal(min_dim)

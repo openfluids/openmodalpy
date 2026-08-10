@@ -575,9 +575,7 @@ class DMDAnalyzer(BaseAnalyzer):
         # Reader already decodes attrs; keep the same defaults as the old helper.
         self._dmd_method = str(res.attrs["dmd_method"] if "dmd_method" in res.attrs else "ls")
         self._dmd_delays = int(res.attrs["dmd_delays"] if "dmd_delays" in res.attrs else 1)
-        self._dmd_named_variant = str(
-            res.attrs["dmd_named_variant"] if "dmd_named_variant" in res.attrs else "dmd"
-        )
+        self._dmd_named_variant = str(res.attrs["dmd_named_variant"] if "dmd_named_variant" in res.attrs else "dmd")
         for coord_key in ("x", "y", "z"):
             value = getattr(res, coord_key, None)
             if value is not None:
