@@ -390,6 +390,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- POD reports the true energy total, and keeps every mode the data supports.
+  Two separate errors, both on the `solver="svd"` route: the reported total was
+  the sum of the returned eigenvalues, which omitted the last one, so every
+  energy percentage read slightly high (measured 2.5e-3 relative on a 40x25
+  case). The total now comes from the exact identity `norm(X_w, 'fro')**2 / m`,
+  which does not depend on how many modes the solver is asked for. Separately,
+  POD now asks the solver only for the modes it keeps instead of nearly the full
+  rank. The bound for that request is `min(n_samples - 1, n_space)`: subtracting
+  the mean costs one snapshot's worth of information, not one of whichever
+  dimension is smaller. Fields with fewer grid points than snapshots keep the
+  mode that the old bound discarded.
 - An mPOD run now labels its figures `mPOD`. Every title drawn inside the
   image said `POD`, because the ten title strings were hardcoded in the POD
   analyzer that mPOD builds on. The filename already said `mpod`, so a

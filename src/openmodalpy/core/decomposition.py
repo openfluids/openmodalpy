@@ -295,7 +295,8 @@ def weighted_second_order(
         this rather than squaring a Hankel matrix.
     n_keep
         If set, keep only the leading ``n_keep`` modes inside the solver
-        (mPOD / ST-POD / PSD-POD). POD passes None and truncates after.
+        (POD / mPOD / ST-POD / PSD-POD). Callers that need the true total
+        energy must compute it from the Frobenius identity themselves.
 
     Returns
     -------

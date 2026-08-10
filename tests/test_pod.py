@@ -145,6 +145,52 @@ def test_spatial_kernel_time_coefficients_use_weighted_inner_product():
     )
 
 
+def test_pod_spatial_regime_keeps_full_spatial_rank(tmp_path):
+    """In the spatial regime, mean-centering must not drop a genuine mode.
+
+    Mean-centering costs one SAMPLE degree of freedom, so the rank bound is
+    ``min(n_samples - 1, n_space)`` — not ``min(n_samples, n_space) - 1``.
+    When ``n_space < n_samples - 1``, POD must therefore return
+    ``min(n_modes_save, n_space)`` modes. Full-column-rank random data makes
+    every spatial direction energetic so the solver does not hide the cap.
+    """
+    rng = np.random.default_rng(0)
+    n_samples, n_space = 8, 3
+    assert n_space < n_samples - 1
+    q = rng.standard_normal((n_samples, n_space))
+    # Ensure the centered field still has full spatial rank.
+    q_c = q - q.mean(axis=0, keepdims=True)
+    assert np.linalg.matrix_rank(q_c, tol=1e-10) == n_space
+
+    data = {
+        "q": q,
+        "x": np.linspace(0.0, 1.0, n_space),
+        "y": np.array([0.0]),
+        "dt": 1.0,
+        "Nx": n_space,
+        "Ny": 1,
+        "Ns": n_samples,
+    }
+    n_modes_save = n_space  # request every genuine mode
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        results_dir=str(tmp_path),
+        figures_dir=str(tmp_path),
+        data_loader=lambda _: data,
+        spatial_weight_type="uniform",
+        n_modes_save=n_modes_save,
+        use_parallel=False,
+    )
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod(solver="eigh")
+
+    want = min(n_modes_save, n_space)
+    assert analyzer.modes.shape == (n_space, want)
+    assert analyzer.eigenvalues.shape == (want,)
+    assert analyzer.time_coefficients.shape == (n_samples, want)
+    assert np.all(analyzer.eigenvalues > 0.0)
+
+
 def test_pod_save_results_records_second_order_contract(tmp_path):
     data = {
         "q": np.array([[1, 2], [3, 4], [5, 6]], dtype=float),

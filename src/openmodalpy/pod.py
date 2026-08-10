@@ -233,23 +233,38 @@ class PODAnalyzer(BaseAnalyzer):
             )
 
         # 3. Identity lift + weighted second-order eigenproblem.
-        # The solver drops eigenvalues below its relative cutoff; POD truncates
-        # what survives by the energy ratio afterwards.
+        # Mean-centering costs one SAMPLE degree of freedom, not one of the
+        # smaller matrix dimension. Rank bound is therefore
+        # min(n_samples - 1, n_space), floored at 1 so a single-DOF field still
+        # returns a mode. The solver may still drop values below its relative
+        # cutoff, so fewer than k may come back.
         self._lift = decomposition.IdentityLift()
         metric = decomposition.SpatialMetric(weight_vector)
         lifted = self._lift.apply(data_mean_removed)
+        n_samples_lift, n_space_lift = lifted.shape
+        max_rank = max(min(n_samples_lift - 1, n_space_lift), 1)
+        k = min(self.n_modes_save, max_rank)
+        if k < self.n_modes_save:
+            logger.warning("Only %d modes available, requested %d", k, self.n_modes_save)
+            self.n_modes_save = k
+
         self.modes, self.eigenvalues, self.time_coefficients = decomposition.weighted_second_order(
             lifted,
             metric,
             method=solver,
-            n_keep=None,
+            n_keep=k,
         )
 
-        # Capture pre-truncation total before slicing eigenvalues (the ratio
-        # cannot be recovered after truncation).
-        self.total_energy = float(np.sum(self.eigenvalues))
+        # True pre-truncation total: sum of all sigma²/m = ‖data_weighted‖_F² / m.
+        # Same exact sqrt(W) as the solver so the identity holds on both routes,
+        # independent of k.
+        sqrt_weights = np.sqrt(metric.weights)
+        data_weighted = lifted * sqrt_weights
+        n_samples = lifted.shape[0]
+        self.total_energy = float(np.linalg.norm(data_weighted, "fro") ** 2 / n_samples)
 
-        # Truncate to requested number of modes
+        # Truncate to requested number of modes (solver may still return fewer
+        # after its relative cutoff).
         n_available_modes = len(self.eigenvalues)
         if self.n_modes_save > n_available_modes:
             logger.warning(
