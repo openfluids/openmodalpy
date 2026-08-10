@@ -403,8 +403,12 @@ def test_spod_load_results_rejects_a_file_without_modes(tmp_path: Path) -> None:
         handle.create_dataset("x", data=np.linspace(0, 1, 4))
         handle.attrs["analysis_type"] = "spod"
 
-    analyzer = SPODAnalyzer.__new__(SPODAnalyzer)
-    analyzer.results_dir = str(results_dir)
+    analyzer = SPODAnalyzer(
+        file_path="not_spod",
+        nfft=8,
+        overlap=0.0,
+        **_analyzer_ctor_kwargs(results_dir),
+    )
 
     with pytest.raises(KeyError, match="not a SPOD result file"):
         analyzer.load_results("not_spod.hdf5")
@@ -417,6 +421,17 @@ def _legacy_capitalised_file(path: Path, modes: np.ndarray, eigenvalues: np.ndar
         handle.create_dataset("TimeCoefficients", data=coeffs)
 
 
+def _analyzer_ctor_kwargs(results_dir: Path) -> dict:
+    """Shared real-constructor kwargs for load_results tests (no half-built objects)."""
+    field = _toy_field()
+    return dict(
+        results_dir=results_dir,
+        figures_dir=results_dir,
+        data_loader=lambda _: field,
+        spatial_weight_type="uniform",
+    )
+
+
 def test_legacy_capitalised_file_loads_through_pod(tmp_path: Path) -> None:
     """A pre-unification POD file with capitalised keys loads via the reader."""
     results_dir = tmp_path / "results"
@@ -427,9 +442,12 @@ def test_legacy_capitalised_file_loads_through_pod(tmp_path: Path) -> None:
     coeffs = rng.standard_normal((8, 2))
     _legacy_capitalised_file(results_dir / "legacy_pod.hdf5", modes, eigenvalues, coeffs)
 
-    analyzer = PODAnalyzer.__new__(PODAnalyzer)
-    analyzer.results_dir = str(results_dir)
-    analyzer.data = {}
+    analyzer = PODAnalyzer(
+        file_path="legacy_pod",
+        n_modes_save=2,
+        use_parallel=False,
+        **_analyzer_ctor_kwargs(results_dir),
+    )
 
     with pytest.warns(DeprecationWarning, match="legacy name"):
         analyzer.load_results("legacy_pod.hdf5")
@@ -449,10 +467,12 @@ def test_legacy_capitalised_file_loads_through_stpod(tmp_path: Path) -> None:
     coeffs = rng.standard_normal((6, 2))
     _legacy_capitalised_file(results_dir / "legacy_stpod.hdf5", modes, eigenvalues, coeffs)
 
-    analyzer = STPODAnalyzer.__new__(STPODAnalyzer)
-    analyzer.results_dir = str(results_dir)
-    analyzer.data = {}
-    analyzer.embedding_dim = 3
+    analyzer = STPODAnalyzer(
+        file_path="legacy_stpod",
+        embedding_dim=3,
+        n_modes_save=2,
+        **_analyzer_ctor_kwargs(results_dir),
+    )
 
     with pytest.warns(DeprecationWarning, match="legacy name"):
         analyzer.load_results("legacy_stpod.hdf5")
@@ -474,9 +494,12 @@ def test_legacy_capitalised_file_loads_through_dmd(tmp_path: Path) -> None:
     coeffs = rng.standard_normal((8, 2)) + 1j * rng.standard_normal((8, 2))
     _legacy_capitalised_file(results_dir / "legacy_dmd.hdf5", modes, eigenvalues, coeffs)
 
-    analyzer = DMDAnalyzer.__new__(DMDAnalyzer)
-    analyzer.results_dir = str(results_dir)
-    analyzer.data = {}
+    analyzer = DMDAnalyzer(
+        file_path="legacy_dmd",
+        n_modes_save=2,
+        rank=2,
+        **_analyzer_ctor_kwargs(results_dir),
+    )
 
     with pytest.warns(DeprecationWarning, match="legacy name"):
         analyzer.load_results("legacy_dmd.hdf5")
