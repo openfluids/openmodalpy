@@ -12,6 +12,7 @@ from openmodalpy.core.base import (
 )
 from openmodalpy.core.decomposition import spod_single_frequency
 from openmodalpy.core.parallel import spod_single_frequency_optimized
+from tests.reference_helpers import reference_pivot_index
 
 
 def test_spod_function_simple():
@@ -38,13 +39,11 @@ def test_spod_function_per_component_weights():
 
 def _assert_spod_modes_canonical(modes: np.ndarray) -> None:
     """Each SPOD mode's band-pivot entry must be real and positive."""
-    from openmodalpy.core.base import canonical_pivot_index
-
     for k in range(modes.shape[1]):
         col = modes[:, k]
         if not np.any(np.abs(col) > 0):
             continue
-        i = canonical_pivot_index(col)
+        i = reference_pivot_index(col)
         v = col[i]
         assert float(np.real(v)) > 0
         assert abs(float(np.imag(v))) <= 1e-9 * max(float(np.abs(v)), 1e-30)
