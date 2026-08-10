@@ -13,7 +13,15 @@ class TestSTPODBasic:
     """Basic functionality tests for ST-POD."""
 
     def test_perform_stpod_simple(self):
-        """Basic ST-POD execution on synthetic data."""
+        """ST-POD on synthetic data: shapes plus POD spectral invariants.
+
+        Eigenvalues must be non-negative and non-increasing; modes must be
+        orthonormal in the (uniform) lifted metric. The energy-fraction check
+        is attribute consistency (stored fraction == sum(lambda)/total_energy),
+        not an independent energy oracle — that lives in
+        test_total_energy_matches_full_svd_frobenius. Arbitrary arrays of the
+        right shape would fail the spectral and orthonormality checks.
+        """
         rng = np.random.default_rng(42)
         Ns, Nx, Ny = 50, 10, 10
         Nspace = Nx * Ny
@@ -45,6 +53,24 @@ class TestSTPODBasic:
         assert analyzer.modes.shape == (embedding_dim * Nspace, n_modes)
         assert analyzer.time_coefficients.shape == (m, n_modes)
         assert analyzer.eigenvalues.shape == (n_modes,)
+
+        # Spectral ordering and positivity (POD eigenvalues = sigma^2 / m).
+        assert np.all(analyzer.eigenvalues >= -1e-14)
+        assert np.all(np.diff(analyzer.eigenvalues) <= 1e-12)
+
+        # Weighted orthonormality under the uniform lifted metric (W = 1).
+        gram = analyzer.modes.T @ analyzer.modes
+        np.testing.assert_allclose(gram, np.eye(n_modes), rtol=0.0, atol=1e-10)
+
+        # Attribute consistency: stored fraction equals sum(lambda) / total_energy.
+        retained = float(np.sum(analyzer.eigenvalues))
+        assert analyzer.total_energy > retained
+        np.testing.assert_allclose(
+            analyzer.energy_captured_fraction,
+            retained / analyzer.total_energy,
+            rtol=1e-12,
+            atol=0.0,
+        )
 
     def test_hankel_matrix_shape(self):
         """Verify Hankel matrix construction."""
@@ -78,7 +104,12 @@ class TestSTPODBasic:
         assert H.shape == (embedding_dim * Nspace, m)
 
     def test_extract_spatial_mode(self):
-        """Test extraction of spatial modes from space-time modes."""
+        """Spatial slices of a space-time mode reassemble the full mode vector.
+
+        Stacking extract_spatial_mode over every delay must recover modes[:, k]
+        exactly, and the extracted blocks must be pairwise disjoint partitions
+        of that column. Shape alone would not catch a wrong delay stride.
+        """
         rng = np.random.default_rng(123)
         Ns, Nspace = 30, 20
         embedding_dim = 4
@@ -108,8 +139,26 @@ class TestSTPODBasic:
             spatial_mode = analyzer.extract_spatial_mode(0, delay)
             assert spatial_mode.shape == (Nspace,)
 
+        # Partition invariant: stack of delay slices == full space-time mode.
+        for mode_idx in range(analyzer.modes.shape[1]):
+            stacked = np.concatenate([analyzer.extract_spatial_mode(mode_idx, d) for d in range(embedding_dim)])
+            np.testing.assert_array_equal(stacked, analyzer.modes[:, mode_idx])
+            # Direct stride check against the raw mode column.
+            for delay in range(embedding_dim):
+                start = delay * Nspace
+                end = start + Nspace
+                np.testing.assert_array_equal(
+                    analyzer.extract_spatial_mode(mode_idx, delay),
+                    analyzer.modes[start:end, mode_idx],
+                )
+
     def test_get_mode_as_movie(self):
-        """Test getting mode as temporal sequence."""
+        """Movie frames are the delay blocks of the space-time mode column.
+
+        Flattening the movie in delay-major order must equal modes[:, idx], and
+        each frame must match extract_spatial_mode. A wrong reshape or stride
+        would pass a pure shape check.
+        """
         rng = np.random.default_rng(456)
         Ns, Nspace = 40, 25
         embedding_dim = 6
@@ -136,6 +185,21 @@ class TestSTPODBasic:
 
         movie = analyzer.get_mode_as_movie(0)
         assert movie.shape == (embedding_dim, Nspace)
+
+        # Flattened movie recovers the full mode; each frame matches extract.
+        np.testing.assert_array_equal(movie.reshape(-1), analyzer.modes[:, 0])
+        for delay in range(embedding_dim):
+            np.testing.assert_array_equal(
+                movie[delay],
+                analyzer.extract_spatial_mode(0, delay),
+            )
+        # Movie L2 energy equals the space-time mode energy (Parseval of the reshape).
+        np.testing.assert_allclose(
+            np.linalg.norm(movie),
+            np.linalg.norm(analyzer.modes[:, 0]),
+            rtol=0.0,
+            atol=1e-14,
+        )
 
     def test_eigenvalues_match_sigma_squared_over_hankel_columns(self):
         """ST-POD spectrum equals SVD of an independently built block-Hankel.
@@ -205,6 +269,7 @@ class TestSTPODBasic:
         )
 
     def test_save_results_records_delay_embedded_contract(self, tmp_path):
+        """Smoke test: asserts execution and artifact only, not numerical values."""
         rng = np.random.default_rng(9)
         Ns, Nspace = 10, 3
         analyzer = STPODAnalyzer(
@@ -277,7 +342,7 @@ class TestSTPODBasic:
         np.testing.assert_array_equal(reloaded.time_coefficients, analyzer.time_coefficients)
 
     def test_plot_spacetime_mode_writes_file(self, tmp_path):
-        """Smoke: plot_spacetime_mode produces a PNG for a 2-D field."""
+        """Smoke test: asserts execution and artifact only, not numerical values."""
         rng = np.random.default_rng(42)
         Ns, Nx, Ny = 24, 5, 4
         Nspace = Nx * Ny

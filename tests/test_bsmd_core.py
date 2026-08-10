@@ -55,12 +55,38 @@ def _make_analyzer(
 
 
 def test_static_bsmd_core_small(tmp_path):
-    """Basic smoke test: single zero-frequency triad produces results."""
+    """Single zero-frequency triad: shapes plus a re-derived dominant eigenpair.
+
+    Characterization, not an independent physical oracle: it re-builds the
+    bispectral matrix C from qhat with the same formula the library uses
+    (see test_compute_single_triad_matches_dominant_eigenpair_shortcut) and
+    checks the analyzer's eigenvalue and modes against its dominant eigenpair.
+    Arbitrary finite arrays of the right shape would still fail.
+    """
+    from tests.reference_helpers import canonicalize_reference
+
     analyzer = _make_analyzer(tmp_path, triads=[(0, 0, 0)])
     analyzer._perform_static_bsmd_core()
     assert analyzer.eigenvalues.shape == (1,)
     assert analyzer.modes1.shape[0] == 1
     assert analyzer.modes1.shape[1] == 4
+
+    # Independent dominant eigenpair of C for triad (0, 0, 0).
+    q0 = analyzer._get_qhat_for_index(0)
+    prod = q0 * q0
+    c_matrix = (np.conj(q0).T @ (analyzer.W * prod)) / q0.shape[1]
+    eigvals, eigvecs = np.linalg.eig(c_matrix)
+    dom = int(np.argmax(np.abs(eigvals)))
+    coeffs_col, _ = canonicalize_reference(eigvecs[:, dom].reshape(-1, 1))
+    coeffs = coeffs_col[:, 0]
+    ref_mode1 = q0 @ coeffs
+    ref_mode2 = prod @ coeffs
+
+    np.testing.assert_allclose(analyzer.eigenvalues[0], eigvals[dom], rtol=1e-10, atol=1e-10)
+    np.testing.assert_allclose(analyzer.modes1[0], ref_mode1, rtol=1e-10, atol=1e-10)
+    np.testing.assert_allclose(analyzer.modes2[0], ref_mode2, rtol=1e-10, atol=1e-10)
+    assert np.isfinite(analyzer.eigenvalues[0])
+    assert np.linalg.norm(analyzer.modes1[0]) > 0.0
 
 
 def test_negative_frequency_conjugate_symmetry(tmp_path):
@@ -103,7 +129,11 @@ def test_static_triads_default_is_none_and_resolves_to_copy(tmp_path):
 
 
 def test_default_triads_at_small_nfft_warn_and_filter(tmp_path):
-    """Default ALL_TRIADS at nfft=8 keeps only in-range triads and warns."""
+    """Default ALL_TRIADS at nfft=8: filter + finite non-trivial spectrum.
+
+    Kept triads stay in-range; every eigenvalue/mode must be finite; at least
+    one |lambda| is strictly positive so a zeroed spectrum cannot pass.
+    """
     rng = np.random.default_rng(20)
     ns, nspace = 64, 4
     data = {
@@ -137,6 +167,14 @@ def test_default_triads_at_small_nfft_warn_and_filter(tmp_path):
     assert kept, "default filter must keep at least one triad"
     assert all(all(abs(int(p)) <= limit for p in t) for t in kept)
     assert analyzer.eigenvalues.shape == (len(kept),)
+
+    assert np.all(np.isfinite(analyzer.eigenvalues))
+    assert np.all(np.isfinite(analyzer.modes1))
+    assert np.all(np.isfinite(analyzer.modes2))
+    # Spectrum is not the zero array — a wrong decomposition that zeros lambda fails.
+    assert float(np.max(np.abs(analyzer.eigenvalues))) > 0.0
+    assert float(np.linalg.norm(analyzer.modes1)) > 0.0
+    assert float(np.linalg.norm(analyzer.modes2)) > 0.0
 
 
 def test_user_out_of_range_triad_still_raises(tmp_path):

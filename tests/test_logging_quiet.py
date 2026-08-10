@@ -47,7 +47,10 @@ def _make_base(tmp_path, data: dict) -> BaseAnalyzer:
 
 
 def test_load_and_preprocess_is_quiet_on_stdout(tmp_path, capsys):
-    """BaseAnalyzer.load_and_preprocess logs shapes; stdout stays empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    BaseAnalyzer.load_and_preprocess logs shapes; stdout stays empty.
+    """
     analyzer = _make_base(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     captured = capsys.readouterr()
@@ -71,7 +74,10 @@ def test_load_and_preprocess_still_says_something(tmp_path, caplog):
 
 
 def test_compute_fft_blocks_is_quiet_on_stdout(tmp_path, capsys):
-    """BaseAnalyzer.compute_fft_blocks logs timings; stdout stays empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    BaseAnalyzer.compute_fft_blocks logs timings; stdout stays empty.
+    """
     analyzer = _make_base(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     capsys.readouterr()
@@ -81,14 +87,20 @@ def test_compute_fft_blocks_is_quiet_on_stdout(tmp_path, capsys):
 
 
 def test_print_summary_is_quiet(capsys):
-    """print_summary routes through the module logger; stdout stays empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    print_summary routes through the module logger; stdout stays empty.
+    """
     print_summary("POD", "/tmp/results", "/tmp/figures")
     captured = capsys.readouterr()
     assert captured.out == ""
 
 
 def test_mat_loader_is_quiet_on_stdout(tmp_path, capsys):
-    """MATDataLoader.load logs progress; stdout stays empty under default logging."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    MATDataLoader.load logs progress; stdout stays empty under default logging.
+    """
     import h5py
 
     file_path = tmp_path / "quiet.mat"
@@ -142,7 +154,10 @@ def _make_pod(tmp_path, data: dict) -> PODAnalyzer:
 
 
 def test_pod_run_is_quiet_on_stdout(tmp_path, capsys):
-    """End-to-end POD (load + perform_pod) must leave stdout empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    End-to-end POD (load + perform_pod) must leave stdout empty.
+    """
     analyzer = _make_pod(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     analyzer.perform_pod()
@@ -184,7 +199,10 @@ def _make_spod(tmp_path, data: dict) -> SPODAnalyzer:
 
 
 def test_spod_run_is_quiet_on_stdout(tmp_path, capsys):
-    """End-to-end SPOD (load + FFT + perform_spod) must leave stdout empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    End-to-end SPOD (load + FFT + perform_spod) must leave stdout empty.
+    """
     analyzer = _make_spod(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     analyzer.compute_fft_blocks()
@@ -228,7 +246,10 @@ def _make_stpod(tmp_path, data: dict) -> STPODAnalyzer:
 
 
 def test_stpod_run_is_quiet_on_stdout(tmp_path, capsys):
-    """End-to-end ST-POD (load + perform_stpod) must leave stdout empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    End-to-end ST-POD (load + perform_stpod) must leave stdout empty.
+    """
     analyzer = _make_stpod(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     analyzer.perform_stpod()
@@ -274,7 +295,10 @@ def _make_bsmd(tmp_path, data: dict) -> BSMDAnalyzer:
 
 
 def test_bsmd_run_is_quiet_on_stdout(tmp_path, capsys):
-    """End-to-end BSMD (load + FFT + perform_bsmd) must leave stdout empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    End-to-end BSMD (load + FFT + perform_bsmd) must leave stdout empty.
+    """
     analyzer = _make_bsmd(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     analyzer.compute_fft_blocks()
@@ -317,7 +341,10 @@ def _make_dmd(tmp_path, data: dict) -> DMDAnalyzer:
 
 
 def test_dmd_run_is_quiet_on_stdout(tmp_path, capsys):
-    """End-to-end DMD (load + perform_dmd + save) must leave stdout empty."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    End-to-end DMD (load + perform_dmd + save) must leave stdout empty.
+    """
     analyzer = _make_dmd(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     analyzer.perform_dmd()

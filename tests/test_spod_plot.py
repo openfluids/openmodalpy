@@ -5,6 +5,7 @@ from openmodalpy import SPODAnalyzer
 
 
 def test_plot_eigenvalues(tmp_path):
+    """Smoke test: asserts execution and artifact only, not numerical values."""
     rng = np.random.default_rng(0)
     data = {
         "q": rng.standard_normal((8, 4)),
@@ -33,6 +34,7 @@ def test_plot_eigenvalues(tmp_path):
 
 
 def test_plot_modes_and_timecoeffs(tmp_path):
+    """Smoke test: asserts execution and artifact only, not numerical values."""
     rng = np.random.default_rng(1)
     data = {
         "q": rng.standard_normal((8, 4)),
@@ -65,6 +67,7 @@ def test_plot_modes_and_timecoeffs(tmp_path):
 
 
 def test_plot_reconstruction_error(tmp_path):
+    """Smoke test: asserts execution and artifact only, not numerical values."""
     rng = np.random.default_rng(2)
     data = {
         "q": rng.standard_normal((8, 4)),
@@ -94,6 +97,7 @@ def test_plot_reconstruction_error(tmp_path):
 
 
 def test_save_results_records_spod_contract(tmp_path):
+    """Smoke test: asserts execution and artifact only, not numerical values."""
     rng = np.random.default_rng(3)
     data = {
         "q": rng.standard_normal((8, 4)),

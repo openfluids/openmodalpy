@@ -58,6 +58,7 @@ def test_perform_dmd_simple():
 
 
 def test_plot_eigenspectra_stem_compat(monkeypatch, tmp_path):
+    """Smoke test: asserts execution and artifact only, not numerical values."""
     rng = np.random.default_rng(10)
     data = {
         "q": rng.standard_normal((8, 4)),
@@ -252,7 +253,11 @@ def _make_analyzer(q, n_modes_save=None, rank=None):
 
 
 def test_delay_embed_shape():
-    """_delay_embed produces the correct Hankel matrix dimensions."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    Shape of the delay-embedded Hankel only; value content is covered by
+    test_delay_embed_values and test_delay_embed_d1_identity.
+    """
     rng = np.random.default_rng(11)
     X = rng.standard_normal((3, 10))
     d = 4
@@ -261,7 +266,10 @@ def test_delay_embed_shape():
 
 
 def test_delay_embed_d1_identity():
-    """With d=1, _delay_embed returns the input unchanged."""
+    """With d=1, _delay_embed returns the input unchanged.
+
+    Already adequate: array_equal against the input pins values, not just shape.
+    """
     rng = np.random.default_rng(12)
     X = rng.standard_normal((5, 8))
     Xd = _delay_embed(X, 1)
@@ -535,7 +543,10 @@ def test_hodmd_save_load_roundtrip(tmp_path):
 
 
 def test_hodmd_plot_modes_uses_2d_slice(monkeypatch, tmp_path):
-    """Delay-embedded DMD modes should be visualized as 2D maps, not 1D lines."""
+    """Smoke test: asserts execution and artifact only, not numerical values.
+
+    Delay-embedded DMD modes should be visualized as 2D maps, not 1D lines.
+    """
     rng = np.random.default_rng(13)
     nx, ny = 4, 3
     n_space = nx * ny
