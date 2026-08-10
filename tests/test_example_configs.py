@@ -31,14 +31,70 @@ def _needs_rank(doc: dict) -> bool:
     return any("dmd" in str(r.get("method", "")).lower() for r in doc.get("runs", []))
 
 
-def _resolved_rank(doc: dict):
-    """Rank the runner would use: per-run params win, else the case default."""
+def _resolved_ranks(doc: dict) -> dict[str, object]:
+    """Map each DMD-family run id to the rank the runner would use.
+
+    Per-run ``params.rank`` wins over the case default, mirroring
+    ``commands.py`` (``spec.params.get("rank", spec.case.rank)``). Mixed
+    per-run ranks are legitimate and returned faithfully; callers that need a
+    single reference value must enforce that themselves.
+    """
     case_rank = (doc.get("case") or {}).get("rank")
+    ranks: dict[str, object] = {}
     for run in doc.get("runs", []):
         if "dmd" in str(run.get("method", "")).lower():
-            if "rank" not in (run.get("params") or {}) and case_rank is None:
-                return None
-    return case_rank
+            run_id = run.get("id")
+            if run_id is None:
+                raise AssertionError(f"DMD-family run is missing id: {run!r}")
+            ranks[str(run_id)] = (run.get("params") or {}).get("rank", case_rank)
+    return ranks
+
+
+def _unique_rank(ranks: dict[str, object]):
+    """Return the sole rank in ``ranks``, or fail with run ids and values."""
+    if not ranks:
+        return None
+    values = list(ranks.values())
+    first = values[0]
+    if any(v != first for v in values[1:]):
+        raise AssertionError(f"DMD runs resolve to differing ranks {ranks}; cannot pick a single rank for comparison")
+    return first
+
+
+def test_resolved_rank_per_run_overrides_case_rank() -> None:
+    """A run-level rank wins over the case default, matching the runner."""
+    doc = {
+        "case": {"rank": 4},
+        "runs": [{"id": "dmd", "method": "dmd", "params": {"rank": 7}}],
+    }
+    assert _resolved_ranks(doc) == {"dmd": 7}
+
+
+def test_resolved_rank_mixed_ranks_returned_faithfully() -> None:
+    """Mixed per-run ranks are returned as-is; single-rank callers reject them."""
+    doc = {
+        "case": {"rank": 4},
+        "runs": [
+            {"id": "dmd_a", "method": "dmd", "params": {"rank": 5}},
+            {"id": "dmd_b", "method": "hdmd", "params": {"rank": 8}},
+        ],
+    }
+    ranks = _resolved_ranks(doc)
+    assert ranks == {"dmd_a": 5, "dmd_b": 8}
+    with pytest.raises(AssertionError, match="differing ranks"):
+        _unique_rank(ranks)
+
+
+def test_resolved_rank_case_rank_only() -> None:
+    """With no per-run override, the case rank fills every DMD run's slot."""
+    doc = {
+        "case": {"rank": 6},
+        "runs": [
+            {"id": "dmd_a", "method": "dmd", "params": {}},
+            {"id": "dmd_b", "method": "hodmd", "params": {}},
+        ],
+    }
+    assert _resolved_ranks(doc) == {"dmd_a": 6, "dmd_b": 6}
 
 
 def _example_files(root: Path) -> list[Path]:
@@ -50,7 +106,8 @@ def test_packaged_example_declares_a_dmd_rank(path: Path) -> None:
     doc = _load(path)
     if not _needs_rank(doc):
         pytest.skip("no DMD-family run in this example")
-    assert _resolved_rank(doc) is not None, (
+    ranks = _resolved_ranks(doc)
+    assert ranks and all(v is not None for v in ranks.values()), (
         f"{path.name}: runs DMD but declares no rank; DMDAnalyzer refuses to guess one, so `examples run` fails"
     )
 
@@ -60,7 +117,8 @@ def test_repo_example_declares_a_dmd_rank(path: Path) -> None:
     doc = _load(path)
     if not _needs_rank(doc):
         pytest.skip("no DMD-family run in this example")
-    assert _resolved_rank(doc) is not None, (
+    ranks = _resolved_ranks(doc)
+    assert ranks and all(v is not None for v in ranks.values()), (
         f"{path.name}: runs DMD but declares no rank; DMDAnalyzer refuses to guess one, so `examples run` fails"
     )
 
@@ -71,8 +129,8 @@ def test_repo_and_packaged_examples_agree_on_rank(path: Path) -> None:
     repo = REPO_EXAMPLES / path.name
     if not repo.exists():
         pytest.skip("packaged-only example")
-    assert _resolved_rank(_load(repo)) == _resolved_rank(_load(path)), (
-        f"{path.name}: repo and packaged copies disagree on the DMD rank, so a "
+    assert _resolved_ranks(_load(repo)) == _resolved_ranks(_load(path)), (
+        f"{path.name}: repo and packaged copies disagree on the DMD rank mapping, so a "
         "checkout and an installed wheel would compute different operators"
     )
 
@@ -101,7 +159,8 @@ def test_packaged_config_rank_and_params_match_reference_fixture(fix_path: Path)
     assert config_path.is_file(), f"missing packaged config for {name}: {config_path}"
     doc = _load(config_path)
 
-    rank = _resolved_rank(doc)
+    ranks = _resolved_ranks(doc)
+    rank = _unique_rank(ranks)
     assert rank == fixture["n_modes"], (
         f"{name}: packaged config rank {rank} != fixture n_modes {fixture['n_modes']}; "
         "the shipped example would compute a different DMD operator than the reference"

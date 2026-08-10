@@ -393,6 +393,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- The repo copy of `examples/cylinder.jsonc` restores the per-run `rank: 4`
+  on its `hodmd` and `tls_hodmd` runs, matching the packaged config. A
+  checkout and an installed wheel now resolve the same rank for every run;
+  the example-config tests now compare the full per-run rank mapping, so
+  this class of drift fails the suite instead of passing silently.
 - `compute_reduced_svd` no longer routes near-full-rank requests to ARPACK.
   The gate is now `use_iterative_svd(min_dim, rank)`: iterative only when
   `rank < 0.05 * min_dim` and `min_dim >= 256`. Callers that ask for
