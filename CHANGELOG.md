@@ -390,6 +390,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- An mPOD run now labels its figures `mPOD`. Every title drawn inside the
+  image said `POD`, because the ten title strings were hardcoded in the POD
+  analyzer that mPOD builds on. The filename already said `mpod`, so a
+  multiscale-POD figure could reach print carrying a plain-POD label. Titles,
+  the start banner and the run summary now all read their name from one
+  shared display-name map, which keeps the conventional casing for `mPOD`,
+  `PSD-POD` and `ST-POD`. Labels only — no numerical result changes.
 - PSD-POD (the complex solver route) now reports a mode value of exactly `0`
   at a zero-measure cell, matching the real POD/ST-POD routes. Modes were
   built from the unweighted Fourier ensemble, so data held at a masked cell —

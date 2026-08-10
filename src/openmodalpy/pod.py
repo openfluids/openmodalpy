@@ -46,6 +46,7 @@ from openmodalpy.core.config import (
     FIGURES_DIR_POD,
     RESULTS_DIR_POD,
 )
+from openmodalpy.specs import display_name_for
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +452,8 @@ class PODAnalyzer(BaseAnalyzer):
             ax.set_yscale("log")
             ax.set_xlabel("Mode Number")
             ax.set_ylabel(f"Normalized Eigenvalue (Energy Percentage %){label_suffix}")
-            ax.set_title("POD Eigenvalue Spectrum")
+            method_label = display_name_for(self.analysis_type)
+            ax.set_title(f"{method_label} Eigenvalue Spectrum")
             ax.grid(True, which="both", ls="--")
 
             plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_eigenvalues.png")
@@ -564,12 +566,13 @@ class PODAnalyzer(BaseAnalyzer):
                     denom, label_suffix = self._energy_denominator()
                     energy_pct = 100.0 * self.eigenvalues[mode_idx] / denom if denom > 0 else 0.0
                     cum_energy_pct = 100.0 * np.sum(self.eigenvalues[: mode_idx + 1]) / denom if denom > 0 else 0.0
+                    label = display_name_for(self.analysis_type)
                     title_str = (
-                        f"POD Mode {mode_idx + 1} [{var_name}] | Energy: {energy_pct:.2f}% | "
+                        f"{label} Mode {mode_idx + 1} [{var_name}] | Energy: {energy_pct:.2f}% | "
                         f"Cumulative: {cum_energy_pct:.2f}%{label_suffix}"
                     )
                 else:
-                    title_str = f"POD Mode {mode_idx + 1} [{var_name}]"
+                    title_str = f"{display_name_for(self.analysis_type)} Mode {mode_idx + 1} [{var_name}]"
                 ax.set_title(title_str)
                 # Colorbar
                 fig.colorbar(cf, ax=ax, format="%.2f")
@@ -715,11 +718,12 @@ class PODAnalyzer(BaseAnalyzer):
         items = []
         for mode_idx in range(n_modes):
             mode_3d = reshape_mode_to_volume(self.modes[:, mode_idx], self.data)
+            label = display_name_for(self.analysis_type)
             if denom > 0:
                 energy_pct = 100.0 * self.eigenvalues[mode_idx] / denom
-                title = f"POD Mode {mode_idx + 1} | E={energy_pct:.2f}%{label_suffix}"
+                title = f"{label} Mode {mode_idx + 1} | E={energy_pct:.2f}%{label_suffix}"
             else:
-                title = f"POD Mode {mode_idx + 1}"
+                title = f"{label} Mode {mode_idx + 1}"
             output_path = os.path.join(
                 self.figures_dir, f"{self.data_root}_{self.analysis_type}_mode_{mode_idx + 1}_{kind}.png"
             )
@@ -847,7 +851,11 @@ class PODAnalyzer(BaseAnalyzer):
             axes[r][c].axis("off")
 
         # Add title and save
-        fig.suptitle(f"POD Modes up to {energy_threshold:.1f}% cumulative energy ({n_modes_plot} modes)", fontsize=12)
+        fig.suptitle(
+            f"{display_name_for(self.analysis_type)} Modes up to {energy_threshold:.1f}% "
+            f"cumulative energy ({n_modes_plot} modes)",
+            fontsize=12,
+        )
 
         plot_filename = os.path.join(
             self.figures_dir,
@@ -902,7 +910,7 @@ class PODAnalyzer(BaseAnalyzer):
             plt.plot(time_vector, coeff, ls="-", lw=0.8, marker="o", markersize=1)
             plt.xlabel(time_xlabel)
             plt.ylabel(f"Amplitude Mode {i + 1}")
-            plt.title(f"Temporal Coefficient for POD Mode {i + 1}")
+            plt.title(f"Temporal Coefficient for {display_name_for(self.analysis_type)} Mode {i + 1}")
             plt.grid(True, linestyle=":")
             plt.xlim(time_vector.min(), time_vector.max())
 
@@ -1019,7 +1027,7 @@ class PODAnalyzer(BaseAnalyzer):
             plt.plot(coeff_i, coeff_j, "o-", markersize=3, linewidth=0.8)
             plt.xlabel(f"Coefficient {i}")
             plt.ylabel(f"Coefficient {j}")
-            plt.title(f"POD Phase Portrait Modes {i} & {j}")
+            plt.title(f"{display_name_for(self.analysis_type)} Phase Portrait Modes {i} & {j}")
             plt.grid(True)
             fname = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_phase_pair_{i}_{j}.png")
             plt.savefig(fname, dpi=FIG_DPI)
@@ -1047,7 +1055,7 @@ class PODAnalyzer(BaseAnalyzer):
             plt.text(x, y, f" {idx + 1}", fontsize=7, va="bottom")
         plt.xlabel("Number of Modes")
         plt.ylabel(f"Cumulative Energy (%){label_suffix}")
-        plt.title("Cumulative Energy of POD Modes")
+        plt.title(f"Cumulative Energy of {display_name_for(self.analysis_type)} Modes")
         plt.grid(True, which="both", ls="--")
         plt.ylim(0, 105)  # Show up to 100% or slightly more
         plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_cumulative_energy.png")
@@ -1090,7 +1098,7 @@ class PODAnalyzer(BaseAnalyzer):
             plt.text(x, y, f" {idx + 1}", fontsize=7, va="bottom")
         plt.xlabel("Number of Modes Used for Reconstruction")
         plt.ylabel("Reconstruction Error (%)")
-        plt.title("Data Reconstruction Error vs. Number of POD Modes")
+        plt.title(f"Data Reconstruction Error vs. Number of {display_name_for(self.analysis_type)} Modes")
         plt.grid(True, which="both", ls="--")
         plt.yscale("log")  # Error often drops off exponentially
         plot_filename = os.path.join(
@@ -1396,7 +1404,11 @@ class PODAnalyzer(BaseAnalyzer):
             check_orthogonality (bool, optional): If True, perform and print orthogonality checks.
                                                 Defaults to True.
         """
-        logger.info("Starting %s analysis for %s", self.analysis_type.upper(), os.path.basename(self.file_path))
+        logger.info(
+            "Starting %s analysis for %s",
+            display_name_for(self.analysis_type),
+            os.path.basename(self.file_path),
+        )
         start_total_time = time.time()
 
         # Load data and calculate weights via BaseAnalyzer's run method.
@@ -1447,4 +1459,4 @@ class PODAnalyzer(BaseAnalyzer):
             "POD analysis and plotting completed successfully in %.2f seconds.",
             end_total_time - start_total_time,
         )
-        print_summary("POD", self.results_dir, self.figures_dir)
+        print_summary(display_name_for(self.analysis_type), self.results_dir, self.figures_dir)

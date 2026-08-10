@@ -35,6 +35,7 @@ from openmodalpy.mpod import MPODAnalyzer
 from openmodalpy.pod import PODAnalyzer
 from openmodalpy.psd_pod import PSDPODAnalyzer
 from openmodalpy.specs import (
+    METHOD_REGISTRY,
     AnalyzeSpec,
     CaseSpec,
     DataSourceSpec,
@@ -45,99 +46,6 @@ from openmodalpy.specs import (
 )
 from openmodalpy.spod import SPODAnalyzer
 from openmodalpy.stpod import STPODAnalyzer
-
-METHOD_REGISTRY: dict[str, MethodInfo] = {
-    "pod": MethodInfo(
-        method_id="pod",
-        cli_name="pod",
-        display_name="POD",
-        description="Proper orthogonal decomposition on the snapshot ensemble.",
-        parameter_help={
-            "solver": (
-                "Second-order route: eigh (default, correlation/Gram kernel) or "
-                "svd (weighted snapshot matrix; better dynamic range on weak modes)."
-            ),
-        },
-    ),
-    "mpod": MethodInfo(
-        method_id="mpod",
-        cli_name="mpod",
-        display_name="mPOD",
-        description="Multiscale second-order POD with non-overlapping temporal scale bands.",
-        parameter_help={
-            "band_edges": "Band edges defining the non-overlapping mPOD intervals.",
-            "band_scale": "Interpret band edges in Hz or as fractions of Nyquist.",
-            "filter_kind": "Band filter type; currently rectangular.",
-        },
-    ),
-    "psd_pod": MethodInfo(
-        method_id="psd_pod",
-        cli_name="psd-pod",
-        display_name="PSD-POD",
-        description="POD on the ensemble of blockwise Fourier realizations.",
-        parameter_help={
-            "nfft": "FFT block size used to build the Fourier ensemble.",
-            "overlap": "Block overlap fraction used in the FFT blocking.",
-        },
-    ),
-    "dmd": MethodInfo(
-        method_id="dmd",
-        cli_name="dmd",
-        display_name="DMD",
-        description="Lift-and-regress dynamic mode decomposition on paired snapshots.",
-        parameter_help={
-            "method": "Regression model: ls or tls.",
-            "delays": "Delay embedding depth; >1 gives Hankel / HODMD-style coordinates.",
-        },
-    ),
-    "hodmd": MethodInfo(
-        method_id="hodmd",
-        cli_name="hodmd",
-        display_name="HODMD",
-        description="Higher-order / Hankel DMD using a delay embedding before DMD regression.",
-        parameter_help={
-            "delays": "Delay embedding depth; defaults to the case embedding dimension.",
-        },
-    ),
-    "tls_hodmd": MethodInfo(
-        method_id="tls_hodmd",
-        cli_name="tls-hodmd",
-        display_name="TLS-HODMD",
-        description="Higher-order / Hankel DMD with total least-squares regression.",
-        parameter_help={
-            "delays": "Delay embedding depth; defaults to the case embedding dimension.",
-        },
-    ),
-    "spod": MethodInfo(
-        method_id="spod",
-        cli_name="spod",
-        display_name="SPOD",
-        description="Welch-block spectral proper orthogonal decomposition.",
-        parameter_help={
-            "nfft": "FFT block size.",
-            "overlap": "Block overlap fraction.",
-        },
-    ),
-    "bsmd": MethodInfo(
-        method_id="bsmd",
-        cli_name="bsmd",
-        display_name="BSMD",
-        description="Bispectral mode decomposition for triadic interactions.",
-        parameter_help={
-            "nfft": "FFT block size.",
-            "overlap": "Block overlap fraction.",
-        },
-    ),
-    "stpod": MethodInfo(
-        method_id="stpod",
-        cli_name="stpod",
-        display_name="ST-POD",
-        description="Delay-embedded space-time POD in a block-Hankel lift.",
-        parameter_help={
-            "embedding_dim": "Delay embedding dimension.",
-        },
-    ),
-}
 
 METHOD_ALIASES = {
     "psd-pod": "psd_pod",

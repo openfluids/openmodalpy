@@ -387,14 +387,15 @@ def _make_mpod(tmp_path, data: dict) -> MPODAnalyzer:
 
 
 def test_mpod_banner_does_not_say_pod(tmp_path, caplog):
-    """mPOD run_analysis banner uses analysis_type.upper() → MPOD, not POD."""
+    """mPOD run_analysis banner uses display_name_for → mPOD, not POD/MPOD."""
     analyzer = _make_mpod(tmp_path, _synthetic_data())
     with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
         analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
-    assert any("Starting MPOD analysis" in m for m in info_msgs), info_msgs
+    assert any("Starting mPOD analysis" in m for m in info_msgs), info_msgs
     assert not any("Starting POD analysis" in m for m in info_msgs), info_msgs
+    assert not any("Starting MPOD analysis" in m for m in info_msgs), info_msgs
 
 
 def test_pod_banner_still_says_pod(tmp_path, caplog):
