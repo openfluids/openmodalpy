@@ -502,8 +502,12 @@ class TestSTPODTotalEnergy:
     def test_truncated_percentages_sum_to_captured_fraction(self):
         """With truncation below full rank, percentages sum to less than 100%.
 
-        Their sum equals 100 * energy_captured_fraction against the true total.
+        Their sum equals 100 * energy_captured_fraction against the true total,
+        computed independently from the weighted lifted matrix (not from the
+        analyzer's own total_energy attribute).
         """
+        from openmodalpy.core import decomposition
+
         rng = np.random.default_rng(12)
         Ns, Nspace = 30, 8
         embedding_dim = 5
@@ -527,24 +531,99 @@ class TestSTPODTotalEnergy:
         analyzer.load_and_preprocess()
         analyzer.perform_stpod()
 
+        # Independent pre-truncation total: ‖data_weighted‖_F² / m.
+        data_centered = data["q"] - np.mean(data["q"], axis=0)
+        lifted = decomposition.DelayEmbeddingLift(embedding_dim).apply(data_centered)
+        weights = np.tile(np.ones(Nspace), embedding_dim)
+        data_weighted = lifted * np.sqrt(weights)
+        m = lifted.shape[0]
+        independent_total = float(np.linalg.norm(data_weighted, "fro") ** 2 / m)
+
+        retained = float(np.sum(analyzer.eigenvalues))
+        assert independent_total > retained
+        expected_fraction = retained / independent_total
+        np.testing.assert_allclose(
+            analyzer.energy_captured_fraction,
+            expected_fraction,
+            rtol=1e-12,
+            atol=0.0,
+        )
+
         denom, suffix = analyzer._energy_denominator()
         assert suffix == ""
-        assert denom == analyzer.total_energy
+        np.testing.assert_allclose(denom, independent_total, rtol=1e-12, atol=0.0)
         percentages = 100.0 * analyzer.eigenvalues / denom
         pct_sum = float(np.sum(percentages))
         assert pct_sum < 100.0
         np.testing.assert_allclose(
             pct_sum,
-            100.0 * analyzer.energy_captured_fraction,
+            100.0 * expected_fraction,
             rtol=1e-12,
             atol=0.0,
         )
-        np.testing.assert_allclose(
-            analyzer.energy_captured_fraction,
-            float(np.sum(analyzer.eigenvalues) / analyzer.total_energy),
-            rtol=1e-12,
-            atol=0.0,
+
+    def test_energy_plot_titles_report_the_true_total(self, tmp_path, monkeypatch):
+        """Plot axis labels use the true-total denominator, not retained-only.
+
+        Renders through the real plotting path and reads label text off the
+        live figure object before it is closed. A retained-sum denominator
+        reintroduces the "retained modes only" suffix and must fail this check.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        import openmodalpy.stpod as stpod_mod
+
+        rng = np.random.default_rng(17)
+        Ns, Nspace = 24, 6
+        embedding_dim = 4
+        n_modes = 2
+        data = {
+            "q": rng.standard_normal((Ns, Nspace)),
+            "x": np.arange(Nspace),
+            "y": np.array([0.0]),
+            "dt": 0.1,
+            "Nx": Nspace,
+            "Ny": 1,
+            "Ns": Ns,
+        }
+        analyzer = STPODAnalyzer(
+            file_path="test_stpod_energy_plot",
+            embedding_dim=embedding_dim,
+            n_modes_save=n_modes,
+            results_dir=tmp_path,
+            figures_dir=tmp_path,
+            data_loader=lambda _: data,
+            spatial_weight_type="uniform",
         )
+        analyzer.load_and_preprocess()
+        analyzer.perform_stpod()
+
+        labels: list[str] = []
+        real_savefig = stpod_mod.plt.savefig
+
+        def capture_savefig(*args, **kwargs):
+            fig = stpod_mod.plt.gcf()
+            for ax in fig.axes:
+                labels.append(ax.get_ylabel() or "")
+                labels.append(ax.get_title() or "")
+                labels.append(ax.get_xlabel() or "")
+            if getattr(fig, "_suptitle", None) is not None:
+                labels.append(fig._suptitle.get_text() or "")
+            return real_savefig(*args, **kwargs)
+
+        monkeypatch.setattr(stpod_mod.plt, "savefig", capture_savefig)
+        try:
+            analyzer.plot_eigenvalues()
+        finally:
+            plt.close("all")
+
+        assert labels, "expected to capture axis text from the live figure"
+        joined = "\n".join(labels)
+        assert any("Normalized Eigenvalue" in text for text in labels)
+        assert "retained" not in joined.lower()
 
     def test_total_energy_save_load_roundtrip(self, tmp_path):
         """Both total_energy and energy_captured_fraction survive save → load."""
