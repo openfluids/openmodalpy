@@ -582,8 +582,9 @@ def test_heavy(tmp_path):
     t = np.arange(Ns) * dt
 
     # Wake model: convecting vortex street with decay
-    k_x = 2 * np.pi * St  # Streamwise wavenumber
     U_conv = 0.8 * U  # Convection velocity (slower than freestream)
+    # Convention matches example_data.py: pattern convected at U_conv oscillates at f_shed.
+    k_x = 2 * np.pi * f_shed / U_conv
     decay = np.exp(-0.02 * np.maximum(X, 0))  # Decay downstream
 
     q_wake = np.zeros((Ns, Nspace))
@@ -628,28 +629,18 @@ def test_heavy(tmp_path):
     # rather than whichever near-unit-circle mode happens to sort first.
     # Exclude the zero-frequency mean/drift mode explicitly — it is not a tone.
     #
-    # Expect the tone the field ACTUALLY contains, which is not f_shed. The
-    # vortices above are written as sin(k_x * (X - U_conv * t)) with
-    # k_x = 2*pi*St, so their temporal frequency is St*U_conv, not St*U/D: the
-    # pattern is convected at U_conv = 0.8*U. Asserting against f_shed instead
-    # would build a 0.0334 Hz (2.7 bin) physics error into the expected value
-    # and force a bound loose enough to hide it.
-    #
-    # Resolution df = 1/(Ns*dt) = 0.0125 Hz. Measured error against the
-    # convected tone is < 1e-4 Hz (DMD returns 0.13360 vs 0.13360 exactly), so
-    # half a bin is a genuine accuracy bar and still catches a 0.05 rad
-    # eigenvalue rotation (a 0.08 Hz shift, ~6 bins).
+    # Resolution df = 1/(Ns*dt) = 0.0125 Hz. Half a bin is a genuine accuracy
+    # bar and still catches a 0.05 rad eigenvalue rotation (~0.08 Hz, ~6 bins).
     df_cyl = 1.0 / (Ns * dt)
-    f_tone = St * U_conv  # convected shedding tone present in the data
     dmd_freqs = np.abs(np.angle(dmd.eigenvalues)) / (2 * np.pi * dt)
     nonzero = np.where(dmd_freqs > df_cyl)[0]
     assert len(nonzero) > 0, "Cylinder DMD: no nonzero-frequency modes"
     dom_nz_idx = int(nonzero[np.argmax(dmd.amplitudes[nonzero])])
     dom_freq = float(dmd_freqs[dom_nz_idx])
-    freq_error = abs(dom_freq - f_tone)
+    freq_error = abs(dom_freq - f_shed)
     assert freq_error < 0.5 * df_cyl, (
         f"Cylinder DMD: finds shedding freq, St={St}, f_shed={f_shed:.3f}, "
-        f"convected tone={f_tone:.4f}, dominant nonzero DMD freq={dom_freq:.4f}, "
+        f"dominant nonzero DMD freq={dom_freq:.4f}, "
         f"error={freq_error:.5f} Hz (0.5*df={0.5 * df_cyl:.5f} Hz)"
     )
 
