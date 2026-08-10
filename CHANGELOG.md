@@ -67,14 +67,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whenever that printout changed. `get_threadpool_summary()` stays and is
   unaffected — it asks `threadpoolctl` directly and returns the real thread
   counts, and every analysis already logs it before computing FFT blocks.
-- DMD `rank` is required (no silent default to `n_modes_save`). See the
-  Changed note below for migration (`rank=n_modes_save` is bit-identical
-  to the previous default).
 - Removed the undocumented per-module entry points
   (`python -m openmodalpy.pod`, `python -m openmodalpy.spod`,
   `python -m openmodalpy.dmd`, `python -m openmodalpy.bsmd`,
   `python -m openmodalpy.stpod`). Use `openmodalpy` / `python -m openmodalpy`
   instead.
+- An unrecognised `spatial_weight_type` now raises at construction instead of
+  being kept as-is. This is a behaviour break: any string other than `"auto"`,
+  `"uniform"`, `"polar"` or `"prescribed"` used to fall through to the
+  grid-spacing weight path and skip POD's and ST-POD's reset to unit weights,
+  so a typo silently changed the metric. Code that relied on that fall-through
+  to hand an analyzer its own weight vector should now pass
+  `spatial_weights=` instead.
+- SPOD result files write the spatial grid once, as `x`/`y`/`z` (matching the
+  other producers). The previous duplicate datasets `x_coords`/`y_coords`/
+  `z_coords` are no longer written. Files that still carry only the old
+  `_coords` spelling continue to load: `read_results` maps them onto the
+  canonical `x`/`y`/`z` fields and emits a `DeprecationWarning` naming the
+  legacy key. Note that files written by earlier versions carry *both*
+  spellings, so reading one now emits that warning where it previously did
+  not. The canonical `x`/`y`/`z` still win, so values are unchanged — but code
+  that turns warnings into errors will need to filter it.
+- One HDF5 result contract for every analyzer. Dataset names are lowercase
+  (`modes`, `eigenvalues`, `time_coefficients`, `freq`, `st`, `modes1`,
+  `modes2`, …); SPOD no longer writes `Weights` (it writes `W` like the
+  others). All `save_results` methods share the signature
+  `save_results(self, filename=None)` — SPOD gains `filename`, and BSMD's
+  `fname` parameter is renamed to `filename` (call sites that passed
+  `fname=` must switch). Writing goes through `openmodalpy.core.results`;
+  `read_results(path)` returns a typed `AnalysisResults` and still accepts
+  the old capitalised layout with a `DeprecationWarning`. `FFTBlocks` keeps
+  its name (FFT cache key, not a downstream result field). SPOD result
+  files are written in mode `"w"`; BSMD still appends when the destination
+  is the open FFT-cache path so that cache is preserved.
+- One rule now turns a spatial weight into a vector, instead of three helpers
+  that disagreed about which shapes they accepted (`core/base.py`,
+  `core/decomposition.py`, `mpod.py`). Two consequences beyond the deduplication.
+  A square weight matrix is read as its diagonal everywhere — the shape the class
+  docstrings have always advertised, and which previously raised
+  `IndexError: tuple index out of range` from inside a private helper. And mPOD
+  now validates its spatial weights like every other method, so a negative or
+  zero-measure weight raises instead of passing through. A complex weight
+  array raises on every entry path that builds or flattens a spatial metric
+  (`require_spatial_metric`, `SpatialMetric`, `_coerce_spatial_weights`,
+  `_as_weight_vector`), rather than being cast to its real part under a
+  `ComplexWarning`. Weight vectors of the usual shape — a length-`n_space`
+  column of positive reals — are unaffected.
+- An invalid spatial metric now raises instead of producing a confident answer.
+  A non-finite weight, a negative weight, or a metric whose total measure is
+  zero raises `ValueError`; an isolated zero among positive weights is still
+  accepted, and that cell now contributes nothing (see the exact-measure entry
+  above). Results for strictly positive weights are unchanged.
+
+  This closes a real hole: polar weights on a grid whose radial coordinate is
+  zero give every annulus an area of `pi*r**2 = 0`, and POD would report an
+  energy fraction off that empty metric without complaint. Note the condition
+  is `r > 0`, **not** `Ny > 1` — a single radial station at `r > 0` has
+  positive measure and is fine.
+
+  Scope: all five named methods plus BSMD. The rule has a single definition
+  (`core/base.py::require_spatial_metric`); POD, mPOD, ST-POD and PSD-POD reach
+  it through the shared seam, SPOD through `spod_function`, and BSMD checks once
+  per analysis. SPOD and BSMD apply weights directly rather than flooring them,
+  so an isolated zero there means that cell contributes nothing.
+- Welch block partitioning now matches `scipy.signal.welch`: `nblocks` is
+  computed with floor arithmetic and the remainder is dropped, rather than
+  ceil plus a clamped final block that re-uses samples. Records that do not
+  divide evenly therefore change block count (the shipped cylinder_wake
+  example with `Ns=500`, `nfft=128`, `overlap=0.5` goes from 7 blocks to 6),
+  so SPOD / PSD-POD / BSMD numbers on those records move. Short records that
+  cannot form one full block, and callers that request more blocks than fit,
+  now raise `ValueError` instead of returning empty or wrapped indices.
+  The same floor helper (`welch_nblocks`) is used by
+  `BaseAnalyzer.load_and_preprocess` and by `commands._apply_snapshot_limit`
+  after `max_snapshots` truncation — the snapshot-limit path previously
+  recomputed `nblocks` with ceil and could request more blocks than fit
+  (e.g. Ns=400, nfft=128, overlap=0.5 → floor 5 vs ceil 6). `novlap >= nfft`
+  (hop ≤ 0) is rejected in both FFT paths instead of repeating block 0.
+- DMD `rank` is required. `DMDAnalyzer` no longer defaults the
+  operator truncation to `n_modes_save` (a plotting parameter). Omitting `rank`
+  raises `ValueError` naming the alternatives: a positive `int`, `"svht"`, or
+  `"energy"`. On the shipped cylinder wake that silent default moved the recovered
+  shedding frequency by ~20×, so a library that picks the rank silently publishes
+  a number the user never chose. There is no principled automatic default either
+  (full numerical rank and SVHT were both rejected for fluid spectra). Migrate
+  by setting `rank` to the value you previously relied on via `n_modes_save`
+  (`rank=n_modes_save` is bit-identical to the old default). `n_modes_save` only
+  bounds how many modes are kept after sorting.
+- BSMD now rejects input it cannot analyse instead of returning something plausible.
+  A triad component outside the available rfft bins (`|p| > nfft//2`) raises `ValueError`
+  naming the offending index and the bin count, where it previously produced a NaN
+  eigenvalue; the last real bin, `|p| = nfft//2`, is still accepted. Dynamic triad
+  selection (`use_static_triads=False`) raises `NotImplementedError` instead of printing
+  a notice and returning empty arrays. Note the consequence for small transforms: the
+  default triad table reaches `|p| = 8`, so `nfft < 16` combined with the default triads
+  now raises rather than filling the high-index rows with NaN.
 
 ### Added
 - `openmodalpy analyze` accepts `--solver {eigh,svd}` and forwards it to POD.
@@ -190,22 +277,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TimeCoefficients`) load and emit the reader's `DeprecationWarning`.
 - ST-POD percentages now mean share of total field energy (pre-truncation) and
   will read lower than before for any truncated spectrum.
-- An unrecognised `spatial_weight_type` now raises at construction instead of
-  being kept as-is. This is a behaviour break: any string other than `"auto"`,
-  `"uniform"`, `"polar"` or `"prescribed"` used to fall through to the
-  grid-spacing weight path and skip POD's and ST-POD's reset to unit weights,
-  so a typo silently changed the metric. Code that relied on that fall-through
-  to hand an analyzer its own weight vector should now pass
-  `spatial_weights=` instead.
-- SPOD result files write the spatial grid once, as `x`/`y`/`z` (matching the
-  other producers). The previous duplicate datasets `x_coords`/`y_coords`/
-  `z_coords` are no longer written. Files that still carry only the old
-  `_coords` spelling continue to load: `read_results` maps them onto the
-  canonical `x`/`y`/`z` fields and emits a `DeprecationWarning` naming the
-  legacy key. Note that files written by earlier versions carry *both*
-  spellings, so reading one now emits that warning where it previously did
-  not. The canonical `x`/`y`/`z` still win, so values are unchanged — but code
-  that turns warnings into errors will need to filter it.
 - Default DMD rank for the shipped `double_gyre` example moved from 10 to 8.
   On the packaged 80×40/Nt=200 grid, rank 10 keeps singular values with
   s9/s0 ~ 2e-12, so machine round-off in the DMD operator is amplified to
@@ -256,31 +327,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `core/results.py::find_latest_result`; each caller still owns its not-found
   policy (mpod silent; the others print `[Auto-detect]` / `[ERROR]`). Net
   `src/` line delta: −13.
-- One HDF5 result contract for every analyzer. Dataset names are lowercase
-  (`modes`, `eigenvalues`, `time_coefficients`, `freq`, `st`, `modes1`,
-  `modes2`, …); SPOD no longer writes `Weights` (it writes `W` like the
-  others). All `save_results` methods share the signature
-  `save_results(self, filename=None)` — SPOD gains `filename`, and BSMD's
-  `fname` parameter is renamed to `filename` (call sites that passed
-  `fname=` must switch). Writing goes through `openmodalpy.core.results`;
-  `read_results(path)` returns a typed `AnalysisResults` and still accepts
-  the old capitalised layout with a `DeprecationWarning`. `FFTBlocks` keeps
-  its name (FFT cache key, not a downstream result field). SPOD result
-  files are written in mode `"w"`; BSMD still appends when the destination
-  is the open FFT-cache path so that cache is preserved.
-- One rule now turns a spatial weight into a vector, instead of three helpers
-  that disagreed about which shapes they accepted (`core/base.py`,
-  `core/decomposition.py`, `mpod.py`). Two consequences beyond the deduplication.
-  A square weight matrix is read as its diagonal everywhere — the shape the class
-  docstrings have always advertised, and which previously raised
-  `IndexError: tuple index out of range` from inside a private helper. And mPOD
-  now validates its spatial weights like every other method, so a negative or
-  zero-measure weight raises instead of passing through. A complex weight
-  array raises on every entry path that builds or flattens a spatial metric
-  (`require_spatial_metric`, `SpatialMetric`, `_coerce_spatial_weights`,
-  `_as_weight_vector`), rather than being cast to its real part under a
-  `ComplexWarning`. Weight vectors of the usual shape — a length-`n_space`
-  column of positive reals — are unaffected.
 - Mode sign and phase are now canonical: each mode is scaled so the pivot
   entry — the lowest index whose magnitude sits within a relative band
   (`CANONICAL_TIE_RTOL = 1e-12`) of the column maximum — is real and positive.
@@ -309,47 +355,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seam in `core/decomposition.py` (`IdentityLift`, `DelayEmbeddingLift`,
   `BandFilteredLift`, `SpatialMetric`, `weighted_second_order`). Results are
   unchanged; each caller keeps its own truncation policy via `n_keep`.
-- An invalid spatial metric now raises instead of producing a confident answer.
-  A non-finite weight, a negative weight, or a metric whose total measure is
-  zero raises `ValueError`; an isolated zero among positive weights is still
-  accepted, and that cell now contributes nothing (see the exact-measure entry
-  above). Results for strictly positive weights are unchanged.
-
-  This closes a real hole: polar weights on a grid whose radial coordinate is
-  zero give every annulus an area of `pi*r**2 = 0`, and POD would report an
-  energy fraction off that empty metric without complaint. Note the condition
-  is `r > 0`, **not** `Ny > 1` — a single radial station at `r > 0` has
-  positive measure and is fine.
-
-  Scope: all five named methods plus BSMD. The rule has a single definition
-  (`core/base.py::require_spatial_metric`); POD, mPOD, ST-POD and PSD-POD reach
-  it through the shared seam, SPOD through `spod_function`, and BSMD checks once
-  per analysis. SPOD and BSMD apply weights directly rather than flooring them,
-  so an isolated zero there means that cell contributes nothing.
-- Welch block partitioning now matches `scipy.signal.welch`: `nblocks` is
-  computed with floor arithmetic and the remainder is dropped, rather than
-  ceil plus a clamped final block that re-uses samples. Records that do not
-  divide evenly therefore change block count (the shipped cylinder_wake
-  example with `Ns=500`, `nfft=128`, `overlap=0.5` goes from 7 blocks to 6),
-  so SPOD / PSD-POD / BSMD numbers on those records move. Short records that
-  cannot form one full block, and callers that request more blocks than fit,
-  now raise `ValueError` instead of returning empty or wrapped indices.
-  The same floor helper (`welch_nblocks`) is used by
-  `BaseAnalyzer.load_and_preprocess` and by `commands._apply_snapshot_limit`
-  after `max_snapshots` truncation — the snapshot-limit path previously
-  recomputed `nblocks` with ceil and could request more blocks than fit
-  (e.g. Ns=400, nfft=128, overlap=0.5 → floor 5 vs ceil 6). `novlap >= nfft`
-  (hop ≤ 0) is rejected in both FFT paths instead of repeating block 0.
-- **Breaking — DMD `rank` is required.** `DMDAnalyzer` no longer defaults the
-  operator truncation to `n_modes_save` (a plotting parameter). Omitting `rank`
-  raises `ValueError` naming the alternatives: a positive `int`, `"svht"`, or
-  `"energy"`. On the shipped cylinder wake that silent default moved the recovered
-  shedding frequency by ~20×, so a library that picks the rank silently publishes
-  a number the user never chose. There is no principled automatic default either
-  (full numerical rank and SVHT were both rejected for fluid spectra). Migrate
-  by setting `rank` to the value you previously relied on via `n_modes_save`
-  (`rank=n_modes_save` is bit-identical to the old default). `n_modes_save` only
-  bounds how many modes are kept after sorting.
 - Four simplifications the code made silently are now written down where a user would
   look for them. `spatial_weight_type="uniform"` returns ones rather than cell volumes,
   so reported POD/SPOD energy is a sum over mesh points, not a domain integral, and its
@@ -371,14 +376,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   triad at `p=12` vanished. The half-width is now derived from the triads actually
   analysed, and the plot extent follows it. The default triad list still produces the
   same 17×17 grid with the same values.
-- BSMD now rejects input it cannot analyse instead of returning something plausible.
-  A triad component outside the available rfft bins (`|p| > nfft//2`) raises `ValueError`
-  naming the offending index and the bin count, where it previously produced a NaN
-  eigenvalue; the last real bin, `|p| = nfft//2`, is still accepted. Dynamic triad
-  selection (`use_static_triads=False`) raises `NotImplementedError` instead of printing
-  a notice and returning empty arrays. Note the consequence for small transforms: the
-  default triad table reaches `|p| = 8`, so `nfft < 16` combined with the default triads
-  now raises rather than filling the high-index rows with NaN.
 - The validation suite now enforces its claims. `tests/test_all.py` describes itself as
   validating mathematical correctness against known analytical solutions, but every one
   of its 22 checks reported through a helper that printed a tick and appended to a list;
