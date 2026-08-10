@@ -222,14 +222,21 @@ def test_dmd(tmp_path):
     )
 
     # --- Test 3: Decaying oscillation ---
-    # q(t) = e^{-αt} * cos(ωt)
-    # Use longer time series for better accuracy
+    # Rank-2 fixture: a real snapshot basis needs both quadratures to represent a complex pair.
+    # q = outer(e^{-αt} cos(ωt), φ1) + outer(e^{-αt} sin(ωt), φ2)
     alpha = 0.1  # Lower decay rate for cleaner signal
     omega = 2 * np.pi * 0.5  # 0.5 Hz
     Ns_decay = 100
     t_decay = np.arange(Ns_decay) * dt
-    envelope = np.exp(-alpha * t_decay) * np.cos(omega * t_decay)
-    q_decay_osc = np.outer(envelope, spatial)
+    x_grid = np.linspace(0, 2 * np.pi, Nx)
+    y_grid = np.linspace(0, 2 * np.pi, Ny)
+    X, Y = np.meshgrid(x_grid, y_grid)
+    phi1 = spatial
+    phi2 = (np.sin(2 * np.pi * X) * np.sin(np.pi * Y)).ravel()
+    phi2 = phi2 / np.linalg.norm(phi2)
+    q_decay_osc = np.outer(np.exp(-alpha * t_decay) * np.cos(omega * t_decay), phi1) + np.outer(
+        np.exp(-alpha * t_decay) * np.sin(omega * t_decay), phi2
+    )
 
     loader = make_test_loader(q_decay_osc, Nx, Ny, dt)
     analyzer = DMDAnalyzer(
@@ -239,13 +246,20 @@ def test_dmd(tmp_path):
     with pytest.warns(RuntimeWarning, match="effective rank"):
         analyzer.perform_dmd()
 
-    eigvals = analyzer.eigenvalues
+    # DMD orders by |λ|, not amplitude — pick the mode that carries the signal.
+    dom = int(np.argmax(analyzer.amplitudes))
+    lam = analyzer.eigenvalues[dom]
     # For decaying oscillation: |λ| = e^{-α*dt} < 1
     expected_mag = np.exp(-alpha * dt)
-    # Find closest eigenvalue to expected magnitude
-    mag_error = np.min(np.abs(np.abs(eigvals) - expected_mag))
-    assert mag_error < 0.15, (
-        f"Decaying oscillation magnitude: expected |λ|={expected_mag:.4f}, closest={np.abs(eigvals[0]):.4f}"
+    mag_error = abs(abs(lam) - expected_mag)
+    assert mag_error < 1e-10, (
+        f"Decaying oscillation magnitude: expected |λ|={expected_mag:.10f}, got={abs(lam):.10f}, error={mag_error:.3e}"
+    )
+    # Frequency recovery on the same dominant mode.
+    dom_freq = abs(np.angle(lam)) / (2 * np.pi * dt)
+    freq_error = abs(dom_freq - 0.5)
+    assert freq_error < 1e-10, (
+        f"Decaying oscillation frequency: expected=0.5 Hz, got={dom_freq:.10f} Hz, error={freq_error:.3e}"
     )
 
     # --- Test 4: Linear system dx/dt = Ax ---
