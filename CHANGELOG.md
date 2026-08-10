@@ -390,6 +390,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- PSD-POD (the complex solver route) now reports a mode value of exactly `0`
+  at a zero-measure cell, matching the real POD/ST-POD routes. Modes were
+  built from the unweighted Fourier ensemble, so data held at a masked cell —
+  which the metric says must contribute nothing — appeared as that cell's mode
+  value and could become the sign/phase pivot, corrupting the whole mode
+  column. Eigenvalues were always correct; mode values at positive-weight
+  cells are unchanged (measured drift about `1e-15`).
 - The repo copy of `examples/cylinder.jsonc` restores the per-run `rank: 4`
   on its `hodmd` and `tls_hodmd` runs, matching the packaged config. A
   checkout and an installed wheel now resolve the same rank for every run;

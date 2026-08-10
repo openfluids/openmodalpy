@@ -450,7 +450,11 @@ def _solve_eigh_complex(
 
     eigenvalues = np.real_if_close(eigenvalues)
     safe_eigs = np.real(eigenvalues)
-    modes = (data.conj().T @ eigenvectors) / np.sqrt(safe_eigs * n_samples)
+    # Build from the sqrt(W)-weighted ensemble, then unweight — same policy as
+    # the real eigh/svd routes. Where w > 0 the sqrt(w) cancels and the mode
+    # matches the historical unweighted formula; where w == 0 the mode is 0.
+    weighted_modes = (data_weighted.conj().T @ eigenvectors) / np.sqrt(safe_eigs * n_samples)
+    modes = _unweight_modes(weighted_modes, weights)
     coeffs = data.conj() @ (weights[:, np.newaxis] * modes)
     modes, coeffs = canonicalize_modes(modes, coeffs)
     return modes, np.asarray(eigenvalues), coeffs

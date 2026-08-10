@@ -4,12 +4,13 @@ The CLI suite reaches this path but does not assert its arithmetic: dropping the
 metric from the time coefficients, or dropping the ``1/sqrt(lambda*N)`` mode
 normalization, still leaves that suite green.
 
-NOTE: ``reference_psd_pod`` is the pre-refactor formula (commands.py at
-3102d9a), kept as a refactoring guard against the shared solver. It mirrors
-``_solve_eigh_complex`` and is a characterization test, NOT an independent
-physics oracle — it only proves the shared path stays consistent with that
-historical expression. Correctness of the PSD-POD construction itself is not
-claimed here.
+NOTE: ``reference_psd_pod`` is a twin of ``_solve_eigh_complex`` (weighted
+mode build + unweight, the openmodalpy-era zero-measure policy), kept as a
+refactoring guard against the shared solver. Where w > 0 it is algebraically
+identical to the pre-refactor formula (commands.py at 3102d9a). It is a
+characterization test, NOT an independent physics oracle — it only proves the
+shared path stays consistent with this expression. Correctness of the PSD-POD
+construction itself is not claimed here.
 """
 
 from __future__ import annotations
@@ -17,13 +18,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from openmodalpy.core.decomposition import SpatialMetric, weighted_second_order
+from openmodalpy.core.decomposition import (
+    SpatialMetric,
+    _unweight_modes,
+    weighted_second_order,
+)
 
 
 def reference_psd_pod(ensemble: np.ndarray, weights: np.ndarray, n_modes_save: int):
-    """Verbatim pre-refactor formula (commands.py::_run_psd_pod at 3102d9a).
+    """Twin of ``_solve_eigh_complex`` (weighted build + unweight policy).
 
     Characterization / refactoring guard only — not an independent oracle.
+    Where w > 0 this is algebraically identical to the pre-refactor unweighted
+    build (commands.py at 3102d9a); where w == 0 the mode value is exactly 0.
     """
     n_realizations = ensemble.shape[0]
     ensemble_weighted = ensemble * np.sqrt(weights)[np.newaxis, :]
@@ -34,9 +41,9 @@ def reference_psd_pod(ensemble: np.ndarray, weights: np.ndarray, n_modes_save: i
     eigenvalues = np.real_if_close(eigenvalues[order][:keep])
     eigenvectors = eigenvectors[:, order][:, :keep]
     safe_eigs = np.maximum(np.real(eigenvalues), 1e-16)
-    ensemble_conj = ensemble.conj()
-    modes = (ensemble_conj.T @ eigenvectors) / np.sqrt(safe_eigs * n_realizations)
-    time_coefficients = ensemble_conj @ (weights[:, np.newaxis] * modes)
+    weighted_modes = (ensemble_weighted.conj().T @ eigenvectors) / np.sqrt(safe_eigs * n_realizations)
+    modes = _unweight_modes(weighted_modes, weights)
+    time_coefficients = ensemble.conj() @ (weights[:, np.newaxis] * modes)
     return modes, eigenvalues, time_coefficients
 
 
@@ -140,6 +147,50 @@ def test_psd_pod_isolated_zero_weight_station():
     # Zero measure: the cell contributes nothing (exact sqrt(0) = 0). On this
     # ensemble the shared path still agrees with the reference within tol.
     _assert_matches_reference(ensemble, weights, n_keep=4)
+
+
+def test_psd_pod_planted_garbage_at_zero_weight_station():
+    """Masked station must report mode value 0 even if the raw data is garbage.
+
+    Mirrors the openmodalpy-c7e measurement: zero one station's weight, plant
+    1e6 there, and require (i) exact-zero mode values at that station, (ii)
+    spectrum matching the station-deleted reference, (iii) other stations
+    matching the no-garbage run.
+    """
+    ensemble, weights = _fourier_ensemble()
+    weights = weights.copy()
+    station = 2
+    weights[station] = 0.0
+    n_keep = 4
+
+    modes_clean, eigs_clean, coeffs_clean = _run_solver(ensemble, weights, n_keep)
+
+    ensemble_garbage = ensemble.copy()
+    ensemble_garbage[:, station] = 1e6
+    modes_g, eigs_g, coeffs_g = _run_solver(ensemble_garbage, weights, n_keep)
+
+    # (i) mode values at the masked station are exactly 0 for every kept mode
+    assert modes_g.shape[1] == n_keep
+    assert np.all(modes_g[station, :] == 0.0)
+
+    # (ii) eigenvalues match deleting the station outright
+    keep_stations = np.arange(ensemble.shape[1]) != station
+    _, eigs_deleted, _ = _run_solver(
+        ensemble[:, keep_stations],
+        weights[keep_stations],
+        n_keep,
+    )
+    np.testing.assert_allclose(np.real(eigs_g), np.real(eigs_deleted), rtol=1e-10, atol=1e-12)
+
+    # (iii) other stations (and spectrum/coeffs) match the no-garbage run
+    np.testing.assert_allclose(np.real(eigs_g), np.real(eigs_clean), rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(
+        modes_g[keep_stations, :],
+        modes_clean[keep_stations, :],
+        rtol=1e-10,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(coeffs_g, coeffs_clean, rtol=1e-10, atol=1e-12)
 
 
 def test_psd_pod_negative_weight_station_raises():
