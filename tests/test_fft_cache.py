@@ -314,6 +314,46 @@ def _sibling_path(tmp_path, analysis):
     return tmp_path / f"dummy_Nfft8_ovlap0.0_32snapshots_{analysis}.hdf5"
 
 
+def test_saving_fft_blocks_without_q_warns_that_the_next_run_recomputes(tmp_path, caplog):
+    """Saving FFTBlocks without source snapshots must warn that the next run recomputes.
+
+    The cache stamp is derived from ``q``. When blocks are written but ``q`` is
+    gone, the file holds unstamped FFTBlocks that no later run can validate.
+    """
+    rng = np.random.default_rng(12)
+    q = rng.standard_normal((32, 4))
+    analyzer = _make_spod(tmp_path, q, file_path="dummy.h5")
+    # Simulate a save after the source snapshots have left memory.
+    analyzer.data = {k: v for k, v in analyzer.data.items() if k != "q"}
+    assert analyzer.data.get("q") is None
+    assert analyzer.qhat is not None and analyzer.qhat.size > 0
+
+    with caplog.at_level(logging.WARNING, logger="openmodalpy.spod"):
+        analyzer.save_results()
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "recomput" in r.getMessage().lower()]
+    assert warnings, f"expected a WARNING about recomputing; saw {[r.getMessage() for r in caplog.records]}"
+
+
+def test_saving_fft_blocks_with_q_does_not_warn(tmp_path, caplog):
+    """Saving FFTBlocks while ``q`` is still in memory must not emit the no-stamp warning.
+
+    Counterpart to ``test_saving_fft_blocks_without_q_warns_that_the_next_run_recomputes``:
+    without this, an unconditional warning would make that test pass spuriously.
+    """
+    rng = np.random.default_rng(13)
+    q = rng.standard_normal((32, 4))
+    analyzer = _make_spod(tmp_path, q, file_path="dummy.h5")
+    assert analyzer.data.get("q") is not None
+    assert analyzer.qhat is not None and analyzer.qhat.size > 0
+
+    with caplog.at_level(logging.WARNING, logger="openmodalpy.spod"):
+        analyzer.save_results()
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "recomput" in r.getMessage().lower()]
+    assert not warnings, f"unexpected recompute warning(s): {[r.getMessage() for r in warnings]}"
+
+
 def test_malformed_sibling_cache_recomputes_instead_of_raising(tmp_path, caplog):
     """A neighbour's bad cache file must never abort this analyzer's run.
 
