@@ -77,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Added
+- `openmodalpy analyze` accepts `--solver {eigh,svd}` and forwards it to POD.
+  The solver route was documented under `methods show pod` but reachable only
+  from a config file; the CLI flag closes that gap. Omitting the flag leaves
+  the library default in charge.
 - SPOD warns when it saves FFT blocks that carry no cache stamp. The stamp is
   derived from the source snapshots, so a save without them in memory leaves
   blocks the next run cannot validate and must recompute. The behaviour is

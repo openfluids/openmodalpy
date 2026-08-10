@@ -665,6 +665,60 @@ def test_cli_analyze_subcommand_routes_overrides(tmp_path: Path, monkeypatch, ca
     assert capsys.readouterr().out == ""
 
 
+def test_cli_analyze_subcommand_routes_solver_override(tmp_path: Path, monkeypatch, capsys) -> None:
+    config_path = tmp_path / "case.jsonc"
+    _write_jsonc(
+        config_path,
+        {
+            "name": "Toy case",
+            "description": "Toy case",
+            "case": {
+                "name": "toy_case",
+                "case_type": "analytical",
+                "data": {"kind": "generator", "name": "double_gyre", "params": {"Nx": 8, "Ny": 4, "Nt": 12}},
+            },
+            "runs": [{"id": "pod", "method": "pod"}],
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_analyze_from_config(config_path, *, method, run_id=None, overrides=None, dry_run=False):
+        captured["config_path"] = Path(config_path)
+        captured["method"] = method
+        captured["run_id"] = run_id
+        captured["overrides"] = dict(overrides or {})
+        captured["dry_run"] = dry_run
+        return object()
+
+    monkeypatch.setattr("openmodalpy.cli.analyze_from_config", fake_analyze_from_config)
+
+    exit_code = main(
+        [
+            "analyze",
+            "pod",
+            "--config",
+            str(config_path),
+            "--solver",
+            "svd",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["config_path"] == config_path.resolve()
+    assert captured["method"] == "pod"
+    assert captured["dry_run"] is False
+    assert captured["overrides"]["solver"] == "svd"
+    assert capsys.readouterr().out == ""
+
+    # Omitting --solver must leave the key absent: the CLI must not inject a
+    # default into overrides, so downstream code keeps its own 'eigh' default.
+    captured.clear()
+    exit_code = main(["analyze", "pod", "--config", str(config_path)])
+    assert exit_code == 0
+    assert "solver" not in captured["overrides"]
+
+
 def test_run_from_config_executes_real_psd_pod(tmp_path: Path) -> None:
     config_path = tmp_path / "psd_pod_case.jsonc"
     _write_jsonc(

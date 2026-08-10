@@ -115,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="DMD regression model (used only when analyze dmd).",
     )
     analyze.add_argument("--delays", type=int, default=None, help="DMD delay embedding depth.")
+    analyze.add_argument(
+        "--solver",
+        choices=("eigh", "svd"),
+        default=None,
+        help="POD eigen-solver: 'eigh' or 'svd' (used only when analyze pod).",
+    )
 
     run = subparsers.add_parser("run", help="Run one config-defined analysis suite or example suite.")
     run.add_argument("--config", type=Path, required=True, help="Path to the JSONC config file.")
@@ -171,6 +177,8 @@ def _collect_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["method"] = args.dmd_method
     if args.delays is not None:
         overrides["delays"] = args.delays
+    if args.solver is not None:
+        overrides["solver"] = args.solver
     return overrides
 
 
