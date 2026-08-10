@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 
 @pytest.fixture(autouse=True)
@@ -66,3 +70,61 @@ def small_pod_field():
 def small_stpod_field():
     """ST-POD-able analytic field long enough for modest delay embedding."""
     return _analytic_rank2_field(Ns=40, Nspace=12)
+
+
+@contextmanager
+def _capture_titles():
+    """Record every string drawn via set_title / suptitle / plt.title."""
+    seen: list[str] = []
+    orig_ax, orig_fig, orig_plt = Axes.set_title, Figure.suptitle, plt.title
+
+    def ax_title(self, label, *a, **k):
+        seen.append(str(label))
+        return orig_ax(self, label, *a, **k)
+
+    def fig_title(self, t, *a, **k):
+        seen.append(str(t))
+        return orig_fig(self, t, *a, **k)
+
+    def plt_title(label, *a, **k):
+        seen.append(str(label))
+        return orig_plt(label, *a, **k)
+
+    Axes.set_title, Figure.suptitle, plt.title = ax_title, fig_title, plt_title
+    try:
+        yield seen
+    finally:
+        Axes.set_title, Figure.suptitle, plt.title = orig_ax, orig_fig, orig_plt
+        plt.close("all")
+
+
+@pytest.fixture
+def capture_titles():
+    """Fixture exposing the shared title-capture context manager."""
+    return _capture_titles
+
+
+@contextmanager
+def _capture_line_ydata():
+    """Record y-data arrays from every Axes.plot call (before figures close)."""
+    seen: list[np.ndarray] = []
+    orig_plot = Axes.plot
+
+    def plot(self, *a, **k):
+        lines = orig_plot(self, *a, **k)
+        for line in lines:
+            seen.append(np.asarray(line.get_ydata(), dtype=float).copy())
+        return lines
+
+    Axes.plot = plot
+    try:
+        yield seen
+    finally:
+        Axes.plot = orig_plot
+        plt.close("all")
+
+
+@pytest.fixture
+def capture_line_ydata():
+    """Fixture exposing the shared line y-data capture context manager."""
+    return _capture_line_ydata

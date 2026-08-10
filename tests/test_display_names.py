@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import pathlib
 import re
-from contextlib import contextmanager
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np
 import pytest
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 
 from openmodalpy.mpod import MPODAnalyzer
 from openmodalpy.pod import PODAnalyzer
@@ -81,32 +77,6 @@ def _make_pod(tmp_path, data: dict) -> PODAnalyzer:
     )
 
 
-@contextmanager
-def _capture_titles():
-    """Record every string drawn via set_title / suptitle / plt.title."""
-    seen: list[str] = []
-    orig_ax, orig_fig, orig_plt = Axes.set_title, Figure.suptitle, plt.title
-
-    def ax_title(self, label, *a, **k):
-        seen.append(str(label))
-        return orig_ax(self, label, *a, **k)
-
-    def fig_title(self, t, *a, **k):
-        seen.append(str(t))
-        return orig_fig(self, t, *a, **k)
-
-    def plt_title(label, *a, **k):
-        seen.append(str(label))
-        return orig_plt(label, *a, **k)
-
-    Axes.set_title, Figure.suptitle, plt.title = ax_title, fig_title, plt_title
-    try:
-        yield seen
-    finally:
-        Axes.set_title, Figure.suptitle, plt.title = orig_ax, orig_fig, orig_plt
-        plt.close("all")
-
-
 def _prepare(analyzer) -> None:
     analyzer.load_and_preprocess()
     analyzer._perform_decomposition()
@@ -124,20 +94,20 @@ def _assert_label_titles(titles: list[str], label: str) -> None:
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_eigenvalue_spectrum_title(tmp_path, maker, label):
+def test_eigenvalue_spectrum_title(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_eigenvalues()
     assert any(t == f"{label} Eigenvalue Spectrum" for t in titles), titles
     _assert_label_titles(titles, label)
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_plot_modes_titles(tmp_path, maker, label):
+def test_plot_modes_titles(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_modes(plot_n_modes=1, modes_per_fig=1)
     mode_titles = [t for t in titles if "Mode" in t and "[" in t]
     assert mode_titles, titles
@@ -146,51 +116,51 @@ def test_plot_modes_titles(tmp_path, maker, label):
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_modes_grid_suptitle(tmp_path, maker, label):
+def test_modes_grid_suptitle(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_modes_grid(energy_threshold=99.5)
     assert any(t.startswith(f"{label} Modes up to") for t in titles), titles
     _assert_label_titles([t for t in titles if "Modes up to" in t], label)
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_time_coefficient_titles(tmp_path, maker, label):
+def test_time_coefficient_titles(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_time_coefficients(n_coeffs_to_plot=1)
     assert any(t == f"Temporal Coefficient for {label} Mode 1" for t in titles), titles
     _assert_label_titles([t for t in titles if "Temporal Coefficient" in t], label)
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_phase_portrait_titles(tmp_path, maker, label):
+def test_phase_portrait_titles(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
     # Force a pair: threshold 0 accepts any correlation.
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_mode_pair_phase(start_mode=1, threshold=0.0)
     assert any(t.startswith(f"{label} Phase Portrait Modes") for t in titles), titles
     _assert_label_titles([t for t in titles if "Phase Portrait" in t], label)
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_cumulative_energy_title(tmp_path, maker, label):
+def test_cumulative_energy_title(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_cumulative_energy()
     assert any(t == f"Cumulative Energy of {label} Modes" for t in titles), titles
     _assert_label_titles(titles, label)
 
 
 @pytest.mark.parametrize("maker,label", [(_make_mpod, "mPOD"), (_make_pod, "POD")])
-def test_reconstruction_error_title(tmp_path, maker, label):
+def test_reconstruction_error_title(tmp_path, maker, label, capture_titles):
     analyzer = maker(tmp_path, _synthetic_2d())
     _prepare(analyzer)
-    with _capture_titles() as titles:
+    with capture_titles() as titles:
         analyzer.plot_reconstruction_error()
     want = f"Data Reconstruction Error vs. Number of {label} Modes"
     assert any(t == want for t in titles), titles
