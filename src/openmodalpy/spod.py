@@ -37,7 +37,6 @@ from openmodalpy.core.config import (
     WINDOW_TYPE,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -348,6 +347,15 @@ class SPODAnalyzer(BaseAnalyzer):
         if self.qhat is not None and self.qhat.size > 0 and self.data.get("q") is not None:
             with h5py.File(save_path, "a") as handle:
                 _write_qhat_stamp(handle, self, self.data["q"])
+        elif self.qhat is not None and self.qhat.size > 0 and self.data.get("q") is None:
+            # Blocks were written, but the stamp is derived from the source
+            # snapshots `q`. Without `q` in memory the next run cannot validate
+            # the cache and will recompute the blocks.
+            logger.warning(
+                "FFT blocks saved to %s without a cache stamp because source "
+                "snapshots are not in memory; the next run will recompute them",
+                save_path,
+            )
         logger.info("SPOD results saved to %s", save_path)
 
     def load_results(self, filename=None):
