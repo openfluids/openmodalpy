@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Optional
 
 import numpy as np
@@ -46,7 +47,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         file_path: str,
         results_dir: str = RESULTS_DIR,
         figures_dir: str = FIGURES_DIR,
-        data_loader=None,
+        data_loader: Callable[[str], dict] | None = None,
         spatial_weight_type: str = "auto",
         nfft: int = 128,
         overlap: float = 0.5,
@@ -57,7 +58,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         use_parallel: bool = True,
         characteristic_length: float | None = None,
         characteristic_velocity: float | None = None,
-        spatial_weights=None,
+        spatial_weights: np.ndarray | None = None,
     ):
         super().__init__(
             file_path=file_path,
@@ -92,7 +93,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         self.results_path: Optional[str] = None
         self.analysis_type = "psd_pod"
 
-    def load_and_preprocess(self):
+    def load_and_preprocess(self) -> None:
         """Load data, spatial weights, and the Welch frequency / Strouhal axes."""
         super().load_and_preprocess()
         self.L = self.L if self.L is not None else self.data.get("D", 1.0)

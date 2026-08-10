@@ -15,7 +15,7 @@ from fftkit import get_fft_func
 from scipy.signal import get_window
 
 
-def welch_nblocks(Ns, nfft, novlap):
+def welch_nblocks(Ns: int, nfft: int, novlap: int) -> int:
     """Number of full Welch blocks under floor partitioning.
 
     Matches ``scipy.signal.welch``: hop = nfft - novlap, drop the remainder.
@@ -27,7 +27,7 @@ def welch_nblocks(Ns, nfft, novlap):
     return (int(Ns) - int(novlap)) // hop
 
 
-def _validate_welch_blocks(Ns, nfft, nblocks, novlap):
+def _validate_welch_blocks(Ns: int, nfft: int, nblocks: int, novlap: int) -> None:
     """Reject short records and over-subscribed Welch partitions.
 
     Matches ``scipy.signal.welch``: floor partitioning, drop the remainder.
@@ -54,21 +54,21 @@ def _validate_welch_blocks(Ns, nfft, nblocks, novlap):
         )
 
 
-def sine_window(n):
+def sine_window(n: int) -> np.ndarray:
     """Return a sine window of length n (periodic-style mid-bin placement)."""
     return np.sin(np.pi * (np.arange(n) + 0.5) / n)
 
 
 def windowed_block_fft(
-    q,
-    nfft,
-    nblocks,
-    novlap,
-    blockwise_mean=False,
-    normvar=False,
-    window_norm="power",
-    window_type="hamming",
-):
+    q: np.ndarray,
+    nfft: int,
+    nblocks: int,
+    novlap: int,
+    blockwise_mean: bool = False,
+    normvar: bool = False,
+    window_norm: str = "power",
+    window_type: str = "hamming",
+) -> np.ndarray:
     """Windowed block FFT for Welch CSD estimation.
 
     Returns complex coefficients shaped ``[freq, space, block]`` (one-sided).

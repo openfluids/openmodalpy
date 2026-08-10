@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.resources
 import json
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
@@ -162,7 +163,7 @@ def examples_root() -> Path:
     return repo_root() / "examples"
 
 
-def packaged_examples_root():
+def packaged_examples_root() -> Traversable:
     """Return the packaged example-config root."""
     return importlib.resources.files("openmodalpy.examples")
 

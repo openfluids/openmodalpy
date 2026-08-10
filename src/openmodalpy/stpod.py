@@ -25,6 +25,7 @@ Reference:
 import logging
 import os
 import time
+from collections.abc import Callable
 from typing import Any, Optional
 
 import matplotlib
@@ -85,10 +86,10 @@ class STPODAnalyzer(BaseAnalyzer):
         n_modes_save: int = 10,
         results_dir: str = RESULTS_DIR_STPOD,
         figures_dir: str = FIGURES_DIR_STPOD,
-        data_loader=None,
+        data_loader: Callable[[str], dict] | None = None,
         spatial_weight_type: str = "auto",
         use_parallel: bool = True,
-        spatial_weights=None,
+        spatial_weights: np.ndarray | None = None,
     ):
         """Initialize the STPODAnalyzer.
 

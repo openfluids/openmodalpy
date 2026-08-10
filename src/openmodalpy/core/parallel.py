@@ -24,7 +24,7 @@ OPENMP_AVAILABLE = False
 PARALLEL_AVAILABLE = True
 
 
-def calculate_polar_weights_optimized(x, y):
+def calculate_polar_weights_optimized(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     Calculate integration weights for 2D cylindrical grid.
 
@@ -46,7 +46,7 @@ def calculate_polar_weights_optimized(x, y):
     return _calculate_weights_numpy(x, y)
 
 
-def _calculate_weights_numpy(x, y):
+def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Vectorized NumPy implementation of polar weights."""
     Nx, Ny = len(x), len(y)
 
@@ -94,13 +94,20 @@ def _calculate_weights_numpy(x, y):
 
 # Placeholder function maintained for backward compatibility. It simply calls
 # the NumPy implementation as OpenMP acceleration has been removed.
-def _calculate_weights_openmp(x, y):
+def _calculate_weights_openmp(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return _calculate_weights_numpy(x, y)
 
 
 def blocksfft_optimized(
-    q, nfft, nblocks, novlap, blockwise_mean=False, normvar=False, window_norm="power", window_type="hamming"
-):
+    q: np.ndarray,
+    nfft: int,
+    nblocks: int,
+    novlap: int,
+    blockwise_mean: bool = False,
+    normvar: bool = False,
+    window_norm: str = "power",
+    window_type: str = "hamming",
+) -> np.ndarray:
     """
     Optimized blocked FFT computation.
 
@@ -158,7 +165,14 @@ def blocksfft_optimized(
     )
 
 
-def spod_single_frequency_optimized(qhat, w, nblocks, dst, num_modes=None, return_psi=False):
+def spod_single_frequency_optimized(
+    qhat: np.ndarray,
+    w: np.ndarray,
+    nblocks: int,
+    dst: float,
+    num_modes: int | None = None,
+    return_psi: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Single-frequency SPOD via the shared eigenproblem body.
 
     Thin wrapper around ``decomposition.spod_single_frequency``. Threading /
@@ -177,7 +191,7 @@ def spod_single_frequency_optimized(qhat, w, nblocks, dst, num_modes=None, retur
     )
 
 
-def get_threadpool_summary():
+def get_threadpool_summary() -> str:
     """Return a short description of active thread pools."""
     try:
         pools = threadpool_info()
