@@ -51,6 +51,24 @@ def _mags_agree(a: float, b: float, rtol: float) -> bool:
     return abs(a - b) <= rtol * scale
 
 
+def reference_pivot_index(col) -> int:
+    """Lowest index whose magnitude is within ``1e-12`` of max |col|.
+
+    Test-side copy of the library pivot rule. Empty or all-zero columns return 0.
+    Kept here (not imported from the library) for the same reason as
+    ``canonicalize_reference``: oracle and SPOD checks must pin WHICH pivot the
+    suite intends, so a library change turns them red instead of tracking along.
+    Enforced by ``test_oracle_tests_do_not_import_the_library_sign_rule``.
+    """
+    mag = np.abs(np.asarray(col))
+    if mag.size == 0:
+        return 0
+    m = float(mag.max())
+    if m == 0.0:
+        return 0
+    return int(np.argmax(mag >= (1.0 - 1e-12) * m))
+
+
 def canonicalize_reference(modes, coeffs=None):
     """Sign/phase-canonicalize mode columns for independent oracle comparison.
 
@@ -59,6 +77,7 @@ def canonicalize_reference(modes, coeffs=None):
     intended: if the reference side called the library helper, both sides would
     track the same factor under any rule change and the comparison would stay
     green. This copy is the fixed expression of that rule on the reference side.
+    Re-coupling is guarded by ``test_oracle_tests_do_not_import_the_library_sign_rule``.
 
     For each column the pivot is the lowest index whose magnitude is within a
     relative band ``1e-12`` of the column maximum; the scale is
@@ -78,13 +97,11 @@ def canonicalize_reference(modes, coeffs=None):
 
     for k in range(modes.shape[1]):
         col = modes[:, k]
-        mag = np.abs(col)
-        m = float(mag.max())
-        if m == 0.0:
-            continue
-        # Lowest index within relative band 1e-12 of the column maximum.
-        i = int(np.argmax(mag >= (1.0 - 1e-12) * m))
+        i = reference_pivot_index(col)
         v = col[i]
+        # All-zero columns: pivot helper returns 0 and |v| is 0 — leave alone.
+        if np.abs(v) == 0.0:
+            continue
         s = np.conj(v) / np.abs(v)
         modes[:, k] *= s
         if coeffs is not None:
