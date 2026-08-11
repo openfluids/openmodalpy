@@ -479,3 +479,28 @@ def test_eigh_spatial_branch_rank_deficient_uses_n_space():
     assert np.all(lam >= 0.0)
     norms = np.sqrt(np.sum(w[:, None] * modes**2, axis=0))
     np.testing.assert_allclose(norms, np.ones(2), rtol=0, atol=1e-8)
+
+
+def test_eigh_svd_agree_mode_count_in_spatial_regime():
+    """eigh and svd keep the same mode count on centered spatial-regime data.
+
+    Mean-centering costs one SAMPLE degree of freedom, so the rank bound is
+    ``min(n_samples - 1, n_space)``. The old SVD cap ``min(n_samples, n_space) - 1``
+    drops one genuine mode whenever ``n_space < n_samples``. Full-column-rank
+    random data makes every spatial direction energetic so the floor cannot
+    hide the off-by-one. Goes RED if ``_solve_svd`` reverts that bound.
+    """
+    rng = np.random.default_rng(0)
+    cases = [(8, 3), (40, 25), (12, 4)]
+    for n_samples, n_space in cases:
+        assert n_space < n_samples, (n_samples, n_space)
+        x = rng.standard_normal((n_samples, n_space))
+        xc = x - x.mean(axis=0)
+        assert np.linalg.matrix_rank(xc, tol=1e-10) == n_space
+        w = np.ones(n_space)
+        n_eigh = weighted_second_order(xc, w, method="eigh")[1].size
+        n_svd = weighted_second_order(xc, w, method="svd")[1].size
+        want = min(n_samples - 1, n_space)
+        assert n_eigh == want, f"{n_samples}x{n_space}: eigh={n_eigh} want={want}"
+        assert n_svd == want, f"{n_samples}x{n_space}: svd={n_svd} want={want}"
+        assert n_eigh == n_svd

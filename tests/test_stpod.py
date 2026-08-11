@@ -2,6 +2,8 @@
 Unit tests for STPODAnalyzer.
 """
 
+import logging
+
 import h5py
 import numpy as np
 import pytest
@@ -839,3 +841,45 @@ class TestSTPODTotalEnergy:
         denom, suffix = reused._energy_denominator()
         assert denom == float(np.sum(reused.eigenvalues))
         assert "retained" in suffix
+
+
+def test_stpod_keeps_every_mode_the_lift_supports_in_the_spatial_regime(caplog):
+    """ST-POD's own rank cap must not drop a genuine mode.
+
+    When the delay-embedded matrix has fewer columns than rows, the old cap
+    ``min(n_samples, n_space) - 1`` undercounts by one. Mean-centering costs a
+    SAMPLE degree of freedom, so the bound is ``min(n_samples - 1, n_space)``.
+
+    Ns=40, Nspace=2, embedding_dim=3 lifts to 38x6, so the lift supports 6
+    modes; the old cap allowed only 5. Guards ``stpod.py``'s caller-side cap,
+    which the low-level ``_solve_svd`` test cannot reach.
+    """
+    rng = np.random.default_rng(11)
+    Ns, Nspace, embedding_dim = 40, 2, 3
+    data = {
+        "q": rng.standard_normal((Ns, Nspace)),
+        "x": np.arange(float(Nspace)),
+        "y": np.array([0.0]),
+        "dt": 0.1,
+        "Nx": Nspace,
+        "Ny": 1,
+        "Ns": Ns,
+    }
+    analyzer = STPODAnalyzer(
+        file_path="stpod_spatial_regime",
+        embedding_dim=embedding_dim,
+        n_modes_save=10,  # deliberately above the bound so the cap decides
+        data_loader=lambda _: data,
+        spatial_weight_type="uniform",
+    )
+    analyzer.load_and_preprocess()
+    with caplog.at_level(logging.WARNING, logger="openmodalpy.stpod"):
+        analyzer.perform_stpod()
+    assert "Only 6 modes available, requested 10" in caplog.text
+
+    n_samples_lift = Ns - embedding_dim + 1
+    n_space_lift = Nspace * embedding_dim
+    want = min(n_samples_lift - 1, n_space_lift)
+    assert want == 6, "fixture drifted: it must sit in the spatial regime"
+    assert analyzer.eigenvalues.size == want
+    assert analyzer.modes.shape == (n_space_lift, want)

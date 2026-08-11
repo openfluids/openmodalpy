@@ -390,6 +390,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- The SVD route keeps every mode the data supports, so it now agrees with the
+  eigenvalue route. Subtracting the mean costs one snapshot's worth of
+  information, so the limit on how many modes the data can support is
+  `min(n_samples - 1, n_space)`. The SVD route instead used
+  `min(n_samples, n_space) - 1`, which is the same number only when there are
+  at least as many grid points as snapshots. With fewer grid points than
+  snapshots it discarded one genuine mode: 40 snapshots on 25 points returned
+  24 modes where the eigenvalue route returned 25, and a run asking for more
+  reported the contradictory `n_modes_save (25) > available modes (24)`. At a
+  single spatial point the old limit collapsed to zero, so the SVD route
+  returned no modes at all for any number of snapshots. The same wrong limit
+  was applied a second time by ST-POD before it called the solver, so both
+  places are corrected. Results are unchanged wherever there are at least as
+  many grid points as snapshots.
 - POD reports the true energy total, and keeps every mode the data supports.
   Two separate errors, both on the `solver="svd"` route: the reported total was
   the sum of the returned eigenvalues, which omitted the last one, so every

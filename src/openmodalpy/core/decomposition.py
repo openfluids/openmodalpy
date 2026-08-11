@@ -467,20 +467,28 @@ def _solve_svd(
     *,
     n_keep: int | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Weighted SVD route (ST-POD). ``data`` is samples × lifted features."""
+    """Weighted SVD route (ST-POD). ``data`` is samples × lifted features.
+
+    The mode-count bound ``min(n_samples - 1, n_space)`` assumes mean-subtracted
+    input: every caller sets ``uses_mean_subtraction: True``, so one sample
+    degree of freedom is already spent before this route runs.
+    """
     n_samples, n_space = data.shape
     weights = _as_weight_vector(metric, n_space)
     sqrt_weights = np.sqrt(weights)
     data_weighted = data * sqrt_weights
 
-    # Same meaning as the eigh path: dimension of the Gram matrix that would
-    # have been factored (temporal if n_samples < n_space, else spatial).
+    # n_kernel scales the singular-value floor: dimension of the Gram that
+    # would have been factored (temporal if n_samples < n_space, else spatial).
+    # Distinct from the mode-count cap below — do not reuse one for the other.
     n_kernel = min(n_samples, n_space)
-    n_min = n_kernel
+    # Mean-centering costs one SAMPLE degree of freedom, so the rank bound is
+    # min(n_samples - 1, n_space), not min(n_samples, n_space) - 1.
+    max_rank = max(min(n_samples - 1, n_space), 0)
     if n_keep is None:
-        k = max(n_min - 1, 0)
+        k = max_rank
     else:
-        k = min(int(n_keep), max(n_min - 1, 0))
+        k = min(int(n_keep), max_rank)
     if k < 1:
         return (
             np.empty((n_space, 0)),
