@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import os
-from typing import Iterable
+from collections.abc import Callable, Iterable
+from typing import Any, cast
 
 import h5py
 import numpy as np
+from numpy.typing import ArrayLike
 
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.config import FIGURES_DIR_POD, RESULTS_DIR_POD
@@ -36,18 +38,18 @@ class MPODAnalyzer(PODAnalyzer):
 
     def __init__(
         self,
-        file_path,
-        results_dir=RESULTS_DIR_POD,
-        figures_dir=FIGURES_DIR_POD,
-        data_loader=None,
-        spatial_weight_type="auto",
-        n_modes_save=10,
+        file_path: str,
+        results_dir: str = RESULTS_DIR_POD,
+        figures_dir: str = FIGURES_DIR_POD,
+        data_loader: Callable[..., dict[str, Any]] | None = None,
+        spatial_weight_type: str = "auto",
+        n_modes_save: int = 10,
         band_edges: Iterable[float] | None = None,
         band_scale: str = "hz",
         filter_kind: str = "rectangular",
-        use_parallel=True,
-        spatial_weights=None,
-    ):
+        use_parallel: bool = True,
+        spatial_weights: ArrayLike | None = None,
+    ) -> None:
         super().__init__(
             file_path=file_path,
             results_dir=results_dir,
@@ -80,7 +82,7 @@ class MPODAnalyzer(PODAnalyzer):
             "band_mode_counts": np.asarray(self.band_mode_counts, dtype=int),
         }
 
-    def load_results(self, filename=None):
+    def load_results(self, filename: str | None = None) -> None:
         super().load_results(filename=filename)
         if not filename:
             filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
@@ -104,7 +106,7 @@ class MPODAnalyzer(PODAnalyzer):
             if "band_scale" in handle.attrs:
                 self.band_scale = str(handle.attrs["band_scale"])
 
-    def perform_mpod(self):
+    def perform_mpod(self) -> None:
         """Perform mPOD by POD-decomposing non-overlapping band-limited data."""
         if "q" not in self.data:
             raise ValueError("Data not loaded. Call load_and_preprocess() first.")
@@ -116,7 +118,7 @@ class MPODAnalyzer(PODAnalyzer):
         if n_snapshots < 2:
             raise ValueError("Need at least 2 snapshots for mPOD.")
 
-        self.temporal_mean = np.mean(data_matrix, axis=0, dtype=np.float64)
+        self.temporal_mean = cast(np.ndarray, np.mean(data_matrix, axis=0, dtype=np.float64))
         data_centered = data_matrix - self.temporal_mean
 
         weight_vector = decomposition._as_weight_vector(np.asarray(self.W), n_space)
@@ -142,6 +144,7 @@ class MPODAnalyzer(PODAnalyzer):
 
         metric = decomposition.SpatialMetric(weight_vector)
         # Kind is shared across bands; each band builds its own BandFilteredLift.
+        # BandFilteredLift satisfies the Lift protocol structurally; no cast needed.
         self._lift = decomposition.BandFilteredLift()
 
         band_modes: list[np.ndarray] = []
@@ -200,7 +203,7 @@ class MPODAnalyzer(PODAnalyzer):
         self.mode_band_indices = band_ids[order][:keep]
         self.band_mode_counts = np.asarray(band_mode_counts, dtype=int)
 
-    def _perform_decomposition(self):
+    def _perform_decomposition(self) -> None:
         """mPOD one-call path: do not inherit POD's perform_pod dispatch."""
         self.perform_mpod()
 

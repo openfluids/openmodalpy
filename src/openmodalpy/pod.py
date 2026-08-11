@@ -12,11 +12,14 @@ Reference codes:
     - https://github.com/MathEXLab/PySPOD/blob/main/pyspod/pod/standard.py
 """
 
+from __future__ import annotations
+
 # Standard library imports
 import logging
 import os
 import time
-from typing import Literal, Optional
+from collections.abc import Callable, Iterator
+from typing import Any, Literal, Optional, cast
 
 import matplotlib
 
@@ -26,6 +29,7 @@ import matplotlib.pyplot as plt
 # Third-party imports
 import numpy as np
 from fftkit import find_peaks, periodogram_rfft
+from numpy.typing import ArrayLike
 
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.base import (
@@ -86,15 +90,15 @@ class PODAnalyzer(BaseAnalyzer):
 
     def __init__(
         self,
-        file_path,
-        results_dir=RESULTS_DIR_POD,
-        figures_dir=FIGURES_DIR_POD,
-        data_loader=None,
-        spatial_weight_type="auto",
-        n_modes_save=10,
-        use_parallel=True,
-        spatial_weights=None,
-    ):
+        file_path: str,
+        results_dir: str = RESULTS_DIR_POD,
+        figures_dir: str = FIGURES_DIR_POD,
+        data_loader: Callable[..., dict[str, Any]] | None = None,
+        spatial_weight_type: str = "auto",
+        n_modes_save: int = 10,
+        use_parallel: bool = True,
+        spatial_weights: ArrayLike | None = None,
+    ) -> None:
         """
         Initialize the PODAnalyzer.
 
@@ -144,7 +148,7 @@ class PODAnalyzer(BaseAnalyzer):
         # Update the analysis type for filenames
         self.analysis_type = "pod"
 
-    def perform_pod(self, *, solver: Literal["eigh", "svd"] = "eigh"):
+    def perform_pod(self, *, solver: Literal["eigh", "svd"] = "eigh") -> None:
         """Perform POD analysis on the loaded and preprocessed data.
 
         Parameters
@@ -194,7 +198,7 @@ class PODAnalyzer(BaseAnalyzer):
             raise ValueError(f"Need at least 1 spatial point, got {num_space_points}")
 
         # 1. Subtract temporal mean (more efficient with axis parameter)
-        self.temporal_mean = np.mean(data_matrix, axis=0, dtype=np.float64)
+        self.temporal_mean = cast(np.ndarray, np.mean(data_matrix, axis=0, dtype=np.float64))
         data_mean_removed = data_matrix - self.temporal_mean
 
         # 2. Spatial metric (inner-product weights)
@@ -238,7 +242,7 @@ class PODAnalyzer(BaseAnalyzer):
         # min(n_samples - 1, n_space), floored at 1 so a single-DOF field still
         # returns a mode. The solver may still drop values below its relative
         # cutoff, so fewer than k may come back.
-        self._lift = decomposition.IdentityLift()
+        self._lift: decomposition.Lift = decomposition.IdentityLift()
         metric = decomposition.SpatialMetric(weight_vector)
         lifted = self._lift.apply(data_mean_removed)
         n_samples_lift, n_space_lift = lifted.shape
@@ -329,7 +333,7 @@ class PODAnalyzer(BaseAnalyzer):
             meta["energy_captured_fraction"] = float(self.energy_captured_fraction)
         return meta
 
-    def load_results(self, filename=None):
+    def load_results(self, filename: str | None = None) -> None:
         """Load POD modes, eigenvalues, and time coefficients from an HDF5 file."""
         from openmodalpy.core.results import read_results
 
@@ -445,7 +449,7 @@ class PODAnalyzer(BaseAnalyzer):
         write_results(save_path, datasets, attrs=attrs)
         logger.info("%s results saved.", display_name_for(self.analysis_type))
 
-    def plot_eigenvalues(self):
+    def plot_eigenvalues(self) -> None:
         """Plot the POD eigenvalue spectrum (energy vs. mode number).
 
         Shows the decay of energy (eigenvalues) with increasing mode number.
@@ -609,7 +613,9 @@ class PODAnalyzer(BaseAnalyzer):
             plt.close(fig)
             logger.info("Saving figure %s", plot_filename)
 
-    def plot_modes_pair_detailed(self, plot_n_modes: int = 4, cmap=CMAP_SEQ, show_cylinder: bool = False) -> None:
+    def plot_modes_pair_detailed(
+        self, plot_n_modes: int = 4, cmap: str = CMAP_SEQ, show_cylinder: bool = False
+    ) -> None:
         """Plot modes in pairs with an additional magnitude row (2×2 per figure).
 
         Produces figures where the top row contains the raw spatial fields for a
@@ -659,6 +665,7 @@ class PODAnalyzer(BaseAnalyzer):
                 else:
                     x_mesh, y_mesh = x_coords, y_coords
                 # Optionally apply cylinder mask
+                field: np.ndarray | np.ma.MaskedArray
                 if show_cylinder:
                     dist = np.sqrt(x_mesh**2 + y_mesh**2)
                     mask = dist <= 0.5
@@ -753,7 +760,9 @@ class PODAnalyzer(BaseAnalyzer):
             items.append({"mode_3d": mode_3d, "output_path": output_path, "title_prefix": title})
         plot_modes_3d(kind, items, x_coords, y_coords, z_coords, data=self.data)
 
-    def plot_modes_grid(self, energy_threshold: float = 99.5, cmap=CMAP_DIV, show_cylinder: bool = False) -> None:
+    def plot_modes_grid(
+        self, energy_threshold: float = 99.5, cmap: str = CMAP_DIV, show_cylinder: bool = False
+    ) -> None:
         """Plot spatial POD modes side-by-side up to a cumulative energy threshold.
 
         This produces a single figure containing all modes required to reach the
@@ -817,6 +826,7 @@ class PODAnalyzer(BaseAnalyzer):
                     x_mesh, y_mesh = x_coords, y_coords
 
                 # Optionally mask interior of cylinder (radius 0.5)
+                mode_plot: np.ndarray | np.ma.MaskedArray
                 if show_cylinder:
                     distance = np.sqrt(x_mesh**2 + y_mesh**2)
                     cylinder_mask = distance <= 0.5
@@ -888,7 +898,13 @@ class PODAnalyzer(BaseAnalyzer):
         plt.close(fig)
         logger.info("Saving figure %s", plot_filename)
 
-    def plot_time_coefficients(self, n_coeffs_to_plot=2, n_snapshots_plot=None, L=1.0, U=1.0):
+    def plot_time_coefficients(
+        self,
+        n_coeffs_to_plot: int = 2,
+        n_snapshots_plot: int | None = None,
+        L: float | None = 1.0,
+        U: float | None = 1.0,
+    ) -> None:
         """Plot the temporal coefficients for selected modes.
 
         Displays the time evolution of the coefficients for the first `n_coeffs_to_plot` modes.
@@ -973,7 +989,7 @@ class PODAnalyzer(BaseAnalyzer):
         plt.close()
         logger.info("Saving figure %s", plot_filename)
 
-    def check_mode_pair_phase(self, start_mode: int = 1, threshold: float = 0.9):
+    def check_mode_pair_phase(self, start_mode: int = 1, threshold: float = 0.9) -> Iterator[tuple[int, int]]:
         """Identify mode pairs with strongly correlated time coefficients.
 
         Starting from ``start_mode`` (1-indexed), iterate through the saved POD
@@ -1022,7 +1038,7 @@ class PODAnalyzer(BaseAnalyzer):
                 logger.info("No correlated partner found for mode %d", i)
                 i += 1
 
-    def plot_mode_pair_phase(self, start_mode: int = 1, threshold: float = 0.9):
+    def plot_mode_pair_phase(self, start_mode: int = 1, threshold: float = 0.9) -> None:
         """Plot phase portraits of automatically detected mode pairs.
 
         Mode pairs are identified using :meth:`check_mode_pair_phase`.  For each
@@ -1057,7 +1073,7 @@ class PODAnalyzer(BaseAnalyzer):
             plt.close()
             logger.info("Saving figure %s", fname)
 
-    def plot_cumulative_energy(self):
+    def plot_cumulative_energy(self) -> None:
         """Plot the cumulative energy captured by POD modes.
 
         Shows the percentage of total energy captured as more modes are included.
@@ -1075,7 +1091,7 @@ class PODAnalyzer(BaseAnalyzer):
         plt.plot(mode_indices, cumulative_energy, "o-", linewidth=2, markersize=6)
         # Annotate cumulative curve with mode numbers
         for idx, (x, y) in enumerate(zip(mode_indices, cumulative_energy)):
-            plt.text(x, y, f" {idx + 1}", fontsize=7, va="bottom")
+            plt.text(float(x), float(y), f" {idx + 1}", fontsize=7, va="bottom")
         plt.xlabel("Number of Modes")
         plt.ylabel(f"Cumulative Energy (%){label_suffix}")
         plt.title(f"Cumulative Energy of {display_name_for(self.analysis_type)} Modes")
@@ -1086,7 +1102,7 @@ class PODAnalyzer(BaseAnalyzer):
         plt.close()
         logger.info("Saving figure %s", plot_filename)
 
-    def plot_reconstruction_error(self):
+    def plot_reconstruction_error(self) -> None:
         """Plot the data reconstruction error using an increasing number of POD modes.
 
         Calculates and plots the normalized mean squared error (NMSE) of reconstructing
@@ -1118,7 +1134,7 @@ class PODAnalyzer(BaseAnalyzer):
         plt.plot(mode_indices, reconstruction_errors, "s-", linewidth=2, markersize=6)
         # Annotate each reconstruction error point with mode number
         for idx, (x, y) in enumerate(zip(mode_indices, reconstruction_errors)):
-            plt.text(x, y, f" {idx + 1}", fontsize=7, va="bottom")
+            plt.text(float(x), float(y), f" {idx + 1}", fontsize=7, va="bottom")
         plt.xlabel("Number of Modes Used for Reconstruction")
         plt.ylabel("Reconstruction Error (%)")
         plt.title(f"Data Reconstruction Error vs. Number of {display_name_for(self.analysis_type)} Modes")
@@ -1131,7 +1147,11 @@ class PODAnalyzer(BaseAnalyzer):
         plt.close()
         logger.info("Saving figure %s", plot_filename)
 
-    def plot_reconstruction_comparison(self, snapshot_indices_to_plot=None, modes_for_reconstruction=None):
+    def plot_reconstruction_comparison(
+        self,
+        snapshot_indices_to_plot: list[int] | None = None,
+        modes_for_reconstruction: list[int] | None = None,
+    ) -> None:
         """Compare original snapshots with their POD reconstructions.
 
         Visualizes selected original data snapshots alongside their reconstructions
@@ -1251,7 +1271,7 @@ class PODAnalyzer(BaseAnalyzer):
         plt.close()
         logger.info("Saving figure %s", plot_filename)
 
-    def check_spatial_mode_orthogonality(self, tolerance=1e-9):
+    def check_spatial_mode_orthogonality(self, tolerance: float = 1e-9) -> bool:
         """Check the orthogonality of spatial modes with respect to weights W.
 
         Verifies that `Modes.T @ W_diag @ Modes` is close to the identity matrix,
@@ -1322,7 +1342,7 @@ class PODAnalyzer(BaseAnalyzer):
         logger.info("Saving figure %s", plot_filename)
         return is_orthogonal
 
-    def check_temporal_coefficient_orthogonality(self, tolerance=1e-9):
+    def check_temporal_coefficient_orthogonality(self, tolerance: float = 1e-9) -> bool:
         """Check the orthogonality of temporal coefficients.
 
         Verifies that `(1/Ns) * TimeCoeffs.T @ TimeCoeffs` is close to `diag(Eigenvalues)`,
@@ -1410,18 +1430,18 @@ class PODAnalyzer(BaseAnalyzer):
         logger.info("Saving figure %s", plot_filename)
         return is_pseudo_orthogonal
 
-    def _perform_decomposition(self):
+    def _perform_decomposition(self) -> None:
         """Run this analyzer's decomposition. Subclasses override (e.g. mPOD)."""
         self.perform_pod()
 
     def run_analysis(
         self,
-        plot_n_modes_spatial=4,
-        plot_n_coeffs_time=5,
-        plot_snapshot_indices=None,
-        modes_for_reconstruction=None,
-        check_orthogonality=False,
-    ):
+        plot_n_modes_spatial: int = 4,
+        plot_n_coeffs_time: int = 5,
+        plot_snapshot_indices: list[int] | None = None,
+        modes_for_reconstruction: list[int] | None = None,
+        check_orthogonality: bool = False,
+    ) -> None:
         """
         Main entry point for running POD analysis and plotting.
             check_orthogonality (bool, optional): If True, perform and print orthogonality checks.
