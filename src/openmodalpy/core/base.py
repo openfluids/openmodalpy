@@ -5,17 +5,27 @@ Common utilities for modal decomposition methods.
 All imports are centralized here to keep the code clean and consistent.
 """
 
+from __future__ import annotations
+
 import glob
 import hashlib
 import logging
 import os
 import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, cast, overload
 
 import h5py
 import numpy as np
+from numpy.typing import ArrayLike
 from scipy.sparse.linalg import svds
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colorbar import Colorbar
+    from matplotlib.figure import Figure
 
 from openmodalpy.core.config import (
     CMAP_DIV,
@@ -83,7 +93,7 @@ def randomized_svd(
     n_oversamples: int = 10,
     n_power_iterations: int = 2,
     seed: int = 0,
-):
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Leading *rank* singular triplets via a randomized (Halko) SVD.
 
     Standard Halko range finder with oversampling and re-orthonormalised power
@@ -141,7 +151,7 @@ def compute_reduced_svd(
     v0_seed: int = 0,
     *,
     method: Literal["auto", "dense", "iterative", "randomized"] = "auto",
-):
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return leading *rank* singular triplets, using truncated SVD when it pays.
 
     Parameters
@@ -190,7 +200,7 @@ def compute_reduced_svd(
 CANONICAL_TIE_RTOL = 1e-12
 
 
-def canonical_pivot_index(col) -> int:
+def canonical_pivot_index(col: ArrayLike) -> int:
     """Lowest index whose magnitude is within ``CANONICAL_TIE_RTOL`` of max |col|.
 
     Empty or all-zero columns return 0. Shared by ``canonicalize_modes`` and the
@@ -205,7 +215,11 @@ def canonical_pivot_index(col) -> int:
     return int(np.argmax(mag >= (1.0 - CANONICAL_TIE_RTOL) * m))
 
 
-def canonicalize_modes(modes, coeffs=None):
+@overload
+def canonicalize_modes(modes: ArrayLike, coeffs: None = None) -> tuple[np.ndarray, None]: ...
+@overload
+def canonicalize_modes(modes: ArrayLike, coeffs: ArrayLike) -> tuple[np.ndarray, np.ndarray]: ...
+def canonicalize_modes(modes: ArrayLike, coeffs: ArrayLike | None = None) -> tuple[np.ndarray, np.ndarray | None]:
     """Scale each mode so its band-pivot entry is real and positive.
 
     LAPACK leaves eigenvector sign (real) and phase (complex) free. For each
@@ -267,7 +281,7 @@ def canonicalize_modes(modes, coeffs=None):
     return modes, coeffs
 
 
-def get_num_threads():
+def get_num_threads() -> int:
     """Return thread count from ``OMP_NUM_THREADS`` or ``os.cpu_count()``."""
     env = os.environ.get("OMP_NUM_THREADS")
     try:
@@ -280,7 +294,11 @@ def get_num_threads():
     return cpu
 
 
-def parallel_map(func, iterable, threads=None):
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+def parallel_map(func: Callable[[T], R], iterable: Iterable[T], threads: int | None = None) -> list[R]:
     """Map function over iterable using threads."""
     threads = threads or get_num_threads()
     if threads <= 1:
@@ -293,7 +311,7 @@ def parallel_map(func, iterable, threads=None):
     return results
 
 
-def make_result_filename(root, nfft, overlap, Ns, analysis):
+def make_result_filename(root: str, nfft: int, overlap: float, Ns: int, analysis: str) -> str:
     """
     Generate a harmonized result filename for analysis outputs.
     Args:
@@ -328,7 +346,7 @@ def _qhat_content_digest(q: np.ndarray) -> str:
     return h.hexdigest()
 
 
-def _qhat_cache_stamp(analyzer, q: np.ndarray) -> dict:
+def _qhat_cache_stamp(analyzer: BaseAnalyzer, q: np.ndarray) -> dict[str, str | float | int | bool]:
     """Return the parameters that determine the FFT blocks produced for ``q``.
 
     Note: ``spatial_weight_type`` is deliberately excluded. ``blocksfft`` (see
@@ -349,13 +367,13 @@ def _qhat_cache_stamp(analyzer, q: np.ndarray) -> dict:
     }
 
 
-def _write_qhat_stamp(h5file, analyzer, q: np.ndarray) -> None:
+def _write_qhat_stamp(h5file: h5py.File, analyzer: BaseAnalyzer, q: np.ndarray) -> None:
     """Stamp the parameters that produced ``qhat`` into ``h5file``'s attrs."""
     for key, value in _qhat_cache_stamp(analyzer, q).items():
         h5file.attrs[f"{_QHAT_STAMP_ATTR_PREFIX}{key}"] = value
 
 
-def _verify_qhat_stamp(h5file, analyzer, q: np.ndarray) -> bool:
+def _verify_qhat_stamp(h5file: h5py.File, analyzer: BaseAnalyzer, q: np.ndarray) -> bool:
     """Return whether ``h5file``'s stamped FFT parameters match ``analyzer``/``q``.
 
     On any mismatch — or an absent stamp (e.g. a cache file from an older
@@ -421,7 +439,7 @@ def print_summary(analysis: str, results_dir: str, figures_dir: str) -> None:
     logger.info("Figures: %s", figures_dir)
 
 
-def compute_aspect_ratio(x_coords, y_coords):
+def compute_aspect_ratio(x_coords: np.ndarray, y_coords: np.ndarray) -> float | Literal["auto"]:
     """Return ``dy/dx`` if coordinates are 1D vectors, else ``'auto'``."""
     if hasattr(x_coords, "ndim") and hasattr(y_coords, "ndim"):
         if x_coords.ndim == 1 and y_coords.ndim == 1:
@@ -546,13 +564,13 @@ def format_mode_title(data: dict, mode_index: int, default: str) -> str:
 
 
 def style_spatial_axes(
-    ax,
+    ax: Axes,
     data: dict,
     *,
-    x_coords=None,
-    y_coords=None,
+    x_coords: ArrayLike | None = None,
+    y_coords: ArrayLike | None = None,
     equal_default: bool = True,
-):
+) -> None:
     """Apply metadata-driven styling to a 2D spatial axis."""
     style = get_plot_style(data)
     figure_facecolor = style.get("figure_facecolor")
@@ -612,15 +630,15 @@ def style_spatial_axes(
 
 
 def add_inset_colorbar(
-    fig,
-    ax,
-    mappable,
+    fig: Figure,
+    ax: Axes,
+    mappable: ScalarMappable,
     data: dict,
     *,
-    ticks=None,
-    ticklabels=None,
-    fmt="%.2f",
-):
+    ticks: Sequence[float] | None = None,
+    ticklabels: Sequence[str] | None = None,
+    fmt: str = "%.2f",
+) -> Colorbar | None:
     """Add a compact, metadata-driven inset colorbar to an axis."""
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -663,9 +681,9 @@ def add_inset_colorbar(
 
 def subset_volume_focus_3d(
     field_3d: np.ndarray,
-    x_coords,
-    y_coords,
-    z_coords,
+    x_coords: ArrayLike | None,
+    y_coords: ArrayLike | None,
+    z_coords: ArrayLike | None,
     data: dict,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Apply optional metadata-driven volume cropping to a 3D scalar field."""
@@ -742,9 +760,9 @@ def reshape_mode_to_volume(mode_values: np.ndarray, data: dict, *, block_index: 
 
 def plot_orthogonal_slices_3d(
     field_3d: np.ndarray,
-    x_coords,
-    y_coords,
-    z_coords,
+    x_coords: ArrayLike | None,
+    y_coords: ArrayLike | None,
+    z_coords: ArrayLike | None,
     *,
     output_path: str,
     title_prefix: str,
@@ -814,9 +832,9 @@ def plot_orthogonal_slices_3d(
 
 def plot_isometric_slices_3d(
     field_3d: np.ndarray,
-    x_coords,
-    y_coords,
-    z_coords,
+    x_coords: ArrayLike | None,
+    y_coords: ArrayLike | None,
+    z_coords: ArrayLike | None,
     *,
     output_path: str,
     title_prefix: str,
@@ -950,10 +968,10 @@ def plot_isometric_slices_3d(
 
 def plot_modes_3d(
     kind: str,
-    work_items,
-    x_coords,
-    y_coords,
-    z_coords,
+    work_items: Iterable[Mapping[str, Any]],
+    x_coords: ArrayLike | None,
+    y_coords: ArrayLike | None,
+    z_coords: ArrayLike | None,
     *,
     data: dict,
 ) -> None:
@@ -1075,7 +1093,7 @@ def generate_dummy_data_like_jetles(
     return output_path
 
 
-def calculate_polar_weights(x, y, use_parallel=True):
+def calculate_polar_weights(x: np.ndarray, y: np.ndarray, use_parallel: bool = True) -> np.ndarray:
     """Calculate integration weights for a 2D cylindrical grid (x, r)."""
     if use_parallel and PARALLEL_AVAILABLE:
         return calculate_polar_weights_optimized(x, y)
@@ -1129,7 +1147,7 @@ def calculate_polar_weights(x, y, use_parallel=True):
     return W
 
 
-def calculate_uniform_weights(x, y, z=None):
+def calculate_uniform_weights(x: np.ndarray, y: np.ndarray, z: ArrayLike | None = None) -> np.ndarray:
     """Return uniform weights for a Cartesian grid.
 
     Returns an all-ones column of length Nx*Ny*Nz. Grid spacing / cell volumes
@@ -1151,15 +1169,15 @@ def calculate_uniform_weights(x, y, z=None):
 
 
 def blocksfft(
-    q,
-    nfft,
-    nblocks,
-    novlap,
-    blockwise_mean=False,
-    normvar=False,
-    window_norm="power",
-    window_type="hamming",
-):
+    q: np.ndarray,
+    nfft: int,
+    nblocks: int,
+    novlap: int,
+    blockwise_mean: bool = False,
+    normvar: bool = False,
+    window_norm: str = "power",
+    window_type: str = "hamming",
+) -> np.ndarray:
     """
     Compute blocked FFT using Welch's method for CSD estimation.
 
@@ -1210,14 +1228,14 @@ def blocksfft(
     )
 
 
-def auto_detect_weight_type(file_path):
+def auto_detect_weight_type(file_path: str) -> str:
     # Always return 'uniform' for dNamiX consolidated .npz files
     if file_path.lower().endswith(".npz"):
         return "uniform"
     return di_auto_detect_weight_type(file_path)
 
 
-def require_spatial_metric(weights):
+def require_spatial_metric(weights: ArrayLike) -> None:
     """Raise ``ValueError`` if ``weights`` do not define an inner product.
 
     A metric that is not an inner product must not reach a solver. Isolated
@@ -1256,7 +1274,7 @@ def require_spatial_metric(weights):
         )
 
 
-def _coerce_spatial_weights(w, expected_len):
+def _coerce_spatial_weights(w: ArrayLike, expected_len: int) -> np.ndarray:
     """Accepted weight shapes -> 1-D vector of length ``expected_len``.
 
     Routes: 1-D; ``(n, 1)``; square matrix (its diagonal); non-square
@@ -1284,7 +1302,14 @@ def _coerce_spatial_weights(w, expected_len):
     return np.asarray(weights, dtype=float)
 
 
-def spod_function(qhat, nblocks, dst, w, return_psi=False, use_parallel=True):
+def spod_function(
+    qhat: np.ndarray,
+    nblocks: int,
+    dst: float,
+    w: np.ndarray,
+    return_psi: bool = False,
+    use_parallel: bool = True,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute SPOD modes and eigenvalues for a single frequency.
     Args:
@@ -1322,16 +1347,16 @@ class BaseAnalyzer:
 
     def __init__(
         self,
-        file_path,
-        nfft=128,
-        overlap=0.5,
-        results_dir="./preprocess",
-        figures_dir="./figs",
-        data_loader=None,
-        spatial_weight_type="auto",
-        use_parallel=True,
-        spatial_weights=None,
-    ):
+        file_path: str,
+        nfft: int = 128,
+        overlap: float = 0.5,
+        results_dir: str = "./preprocess",
+        figures_dir: str = "./figs",
+        data_loader: Callable[..., dict[str, Any]] | None = None,
+        spatial_weight_type: str = "auto",
+        use_parallel: bool = True,
+        spatial_weights: ArrayLike | None = None,
+    ) -> None:
         """Initialize the analyzer.
 
         Args:
@@ -1359,6 +1384,7 @@ class BaseAnalyzer:
 
         # Weight type / prescribed vector — one validation site for all analyzers.
         accepted = ("auto", "uniform", "polar", "prescribed")
+        self._prescribed_spatial_weights: ArrayLike | None
         if spatial_weights is not None:
             if spatial_weight_type not in ("auto", "prescribed"):
                 raise ValueError(
@@ -1384,7 +1410,7 @@ class BaseAnalyzer:
 
         # Calculated later
         self.novlap = int(overlap * nfft)
-        self.data = {}
+        self.data: dict[str, Any] = {}
         self.W = np.array([])
         self.nblocks = 0
         self.fs = 0.0
@@ -1407,7 +1433,7 @@ class BaseAnalyzer:
         os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.figures_dir, exist_ok=True)
 
-    def load_and_preprocess(self):
+    def load_and_preprocess(self) -> None:
         """Load data and calculate weights."""
         # Load data from file only if not already provided
         if not self.data:
@@ -1418,7 +1444,8 @@ class BaseAnalyzer:
             # n_space from the snapshot matrix (time × space); helpers check
             # length/shape and that the metric is an inner product.
             n_space = int(np.asarray(self.data["q"]).shape[1])
-            self.W = _coerce_spatial_weights(self._prescribed_spatial_weights, n_space)
+            # Invariant from __init__: prescribed type always carries a vector.
+            self.W = _coerce_spatial_weights(cast(ArrayLike, self._prescribed_spatial_weights), n_space)
             logger.info("Using prescribed spatial weights.")
         elif self.spatial_weight_type == "polar":
             self.W = calculate_polar_weights(self.data["x"], self.data["y"], use_parallel=self.use_parallel)
@@ -1636,7 +1663,7 @@ class BaseAnalyzer:
         disk offload; the default is a no-op.
         """
 
-    def compute_fft_blocks(self):
+    def compute_fft_blocks(self) -> None:
         """Compute blocked FFT using Welch's method, with optional disk cache.
 
         When ``analysis_type`` is set, blocks are loaded from / saved to a
@@ -1724,7 +1751,7 @@ class BaseAnalyzer:
             },
         )
 
-    def run(self, compute_fft=True):
+    def run(self, compute_fft: bool = True) -> BaseAnalyzer:
         """Run the full analysis pipeline."""
         start_time = time.time()
 
@@ -1740,7 +1767,7 @@ class BaseAnalyzer:
 
         return self
 
-    def _get_metadata(self):
+    def _get_metadata(self) -> dict[str, Any]:
         """Return a dictionary of common metadata for saving results."""
         meta = {
             "analysis_type": getattr(self, "analysis_type", ""),
