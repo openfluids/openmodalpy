@@ -208,13 +208,11 @@ class STPODAnalyzer(BaseAnalyzer):
         # 4. Weighted SVD in the lifted space (do not square the Hankel matrix).
         # Use the same cap _solve_svd applies internally, so the caller and the
         # solver agree instead of clamping twice to different values.
-        # The -1 comes from mean-centering the SNAPSHOT matrix. The lift is built
-        # from centered snapshots but is not itself row-centered — a delay column
-        # is a window of a zero-mean series, which is not zero-mean — so this
-        # bound is conservative by one whenever n_samples_lift <= n_space_lift.
-        # Relaxing it means changing _solve_svd's cap too; tracked separately.
+        # Snapshots are mean-centered before the lift, but a delay window of a
+        # zero-mean series is not itself zero-mean: the lifted matrix has full
+        # row rank in the temporal-lift regime. Cap at the honest matrix bound.
         n_samples_lift, n_space_lift = lifted.shape
-        max_rank = max(min(n_samples_lift - 1, n_space_lift), 0)
+        max_rank = max(min(n_samples_lift, n_space_lift), 0)
         k = min(self.n_modes_save, max_rank)
         if k < self.n_modes_save:
             logger.warning("Only %d modes available, requested %d", k, self.n_modes_save)

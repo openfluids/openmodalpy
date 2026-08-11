@@ -484,11 +484,13 @@ def test_eigh_spatial_branch_rank_deficient_uses_n_space():
 def test_eigh_svd_agree_mode_count_in_spatial_regime():
     """eigh and svd keep the same mode count on centered spatial-regime data.
 
-    Mean-centering costs one SAMPLE degree of freedom, so the rank bound is
-    ``min(n_samples - 1, n_space)``. The old SVD cap ``min(n_samples, n_space) - 1``
-    drops one genuine mode whenever ``n_space < n_samples``. Full-column-rank
-    random data makes every spatial direction energetic so the floor cannot
-    hide the off-by-one. Goes RED if ``_solve_svd`` reverts that bound.
+    Spatial regime (``n_space < n_samples``) with full-column-rank centered
+    input: every spatial direction is energetic, so the relative floor cannot
+    hide a genuine mode. Mean-centering puts the all-ones vector in the left
+    null space; both routes drop that null direction and keep
+    ``min(n_samples - 1, n_space)`` modes. Pins eigh/svd agreement on centered
+    spatial data — the SVD *cap* itself is the honest matrix bound
+    ``min(n_samples, n_space)``; the floor, not the cap, removes the null.
     """
     rng = np.random.default_rng(0)
     cases = [(8, 3), (40, 25), (12, 4)]
@@ -504,3 +506,46 @@ def test_eigh_svd_agree_mode_count_in_spatial_regime():
         assert n_eigh == want, f"{n_samples}x{n_space}: eigh={n_eigh} want={want}"
         assert n_svd == want, f"{n_samples}x{n_space}: svd={n_svd} want={want}"
         assert n_eigh == n_svd
+
+
+def test_svd_uncentered_temporal_regime_keeps_full_row_rank():
+    """Uncentered full-row-rank matrix in the temporal regime keeps min(m, n).
+
+    Pins ``_solve_svd``'s cap at the honest matrix bound
+    ``min(n_samples, n_space)``. Restoring the centered-input bound
+    ``min(n_samples - 1, n_space)`` drops one genuine mode here.
+    """
+    rng = np.random.default_rng(4205)
+    # Temporal regime: m < n, full row rank, NOT centered.
+    cases = [(5, 12), (8, 20), (13, 30)]
+    for n_samples, n_space in cases:
+        assert n_samples < n_space, (n_samples, n_space)
+        x = rng.standard_normal((n_samples, n_space))
+        assert abs(x.mean()) > 1e-3  # not accidentally near zero-mean
+        assert np.linalg.matrix_rank(x, tol=1e-10) == n_samples
+        w = np.ones(n_space)
+        n_svd = weighted_second_order(x, w, method="svd")[1].size
+        want = min(n_samples, n_space)
+        assert n_svd == want, f"{n_samples}x{n_space}: svd={n_svd} want={want}"
+
+
+def test_svd_centered_keeps_m_minus_one_via_relative_floor():
+    """Centered input still loses the null direction to the relative floor.
+
+    The SVD cap is ``min(n_samples, n_space)``; for centered rows the extra
+    direction is numerically null (sigma ~ 1e-16 of sigma_max) and the floor
+    drops it, so the kept count remains ``m - 1``. Includes ``m = 3`` where
+    the floor margin is tightest.
+    """
+    rng = np.random.default_rng(7)
+    # Temporal-regime cases so the honest cap is m and the floor must do the work.
+    cases = [(3, 8), (8, 20), (12, 40)]
+    for n_samples, n_space in cases:
+        assert n_samples < n_space, (n_samples, n_space)
+        x = rng.standard_normal((n_samples, n_space))
+        xc = x - x.mean(axis=0)
+        assert np.linalg.matrix_rank(xc, tol=1e-10) == n_samples - 1
+        w = np.ones(n_space)
+        n_svd = weighted_second_order(xc, w, method="svd")[1].size
+        want = n_samples - 1
+        assert n_svd == want, f"{n_samples}x{n_space}: svd={n_svd} want={want}"

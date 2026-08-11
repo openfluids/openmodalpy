@@ -844,15 +844,12 @@ class TestSTPODTotalEnergy:
 
 
 def test_stpod_keeps_every_mode_the_lift_supports_in_the_spatial_regime(caplog):
-    """ST-POD's own rank cap must not drop a genuine mode.
+    """ST-POD's own rank cap must not drop a genuine mode (spatial lift).
 
-    When the delay-embedded matrix has fewer columns than rows, the old cap
-    ``min(n_samples, n_space) - 1`` undercounts by one. Mean-centering costs a
-    SAMPLE degree of freedom, so the bound is ``min(n_samples - 1, n_space)``.
-
-    Ns=40, Nspace=2, embedding_dim=3 lifts to 38x6, so the lift supports 6
-    modes; the old cap allowed only 5. Guards ``stpod.py``'s caller-side cap,
-    which the low-level ``_solve_svd`` test cannot reach.
+    Ns=40, Nspace=2, embedding_dim=3 lifts to 38x6. The lifted matrix supports
+    6 modes (full column rank); the caller cap must allow all of them.
+    Guards ``stpod.py``'s caller-side cap, which the low-level ``_solve_svd``
+    test cannot reach.
     """
     rng = np.random.default_rng(11)
     Ns, Nspace, embedding_dim = 40, 2, 3
@@ -879,7 +876,50 @@ def test_stpod_keeps_every_mode_the_lift_supports_in_the_spatial_regime(caplog):
 
     n_samples_lift = Ns - embedding_dim + 1
     n_space_lift = Nspace * embedding_dim
-    want = min(n_samples_lift - 1, n_space_lift)
+    want = min(n_samples_lift, n_space_lift)
     assert want == 6, "fixture drifted: it must sit in the spatial regime"
     assert analyzer.eigenvalues.size == want
     assert analyzer.modes.shape == (n_space_lift, want)
+
+
+def test_stpod_kept_count_equals_lifted_matrix_rank():
+    """ST-POD keeps every mode ``matrix_rank`` of the lifted matrix supports.
+
+    Temporal-lift regime (``m <= d*Nx``): snapshots are centered before the
+    delay embed, but a window of a zero-mean series is not zero-mean, so the
+    lifted matrix has full row rank. Restoring the centered-input caller cap
+    ``min(m - 1, n)`` drops one genuine mode and fails here.
+    """
+    from openmodalpy.core.decomposition import DelayEmbeddingLift
+
+    rng = np.random.default_rng(4205)
+    # The first three are temporal-lift (m = Ns - d + 1 <= d * Nx), where the
+    # old m-1 cap dropped a mode. The last (m=38, d*Nx=6) is spatial: the
+    # feature dimension binds and both caps give 6, so it is the control.
+    cases = [(30, 3, 10), (16, 5, 4), (24, 6, 5), (40, 2, 3)]
+    for Ns, Nx, d in cases:
+        q = rng.standard_normal((Ns, Nx))
+        data = {
+            "q": q,
+            "x": np.arange(Nx, dtype=float),
+            "y": np.array([0.0]),
+            "dt": 0.1,
+            "Nx": Nx,
+            "Ny": 1,
+            "Ns": Ns,
+        }
+        m = Ns - d + 1
+        analyzer = STPODAnalyzer(
+            file_path=f"stpod_rank_{Ns}_{Nx}_{d}",
+            embedding_dim=d,
+            n_modes_save=m + 5,
+            data_loader=lambda _, _data=data: _data,
+            spatial_weight_type="uniform",
+        )
+        analyzer.load_and_preprocess()
+        analyzer.perform_stpod()
+        lifted = DelayEmbeddingLift(d).apply(q - q.mean(axis=0))
+        want = int(np.linalg.matrix_rank(lifted, tol=1e-10))
+        got = int(np.asarray(analyzer.eigenvalues).size)
+        assert got == want, f"Ns={Ns} Nx={Nx} d={d} lifted={lifted.shape}: kept {got}, rank {want}"
+        assert analyzer.modes.shape[1] == got

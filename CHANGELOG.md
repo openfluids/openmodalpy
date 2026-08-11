@@ -390,6 +390,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- ST-POD returns one more mode in the temporal-lift regime. The SVD route and
+  ST-POD's caller both capped the mode count at `min(m - 1, n)`, the bound that
+  mean-centering would justify — but the matrix they factor is the delay-embedded
+  lift of a centered series, which is not itself row-centered and has full row
+  rank. The cap is now the honest matrix bound `min(m, n)`. POD is unaffected:
+  it still passes its own `min(m - 1, n)` bound, which is what accounts for the
+  direction its centering removes.
 - An mPOD run says `mPOD` on the console. Six lines printed during a run, and
   two more when results are loaded, said a bare `POD`, because the analyzer
   mPOD builds on hardcoded the word. The save line was the clearest symptom: it

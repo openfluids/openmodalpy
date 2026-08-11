@@ -467,11 +467,22 @@ def _solve_svd(
     *,
     n_keep: int | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Weighted SVD route (ST-POD). ``data`` is samples × lifted features.
+    """Weighted SVD route (ST-POD). ``data`` is samples × features.
 
-    The mode-count bound ``min(n_samples - 1, n_space)`` assumes mean-subtracted
-    input: every caller sets ``uses_mean_subtraction: True``, so one sample
-    degree of freedom is already spent before this route runs.
+    Caps the mode count at the matrix bound ``min(n_samples, n_space)``. Does
+    not assume mean-centered rows: a delay-embedded window of a zero-mean
+    series is not itself zero-mean, so the all-ones left-null that centering
+    would create is not present.
+
+    Centered input, and the limit of the floor. Centering nulls one direction;
+    the relative singular-value floor recognises it only while the removed mean
+    is comparable to the fluctuation. Measured on Gaussian data: the residual
+    null sits 3x to 70x below the floor for a mean of order the fluctuation,
+    but centering a mean 1e3 times larger loses enough digits to lift it ABOVE
+    the floor, and the route then returns one numerically null extra mode.
+    Callers that center are expected to pass ``n_keep`` from their own
+    ``min(n_samples - 1, n_space)`` bound, which is what shields POD here — the
+    floor is a backstop for that case, not the guarantee.
     """
     n_samples, n_space = data.shape
     weights = _as_weight_vector(metric, n_space)
@@ -482,9 +493,10 @@ def _solve_svd(
     # would have been factored (temporal if n_samples < n_space, else spatial).
     # Distinct from the mode-count cap below — do not reuse one for the other.
     n_kernel = min(n_samples, n_space)
-    # Mean-centering costs one SAMPLE degree of freedom, so the rank bound is
-    # min(n_samples - 1, n_space), not min(n_samples, n_space) - 1.
-    max_rank = max(min(n_samples - 1, n_space), 0)
+    # Honest matrix rank bound. ST-POD's lifted matrix is full row rank; POD
+    # loses one direction to its OWN caller-side cap, before this route is
+    # asked for k modes — not to the floor below. See the docstring.
+    max_rank = max(min(n_samples, n_space), 0)
     if n_keep is None:
         k = max_rank
     else:
