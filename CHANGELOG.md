@@ -390,6 +390,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- An mPOD run says `mPOD` on the console. Six lines printed during a run, and
+  two more when results are loaded, said a bare `POD`, because the analyzer
+  mPOD builds on hardcoded the word. The save line was the clearest symptom: it
+  printed a path already containing `mpod` inside a sentence saying `POD`. The
+  label now follows the analysis type, the same way the figure titles do. A
+  plain POD run is unchanged, and messages naming the `perform_pod()` method
+  keep that name, since it is the method both classes really use.
 - The SVD route keeps every mode the data supports, so it now agrees with the
   eigenvalue route. Subtracting the mean costs one snapshot's worth of
   information, so the limit on how many modes the data can support is

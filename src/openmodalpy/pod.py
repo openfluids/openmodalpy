@@ -180,7 +180,7 @@ class PODAnalyzer(BaseAnalyzer):
         if "q" not in self.data:
             raise ValueError("Data not loaded. Call load_and_preprocess() first.")
 
-        logger.info("Performing POD analysis...")
+        logger.info("Performing %s analysis...", display_name_for(self.analysis_type))
         start_time = time.time()
 
         # Data is expected as [time, space]
@@ -279,8 +279,16 @@ class PODAnalyzer(BaseAnalyzer):
         self.time_coefficients = self.time_coefficients[:, : self.n_modes_save]
 
         end_time = time.time()
-        logger.info("POD analysis completed in %.2f seconds.", end_time - start_time)
-        logger.info("Computed %d POD modes.", self.modes.shape[1])
+        logger.info(
+            "%s analysis completed in %.2f seconds.",
+            display_name_for(self.analysis_type),
+            end_time - start_time,
+        )
+        logger.info(
+            "Computed %d %s modes.",
+            self.modes.shape[1],
+            display_name_for(self.analysis_type),
+        )
 
         # Fraction of pre-truncation energy retained by the saved modes.
         if self.total_energy > 0:
@@ -328,7 +336,7 @@ class PODAnalyzer(BaseAnalyzer):
         if not filename:
             filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
         load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading POD results from %s", load_path)
+        logger.info("Loading %s results from %s", display_name_for(self.analysis_type), load_path)
         if not os.path.isfile(load_path):
             # Try to auto-detect a results file for this variable and analysis type
             from openmodalpy.core.results import find_latest_result
@@ -394,7 +402,7 @@ class PODAnalyzer(BaseAnalyzer):
             self.total_energy = float(res.attrs["total_energy"])
         if "energy_captured_fraction" in res.attrs:
             self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
-        logger.info("POD results loaded.")
+        logger.info("%s results loaded.", display_name_for(self.analysis_type))
 
     def save_results(self, filename: str | None = None) -> None:
         """Save POD modes, eigenvalues, and time coefficients to an HDF5 file.
@@ -412,7 +420,7 @@ class PODAnalyzer(BaseAnalyzer):
             filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
 
         save_path = os.path.join(self.results_dir, filename)
-        logger.info("Saving POD results to %s", save_path)
+        logger.info("Saving %s results to %s", display_name_for(self.analysis_type), save_path)
 
         datasets: dict = {
             "modes": self.modes,
@@ -435,7 +443,7 @@ class PODAnalyzer(BaseAnalyzer):
         attrs["n_snapshots"] = self.data.get("Ns", 0)
         attrs["Nspace"] = self.modes.shape[0]
         write_results(save_path, datasets, attrs=attrs)
-        logger.info("POD results saved.")
+        logger.info("%s results saved.", display_name_for(self.analysis_type))
 
     def plot_eigenvalues(self):
         """Plot the POD eigenvalue spectrum (energy vs. mode number).
@@ -1471,7 +1479,8 @@ class PODAnalyzer(BaseAnalyzer):
 
         end_total_time = time.time()
         logger.info(
-            "POD analysis and plotting completed successfully in %.2f seconds.",
+            "%s analysis and plotting completed successfully in %.2f seconds.",
+            display_name_for(self.analysis_type),
             end_total_time - start_total_time,
         )
         print_summary(display_name_for(self.analysis_type), self.results_dir, self.figures_dir)

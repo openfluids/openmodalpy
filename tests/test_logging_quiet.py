@@ -406,3 +406,40 @@ def test_pod_banner_still_says_pod(tmp_path, caplog):
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
     assert any("Starting POD analysis" in m for m in info_msgs), info_msgs
+
+
+# Bare "POD" as an analysis label (not the perform_pod() method name).
+_BARE_POD_LABEL = re.compile(r"(?<![A-Za-z_])POD(?![A-Za-z_])")
+_METHOD_REF = re.compile(r"perform_pod\(\)")
+
+
+def _bare_pod_label_msgs(info_msgs: list[str]) -> list[str]:
+    """INFO messages whose prose still uses a bare POD analysis label."""
+    return [m for m in info_msgs if _BARE_POD_LABEL.search(_METHOD_REF.sub("", m))]
+
+
+def test_mpod_console_labels_say_mpod_not_pod(tmp_path, caplog):
+    """mPOD run_analysis INFO lines use mPOD, never a bare POD analysis label.
+
+    Pins the six in-run sites (perform / completed / computed / saving /
+    saved / epilogue). Reverting any one of them turns this red.
+    """
+    analyzer = _make_mpod(tmp_path, _synthetic_data())
+    with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
+        analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
+
+    info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    offenders = _bare_pod_label_msgs(info_msgs)
+    assert not offenders, offenders
+
+    # Each of the six sites must actually announce mPOD (not go silent).
+    required_fragments = (
+        "Performing mPOD analysis",
+        "mPOD analysis completed",
+        "mPOD modes",
+        "Saving mPOD results",
+        "mPOD results saved",
+        "mPOD analysis and plotting completed",
+    )
+    for frag in required_fragments:
+        assert any(frag in m for m in info_msgs), (frag, info_msgs)
