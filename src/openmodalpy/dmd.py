@@ -7,6 +7,8 @@ with Euclidean least squares. It does not currently apply the spatial metric
 ``W`` or mean subtraction inside ``perform_dmd()``.
 """
 
+from __future__ import annotations
+
 # Standard library imports
 import logging
 import os
@@ -16,7 +18,8 @@ import matplotlib
 matplotlib.use("Agg")
 import inspect
 import warnings
-from typing import Optional
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, Optional
 
 import matplotlib.pyplot as plt
 
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 # Suppress contour warnings when no levels can be plotted
 warnings.filterwarnings("ignore", message="No contour levels were found within the data range.")
 import numpy as np  # noqa: E402
+from numpy.typing import ArrayLike, DTypeLike  # noqa: E402
 
 from openmodalpy.core.base import (  # noqa: E402
     BaseAnalyzer,
@@ -48,7 +52,7 @@ from openmodalpy.core.config import (  # noqa: E402
 from openmodalpy.core.threads import apply_blas_limit  # noqa: E402
 
 
-def _delay_embed(X, d):
+def _delay_embed(X: np.ndarray, d: int) -> np.ndarray:
     """Build delay-embedded (Hankel) matrix from snapshot matrix X.
 
     Parameters
@@ -70,7 +74,7 @@ def _delay_embed(X, d):
     return out
 
 
-def _dmd_pinv_rcond(shape, dtype) -> float:
+def _dmd_pinv_rcond(shape: Sequence[int], dtype: DTypeLike) -> float:
     """Return ``max(shape) * finfo(dtype).eps`` (numpy.linalg.pinv default).
 
     Used as the relative singular-value floor: keep ``s_j > rcond * s[0]``.
@@ -90,7 +94,7 @@ def _dmd_pinv_rcond(shape, dtype) -> float:
 DMD_PINV_RCOND = _dmd_pinv_rcond
 
 
-def svht_lambda(beta):
+def svht_lambda(beta: float) -> float:
     """Gavish–Donoho (2014) optimal hard-threshold coefficient (known noise).
 
     For a *known* noise level ``sigma``, the hard threshold is
@@ -124,7 +128,7 @@ def svht_lambda(beta):
     return float(np.sqrt(2.0 * (beta + 1.0) + 8.0 * beta / ((beta + 1.0) + np.sqrt(beta * beta + 14.0 * beta + 1.0))))
 
 
-def _mp_median(beta):
+def _mp_median(beta: float) -> float:
     """Median of the Marchenko–Pastur law with aspect ratio ``beta`` in (0, 1].
 
     Density ``sqrt((b-x)(x-a)) / (2*pi*beta*x)`` on ``[a, b]`` with
@@ -142,13 +146,13 @@ def _mp_median(beta):
         return float(a)
     span = b_edge - a
 
-    def phi_of(x):
+    def phi_of(x: float) -> float:
         # Map x in [a, b] to phi in [0, pi/2].
         t = (x - a) / span
         t = min(max(t, 0.0), 1.0)
         return float(np.arcsin(np.sqrt(t)))
 
-    def integrand(phi):
+    def integrand(phi: float) -> float:
         # Transformed density: integrable form without endpoint singularities.
         s2 = np.sin(phi) ** 2
         c2 = np.cos(phi) ** 2
@@ -162,7 +166,7 @@ def _mp_median(beta):
             return span / (np.pi * beta)
         return (span**2 * s2 * c2) / (np.pi * beta * x)
 
-    def cdf_minus_half(t):
+    def cdf_minus_half(t: float) -> float:
         if t <= a:
             return -0.5
         if t >= b_edge:
@@ -175,7 +179,7 @@ def _mp_median(beta):
     return float(optimize.brentq(cdf_minus_half, lo, hi))
 
 
-def svht_omega(beta):
+def svht_omega(beta: float) -> float:
     """Gavish–Donoho (2014) optimal hard-threshold coefficient (unknown noise).
 
     When the noise level is unknown, it is estimated by the median singular
@@ -216,17 +220,17 @@ class DMDAnalyzer(BaseAnalyzer):
 
     def __init__(
         self,
-        file_path,
-        results_dir=RESULTS_DIR_DMD,
-        figures_dir=FIGURES_DIR_DMD,
-        data_loader=None,
-        spatial_weight_type="auto",
-        n_modes_save=10,
-        rank=None,  # required: positive int | "svht" | "energy"
-        energy_fraction=0.999,
-        use_parallel=True,
-        spatial_weights=None,
-    ):
+        file_path: str,
+        results_dir: str = RESULTS_DIR_DMD,
+        figures_dir: str = FIGURES_DIR_DMD,
+        data_loader: Callable[..., dict[str, Any]] | None = None,
+        spatial_weight_type: str = "auto",
+        n_modes_save: int = 10,
+        rank: int | np.integer | Literal["svht", "energy"] | None = None,  # required: positive int | "svht" | "energy"
+        energy_fraction: float = 0.999,
+        use_parallel: bool = True,
+        spatial_weights: ArrayLike | None = None,
+    ) -> None:
         super().__init__(
             file_path=file_path,
             nfft=1,
@@ -263,7 +267,7 @@ class DMDAnalyzer(BaseAnalyzer):
         self._dmd_delays = 1
         self._dmd_named_variant = "dmd"
 
-    def _svd_request_rank(self, shape) -> int:
+    def _svd_request_rank(self, shape: Sequence[int]) -> int:
         """How many singular triplets to request from ``compute_reduced_svd``.
 
         An explicit integer ``rank`` can use a truncated path; spectrum-based
@@ -279,7 +283,7 @@ class DMDAnalyzer(BaseAnalyzer):
             return max_r
         raise ValueError(f"Unknown rank {rank!r}; use a positive int, 'svht', or 'energy'.")
 
-    def _resolve_rank(self, s, shape, rcond):
+    def _resolve_rank(self, s: np.ndarray, shape: Sequence[int], rcond: float) -> tuple[int, int]:
         """Map singular values + ``self.rank`` to ``(effective_r, r_requested)``.
 
         Every path floors by the relative threshold ``s_j > rcond * s[0]``.
@@ -322,7 +326,12 @@ class DMDAnalyzer(BaseAnalyzer):
 
         raise ValueError(f"Unknown rank {rank!r}; use a positive int, 'svht', or 'energy'.")
 
-    def perform_dmd(self, method="ls", delays=1, named_variant=None):
+    def perform_dmd(
+        self,
+        method: str = "ls",
+        delays: int = 1,
+        named_variant: str | None = None,
+    ) -> None:
         """Compute DMD on raw shifted snapshots.
 
         Parameters
@@ -516,7 +525,7 @@ class DMDAnalyzer(BaseAnalyzer):
         self.perform_dmd()
         self.save_results()
 
-    def load_results(self, filename=None):
+    def load_results(self, filename: str | None = None) -> None:
         """Load DMD results from an HDF5 file."""
         from openmodalpy.core.results import read_results
 
@@ -594,7 +603,7 @@ class DMDAnalyzer(BaseAnalyzer):
             self.data["Nz"] = int(res.attrs["Nz"])
         logger.info("DMD results loaded from %s", path)
 
-    def _mode_freq(self, eigvals):
+    def _mode_freq(self, eigvals: np.ndarray) -> np.ndarray | None:
         """Return mode frequencies in Hz, or ``None`` when ``dt`` is unusable.
 
         Computes ``angle(eigvals) / (2π · dt)`` when ``self.data["dt"]`` is a
@@ -603,6 +612,8 @@ class DMDAnalyzer(BaseAnalyzer):
         annotations. Physics-bearing plots must use :meth:`_require_dt` instead.
         """
         dt = self.data.get("dt") if self.data else None
+        if dt is None:
+            return None
         try:
             dt_f = float(dt)
         except (TypeError, ValueError):
@@ -611,7 +622,7 @@ class DMDAnalyzer(BaseAnalyzer):
             return None
         return np.angle(eigvals) / (2 * np.pi * dt_f)
 
-    def plot_eigenvalues(self):
+    def plot_eigenvalues(self) -> None:
         """Plot DMD eigenvalues in the complex plane."""
         if self.eigenvalues.size == 0:
             logger.warning("No eigenvalues to plot.")
@@ -632,7 +643,7 @@ class DMDAnalyzer(BaseAnalyzer):
         plt.close()
         logger.info("Saving figure %s", fname)
 
-    def plot_eigenspectra(self):
+    def plot_eigenspectra(self) -> None:
         """Create composite spectra figure: eigenvalues circle, amplitude vs frequency and growth rate."""
         if self.eigenvalues.size == 0 or self.amplitudes.size == 0:
             logger.warning("No eigenvalue data to plot. Run perform_dmd() first.")
@@ -675,8 +686,11 @@ class DMDAnalyzer(BaseAnalyzer):
         ax_complex.set_title("DMD eigenvalues")
 
         # Amplitude vs frequency
+        # Route through Callable[..., object] so the optional pre-3.8 matplotlib
+        # kwarg ``use_line_collection`` is not checked against the current stub.
+        stem_freq: Callable[..., object] = ax_freq.stem
         if "use_line_collection" in inspect.signature(ax_freq.stem).parameters:
-            ax_freq.stem(
+            stem_freq(
                 freq,
                 amps_norm,
                 linefmt="brown",
@@ -694,8 +708,9 @@ class DMDAnalyzer(BaseAnalyzer):
         ax_freq.set_title("Amplitude vs frequency")
 
         # Amplitude vs growth rate
+        stem_growth: Callable[..., object] = ax_growth.stem
         if "use_line_collection" in inspect.signature(ax_growth.stem).parameters:
-            ax_growth.stem(
+            stem_growth(
                 growth,
                 amps_norm,
                 linefmt="brown",
@@ -726,7 +741,7 @@ class DMDAnalyzer(BaseAnalyzer):
         unwrap_phase: bool = False,
         ref_method: str = "max",
         show_cylinder: bool = False,
-    ):
+    ) -> None:
         """Plot real, imaginary, magnitude, and phase of several modes in a 4-row grid.
 
         Args:
@@ -860,7 +875,7 @@ class DMDAnalyzer(BaseAnalyzer):
         plt.close(fig)
         logger.info("Saving figure %s", fname_modes)
 
-    def plot_cumulative_energy(self):
+    def plot_cumulative_energy(self) -> None:
         """Plot the cumulative energy captured by DMD modes (using |eigval|^2 as proxy)."""
         if self.eigenvalues.size == 0:
             logger.warning("No eigenvalues to plot. Run perform_dmd() first.")
@@ -881,7 +896,7 @@ class DMDAnalyzer(BaseAnalyzer):
         plt.close()
         logger.info("Saving figure %s", fname)
 
-    def plot_modes(self, plot_n_modes: Optional[int] = 10, modes_per_fig: int = 1, show_cylinder: bool = False):
+    def plot_modes(self, plot_n_modes: Optional[int] = 10, modes_per_fig: int = 1, show_cylinder: bool = False) -> None:
         """Plot the spatial DMD modes (1D/2D, like POD).
 
         Args:
@@ -1045,7 +1060,7 @@ class DMDAnalyzer(BaseAnalyzer):
             )
         plot_modes_3d(kind, items, x_coords, y_coords, z_coords, data=self.data)
 
-    def plot_time_coefficients(self, n_coeffs_to_plot=2):
+    def plot_time_coefficients(self, n_coeffs_to_plot: int = 2) -> None:
         """Plot DMD temporal coefficients."""
         if self.time_coefficients.size == 0:
             logger.warning("No time coefficients to plot. Run perform_dmd() first.")
@@ -1091,7 +1106,7 @@ class DMDAnalyzer(BaseAnalyzer):
         plt.close(fig)
         logger.info("Saving figure %s", plot_filename)
 
-    def plot_reconstruction_error(self):
+    def plot_reconstruction_error(self) -> None:
         """Plot the data reconstruction error using an increasing number of DMD modes."""
         if self.modes.size == 0 or self.time_coefficients.size == 0 or "q" not in self.data:
             logger.warning("Data, modes, or time coefficients not available. Run perform_dmd() first.")
