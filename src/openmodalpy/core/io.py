@@ -15,7 +15,7 @@ import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, cast
 
 import h5py
 import numpy as np
@@ -92,7 +92,7 @@ SPLIT_SCHEMA_DEFAULTS: dict[str, Any] = {
 }
 
 
-def natural_sort_key(string: str):
+def natural_sort_key(string: str) -> list[int | str]:
     """Return a key for natural sorting of strings with numbers."""
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", string)]
 
@@ -339,7 +339,7 @@ def _slice_block_in_time(
     else:
         raise ValueError("Either arr or block_len must be provided.")
 
-    def _empty():
+    def _empty() -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         empty_arr = arr[:0] if arr is not None else None
         empty_times = None if times is None else times[:0]
         empty_track = None if track_values is None else track_values[:0]
@@ -393,8 +393,21 @@ class DataLoader(ABC):
     """Abstract base class for data loaders."""
 
     @abstractmethod
-    def load(self, file_path: str, **kwargs) -> Dict[str, Any]:
-        """Load data from ``file_path`` and return the standardized data contract."""
+    def load(
+        self,
+        file_path: str,
+        *,
+        preview_ns: int | None = None,
+        field: str | None = None,
+        load_single: bool = False,
+        schema: dict[str, Any] | None = None,
+        **kwargs: object,
+    ) -> Dict[str, Any]:
+        """Load data from ``file_path`` and return the standardized data contract.
+
+        Loader options after ``file_path`` are keyword-only so subclasses can share
+        one override-safe signature without positional meaning shifting between them.
+        """
 
     @abstractmethod
     def supports_format(self, file_path: str) -> bool:
@@ -407,9 +420,23 @@ class MATDataLoader(DataLoader):
     def supports_format(self, file_path: str) -> bool:
         return file_path.lower().endswith(".mat")
 
-    def load(self, file_path: str, preview_ns: int | None = None, **kwargs) -> Dict[str, Any]:
-        """Load data from .mat file with flexible variable detection."""
-        del kwargs
+    def load(
+        self,
+        file_path: str,
+        *,
+        preview_ns: int | None = None,
+        field: str | None = None,
+        load_single: bool = False,
+        schema: dict[str, Any] | None = None,
+        **kwargs: object,
+    ) -> Dict[str, Any]:
+        """Load data from .mat file with flexible variable detection.
+
+        ``field``, ``load_single``, and ``schema`` are accepted for interface parity
+        with other loaders and are ignored — the .mat path has no use for them.
+        Extra keyword arguments are discarded.
+        """
+        del field, load_single, schema, kwargs
 
         file_size = format_file_size(file_path)
         logger.info("Loading .mat data from %s (%s)", file_path, file_size)
@@ -560,7 +587,12 @@ class DNamiDataLoader(DataLoader):
             return any(name.lower().endswith(".npz") for name in os.listdir(file_path))
         return False
 
-    def get_available_fields(self, file_path: str, schema: Optional[dict[str, Any]] = None, load_single: bool = False):
+    def get_available_fields(
+        self,
+        file_path: str,
+        schema: Optional[dict[str, Any]] = None,
+        load_single: bool = False,
+    ) -> list[str]:
         """Return available flow-field keys for the configured layout."""
         normalized = _normalize_schema(schema)
         if normalized["layout"] == "consolidated_npz":
@@ -584,11 +616,12 @@ class DNamiDataLoader(DataLoader):
     def load(
         self,
         file_path: str,
+        *,
+        preview_ns: Optional[int] = None,
         field: Optional[str] = None,
         load_single: bool = False,
-        preview_ns: Optional[int] = None,
         schema: Optional[dict[str, Any]] = None,
-        **kwargs,
+        **kwargs: object,
     ) -> Dict[str, Any]:
         """Load data from a consolidated or split NPZ layout."""
         if kwargs:
@@ -1043,7 +1076,7 @@ class DataInterfaceManager:
     def __init__(self) -> None:
         self.loaders = [MATDataLoader(), DNamiDataLoader()]
 
-    def load_data(self, file_path: str, loader_type: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    def load_data(self, file_path: str, loader_type: Optional[str] = None, **kwargs: object) -> Dict[str, Any]:
         """Load ``file_path`` with the matching loader."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Data file not found: {file_path}")
@@ -1057,11 +1090,14 @@ class DataInterfaceManager:
             }
             if loader_type not in loader_map:
                 raise ValueError(f"Unknown loader type: {loader_type}")
-            return loader_map[loader_type]().load(file_path, **kwargs)
+            # cast: typed keyword-only options on load cannot accept **dict[str, object]
+            load_fn = cast(Callable[..., Dict[str, Any]], loader_map[loader_type]().load)
+            return load_fn(file_path, **kwargs)
 
         for loader in self.loaders:
             if loader.supports_format(file_path):
-                return loader.load(file_path, **kwargs)
+                load_fn = cast(Callable[..., Dict[str, Any]], loader.load)
+                return load_fn(file_path, **kwargs)
 
         ext = os.path.splitext(file_path)[1].lower()
         raise ValueError(f"No loader found for file extension '{ext}'. Supported formats: ['.mat', '.npz', directory]")
@@ -1092,7 +1128,7 @@ def format_file_size(file_path: str) -> str:
 data_manager = DataInterfaceManager()
 
 
-def load_data(file_path: str, loader_type: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+def load_data(file_path: str, loader_type: Optional[str] = None, **kwargs: object) -> Dict[str, Any]:
     """Convenience entry point for loading data."""
     return data_manager.load_data(file_path, loader_type, **kwargs)
 
@@ -1102,17 +1138,17 @@ def get_weight_type(data: Dict[str, Any], file_path: str) -> str:
     return data_manager.get_weight_type(data, file_path)
 
 
-def load_jetles_data(file_path: str, **kwargs) -> Dict[str, Any]:
+def load_jetles_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
     """Legacy alias for ``load_mat_data``."""
     return load_mat_data(file_path, **kwargs)
 
 
-def load_mat_data(file_path: str, **kwargs) -> Dict[str, Any]:
+def load_mat_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
     """Legacy compatibility function for .mat data."""
     return load_data(file_path, loader_type="mat", **kwargs)
 
 
-def load_dnami_data(file_path: str, **kwargs) -> Dict[str, Any]:
+def load_dnami_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
     """Convenience wrapper for the general dNami loader."""
     return load_data(file_path, loader_type="dnami", **kwargs)
 

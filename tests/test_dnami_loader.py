@@ -1,6 +1,9 @@
-import numpy as np
+import inspect
 
-from openmodalpy.core.io import DNamiDataLoader
+import numpy as np
+import pytest
+
+from openmodalpy.core.io import DataLoader, DNamiDataLoader, MATDataLoader
 
 
 def test_parallel_loading_identical(tmp_path, monkeypatch):
@@ -107,3 +110,25 @@ def test_consolidated_loader_applies_spatial_stride_schema(tmp_path):
     np.testing.assert_array_equal(data["q"], expected)
     assert data["metadata"]["reduction"]["x_stride"] == 2
     assert data["metadata"]["reduction"]["y_stride"] == 2
+
+
+def test_loader_options_are_keyword_only():
+    """Loader options must stay keyword-only so positional meaning cannot drift."""
+    options = {"preview_ns", "field", "load_single", "schema"}
+    for cls in (DataLoader, MATDataLoader, DNamiDataLoader):
+        sig = inspect.signature(cls.load)
+        for name in options:
+            assert sig.parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+        positional = [
+            n
+            for n, p in sig.parameters.items()
+            if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD) and n != "self"
+        ]
+        assert positional == ["file_path"]
+
+    # End to end on BOTH concrete loaders: signature inspection alone would miss a
+    # class that kept a positional option through some other mechanism.
+    with pytest.raises(TypeError, match="positional"):
+        MATDataLoader().load("nonexistent.mat", 5)
+    with pytest.raises(TypeError, match="positional"):
+        DNamiDataLoader().load("nonexistent.npz", "u")

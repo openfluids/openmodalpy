@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Breaking
+- `DataLoader.load` / `MATDataLoader.load` / `DNamiDataLoader.load` options
+  (`preview_ns`, `field`, `load_single`, `schema`) are keyword-only. A positional
+  second argument raises `TypeError` instead of binding to whichever option sat
+  second in a given subclass.
 - `SPODAnalyzer.plot_eigenvalues_v2` is renamed to `plot_eigenvalues`. The
   `_v2` suffix is gone; SPOD never had another `plot_eigenvalues` to collide
   with. Output figure basenames drop the `_v2` token as well.
