@@ -1415,6 +1415,9 @@ class BaseAnalyzer:
         self.nblocks = 0
         self.fs = 0.0
         self.qhat = np.array([])
+        # Set to a real path by compute_fft_blocks when a cache file is in use.
+        # Declared here so it always exists and readers can test it for None.
+        self._qhat_cache_path: str | None = None
 
         # Extract root name for output files
         base = os.path.basename(file_path)

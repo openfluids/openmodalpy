@@ -25,20 +25,24 @@ Method:
        Φ1_j = Σ_b a_b^* B_jb,  Φ2_j = Σ_b a_b^* A_jb.
 """
 
+from __future__ import annotations
+
 # Standard library imports
 import logging
 import os
 import re
 import time
 import warnings
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Any, Optional
 
 import h5py
 import matplotlib.pyplot as plt
 
 # Third-party imports
 import numpy as np
+from numpy.typing import ArrayLike
 from tqdm import tqdm
 
 from openmodalpy.core.base import (
@@ -177,19 +181,19 @@ class BSMDAnalyzer(BaseAnalyzer):
 
     def __init__(
         self,
-        file_path,
-        nfft=128,
-        overlap=0.5,
-        results_dir=RESULTS_DIR_BSMD,
-        figures_dir=FIGURES_DIR_BSMD,
-        data_loader=None,
-        spatial_weight_type="auto",
-        use_static_triads=True,
-        static_triads=None,
-        use_parallel=True,
-        max_qhat_gb=4.0,
-        spatial_weights=None,
-    ):
+        file_path: str,
+        nfft: int = 128,
+        overlap: float = 0.5,
+        results_dir: str = RESULTS_DIR_BSMD,
+        figures_dir: str = FIGURES_DIR_BSMD,
+        data_loader: Callable[..., dict[str, Any]] | None = None,
+        spatial_weight_type: str = "auto",
+        use_static_triads: bool = True,
+        static_triads: Sequence[tuple[int, int, int]] | None = None,
+        use_parallel: bool = True,
+        max_qhat_gb: float = 4.0,
+        spatial_weights: ArrayLike | None = None,
+    ) -> None:
         """
         Initialize the BSMDAnalyzer.
 
@@ -261,31 +265,30 @@ class BSMDAnalyzer(BaseAnalyzer):
         self.data_root = re.sub(r"\.[^.]*$", "", base)
 
         # Placeholders
-        self.data = {}
+        self.data: dict[str, Any] = {}
         self.W = np.array([])
         self.novlap = int(overlap * nfft)
         self.nblocks = 0
         self.qhat = np.array([])
         self.qhat_cached = False
-        self.triads = []
+        self.triads: list[tuple[int, int, int]] | np.ndarray = []
         self.eigenvalues = np.array([])
         self.modes1 = np.array([])
         self.modes2 = np.array([])
-        self.freq = None
-        self.St = None
+        self.freq: np.ndarray | None = None
+        self.St: np.ndarray | None = None
         self.energy_map = np.array([])
 
         # Disk-backed qhat for large datasets
         self._max_qhat_bytes = int(max_qhat_gb * 1024**3)
-        self._qhat_file = None  # h5py File handle (kept open in disk mode)
-        self._qhat_dataset = None  # h5py Dataset reference
+        self._qhat_file: h5py.File | None = None  # kept open in disk mode
+        self._qhat_dataset: h5py.Dataset | None = None
         self._qhat_on_disk = False
-        self._qhat_bin_cache = {}  # {abs_freq_bin: np.ndarray}
-        self._qhat_cache_path = None
+        self._qhat_bin_cache: dict[int, np.ndarray] = {}  # {abs_freq_bin: np.ndarray}
 
     # -- Disk-backed qhat management -----------------------------------------
 
-    def _maybe_offload_qhat(self):
+    def _maybe_offload_qhat(self) -> None:
         """If qhat exceeds the memory threshold, offload to HDF5 and free RAM.
 
         After this call, ``self.qhat`` is an empty array and all frequency-bin
@@ -311,7 +314,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         self._qhat_on_disk = True
         self.qhat = np.array([])  # release RAM
 
-    def _prefetch_bins(self):
+    def _prefetch_bins(self) -> None:
         """Pre-load all frequency bins needed by the triad list into the cache.
 
         In disk-backed mode this reads each unique bin from HDF5 exactly once,
@@ -320,6 +323,8 @@ class BSMDAnalyzer(BaseAnalyzer):
         """
         if not self._qhat_on_disk:
             return
+        dataset = self._qhat_dataset
+        assert dataset is not None
         needed = set()
         for p1, p2, p3 in self.static_triads_list:
             needed.update([abs(p1), abs(p2), abs(p3)])
@@ -327,8 +332,8 @@ class BSMDAnalyzer(BaseAnalyzer):
         if not to_read:
             return
         for bin_idx in to_read:
-            if bin_idx < self._qhat_dataset.shape[0]:
-                self._qhat_bin_cache[bin_idx] = self._qhat_dataset[bin_idx, :, :]
+            if bin_idx < dataset.shape[0]:
+                self._qhat_bin_cache[bin_idx] = dataset[bin_idx, :, :]
         total_mb = sum(v.nbytes for v in self._qhat_bin_cache.values()) / 1024**2
         logger.info(
             "Pre-fetched %d frequency bins (%.0f MB) for %d triads.",
@@ -337,7 +342,7 @@ class BSMDAnalyzer(BaseAnalyzer):
             len(self.static_triads_list),
         )
 
-    def close(self):
+    def close(self) -> None:
         """Release disk-backed resources (HDF5 file handle, bin cache)."""
         self._qhat_bin_cache.clear()
         if self._qhat_file is not None:
@@ -346,7 +351,7 @@ class BSMDAnalyzer(BaseAnalyzer):
             self._qhat_dataset = None
             self._qhat_on_disk = False
 
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             self.close()
         except Exception:
@@ -354,7 +359,7 @@ class BSMDAnalyzer(BaseAnalyzer):
 
     # -- Data loading --------------------------------------------------------
 
-    def load_and_preprocess(self):
+    def load_and_preprocess(self) -> None:
         """
         Loads data, computes spatial weights, and STFT using BaseAnalyzer methods.
 
@@ -374,12 +379,13 @@ class BSMDAnalyzer(BaseAnalyzer):
         only needs this post-step. ``_qhat_cache_path`` is set by the base
         path so ``save_results`` can still append onto the same file.
         """
-        self.freq = np.fft.rfftfreq(self.nfft, d=1.0 / self._require_fs())
-        self.St = self.freq.copy()  # Default: Strouhal equals frequency if no scaling
+        freq = np.fft.rfftfreq(self.nfft, d=1.0 / self._require_fs())
+        self.freq = freq
+        self.St = freq.copy()  # Default: Strouhal equals frequency if no scaling
         self._maybe_offload_qhat()
 
     # Main method to perform BSMD analysis based on configuration.
-    def perform_bsmd(self):
+    def perform_bsmd(self) -> None:
         """
         Perform Bispectral Mode Decomposition (BSMD) analysis.
 
@@ -405,14 +411,18 @@ class BSMDAnalyzer(BaseAnalyzer):
     def _n_freq_bins(self) -> int:
         """Number of frequency bins, whether qhat is in RAM or on disk."""
         if self._qhat_on_disk:
-            return self._qhat_dataset.shape[0]
+            dataset = self._qhat_dataset
+            assert dataset is not None
+            return dataset.shape[0]
         return self.qhat.shape[0]
 
     @property
     def _n_spatial(self) -> int:
         """Number of spatial points, whether qhat is in RAM or on disk."""
         if self._qhat_on_disk:
-            return self._qhat_dataset.shape[1]
+            dataset = self._qhat_dataset
+            assert dataset is not None
+            return dataset.shape[1]
         return self.qhat.shape[1]
 
     def _get_qhat_for_index(self, idx: int) -> np.ndarray:
@@ -443,14 +453,18 @@ class BSMDAnalyzer(BaseAnalyzer):
         if abs_idx in self._qhat_bin_cache:
             data = self._qhat_bin_cache[abs_idx]
         elif self._qhat_on_disk:
-            data = self._qhat_dataset[abs_idx, :, :]
+            dataset = self._qhat_dataset
+            assert dataset is not None
+            data = dataset[abs_idx, :, :]
             self._qhat_bin_cache[abs_idx] = data
         else:
             data = self.qhat[abs_idx, :, :]
 
         return np.conj(data) if idx < 0 else data
 
-    def _compute_single_triad(self, p1: int, p2: int, p3: int):
+    def _compute_single_triad(
+        self, p1: int, p2: int, p3: int
+    ) -> tuple[complex | float, np.ndarray | None, np.ndarray | None]:
         """Compute BSMD eigenvalue and spatial modes for one triad.
 
         Thread-safe: reads from shared ``self.qhat`` and ``self.W`` (read-only),
@@ -513,7 +527,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         }
 
     # Core logic for BSMD with statically defined triads.
-    def _perform_static_bsmd_core(self):
+    def _perform_static_bsmd_core(self) -> None:
         """
         Perform BSMD for a statically defined list of frequency triads.
 
@@ -547,7 +561,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         loaded_limit = n_loaded - 1
         max_bin = min(nfft_limit, loaded_limit)
 
-        def _out_of_range_kind(p_int):
+        def _out_of_range_kind(p_int: int) -> str | None:
             if abs(p_int) <= max_bin:
                 return None
             if abs(p_int) > nfft_limit:
@@ -659,15 +673,16 @@ class BSMDAnalyzer(BaseAnalyzer):
         if self.freq is None or self.St is None:
             n_freq = self._n_freq_bins
             if n_freq > 0:
-                self.freq = np.fft.rfftfreq(n_freq * 2 - 2, d=1.0 / self._require_fs())[:n_freq]
-                self.St = self.freq.copy()
+                freq = np.fft.rfftfreq(n_freq * 2 - 2, d=1.0 / self._require_fs())[:n_freq]
+                self.freq = freq
+                self.St = freq.copy()
 
         # Pre-fetch frequency bins from HDF5 into RAM cache before threading.
         # In disk-backed mode this avoids h5py reads inside threads (not thread-safe).
         # In RAM mode this is a no-op.
         self._prefetch_bins()
 
-        def _store_result(i, lam, m1, m2):
+        def _store_result(i: int, lam: complex | float, m1: np.ndarray | None, m2: np.ndarray | None) -> None:
             """Write one triad's results into the pre-allocated arrays."""
             self.eigenvalues[i] = lam
             if m1 is not None:
@@ -702,7 +717,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         # Build energy map for quick visualisation
         self.energy_map = self._compute_energy_map()
 
-    def perform_dynamic_bsmd(self):
+    def perform_dynamic_bsmd(self) -> None:
         """
         Perform BSMD with dynamically identified triads (Placeholder).
 
@@ -714,7 +729,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         """
         raise NotImplementedError("Dynamic BSMD is not yet implemented.")
 
-    def _compute_energy_map(self):
+    def _compute_energy_map(self) -> np.ndarray:
         """Return a 2D map of eigenvalue magnitudes indexed by (p1,p2).
 
         Grid half-width is derived from the triads actually analysed
@@ -756,8 +771,9 @@ class BSMDAnalyzer(BaseAnalyzer):
             results_path = os.path.join(self.results_dir, filename)
         os.makedirs(self.results_dir, exist_ok=True)
 
-        using_cache_file = self._qhat_cache_path is not None and os.path.abspath(results_path) == os.path.abspath(
-            self._qhat_cache_path
+        qhat_cache_path = self._qhat_cache_path
+        using_cache_file = qhat_cache_path is not None and os.path.abspath(results_path) == os.path.abspath(
+            qhat_cache_path
         )
         if using_cache_file and self._qhat_file is not None:
             # The FFT cache may already hold an open handle to this same path.
@@ -830,7 +846,7 @@ class BSMDAnalyzer(BaseAnalyzer):
                 self.data[attr_key] = res.attrs[attr_key]
         logger.info("BSMD results loaded.")
 
-    def plot_modes(self, triad_indices=None, plot_n_modes: Optional[int] = 10):
+    def plot_modes(self, triad_indices: Sequence[int] | None = None, plot_n_modes: Optional[int] = 10) -> None:
         """Plot spatial BSMD modes for selected triads."""
         if self.modes1.size == 0 or self.modes2.size == 0:
             logger.warning("No BSMD modes to plot. Run perform_bsmd() first.")
@@ -937,15 +953,24 @@ class BSMDAnalyzer(BaseAnalyzer):
             plt.close(fig)
             logger.info("BSMD mode plot saved to %s", fname)
 
-    def plot_modes_3d_slices(self, triad_indices=None, plot_n_modes: Optional[int] = 10):
+    def plot_modes_3d_slices(
+        self, triad_indices: Sequence[int] | None = None, plot_n_modes: Optional[int] = 10
+    ) -> None:
         """Plot orthogonal 3D slices for selected BSMD triads."""
         self._plot_modes_3d("slices", triad_indices=triad_indices, plot_n_modes=plot_n_modes)
 
-    def plot_modes_3d_isometric(self, triad_indices=None, plot_n_modes: Optional[int] = 10):
+    def plot_modes_3d_isometric(
+        self, triad_indices: Sequence[int] | None = None, plot_n_modes: Optional[int] = 10
+    ) -> None:
         """Plot 3D isosurfaces for selected BSMD triads."""
         self._plot_modes_3d("isometric", triad_indices=triad_indices, plot_n_modes=plot_n_modes)
 
-    def _plot_modes_3d(self, kind: str, triad_indices=None, plot_n_modes: Optional[int] = 10):
+    def _plot_modes_3d(
+        self,
+        kind: str,
+        triad_indices: Sequence[int] | None = None,
+        plot_n_modes: Optional[int] = 10,
+    ) -> None:
         if self.modes1.size == 0 or self.modes2.size == 0:
             logger.warning("No BSMD modes to plot. Run perform_bsmd() first.")
             return
@@ -979,7 +1004,7 @@ class BSMDAnalyzer(BaseAnalyzer):
                 )
         plot_modes_3d(kind, items, x_coords, y_coords, z_coords, data=self.data)
 
-    def plot_energy_map(self):
+    def plot_energy_map(self) -> None:
         """Plot a 2D heatmap of eigenvalue magnitudes indexed by triad frequencies."""
         if self.energy_map.size == 0:
             logger.warning("No energy map available. Run perform_bsmd() first.")
@@ -1006,7 +1031,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         logger.info("Energy map saved to %s", fname)
 
     # Execute the full BSMD pipeline.
-    def run_analysis(self):
+    def run_analysis(self) -> None:
         """
         Execute the full BSMD analysis pipeline.
 

@@ -138,7 +138,7 @@ ignore_missing_imports = true
 
 # mypy ratchet: modules listed here have fully annotated defs and are pinned with
 # disallow_untyped_defs so they cannot quietly regress. A module joins only once
-# its defs are annotated. Still to do (later dispatches): openmodalpy.bsmd.
+# its defs are annotated.
 [[tool.mypy.overrides]]
 module = [
     "openmodalpy",
@@ -165,6 +165,7 @@ module = [
     "openmodalpy.mpod",
     "openmodalpy.spod",
     "openmodalpy.dmd",
+    "openmodalpy.bsmd",
 ]
 disallow_untyped_defs = true
 

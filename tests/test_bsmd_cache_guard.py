@@ -98,3 +98,15 @@ def test_read_failure_still_recomputes_and_names_the_file(tmp_path, caplog):
     assert str(cache_path) in failure[0].getMessage()
     assert fresh.qhat_cached is False
     assert fresh.qhat.shape[0] == NFFT // 2 + 1
+
+
+def test_cache_path_is_none_before_any_fft(tmp_path):
+    """A new analyzer must already carry ``_qhat_cache_path``, set to None.
+
+    ``compute_fft_blocks`` only assigns this attribute when a cache file is in
+    use, so the readers in ``_maybe_offload_qhat`` and ``save_results`` test it
+    for None. If nothing declares it up front, those reads raise AttributeError
+    instead on any run without a cache.
+    """
+    analyzer = _bsmd(tmp_path)
+    assert analyzer._qhat_cache_path is None
