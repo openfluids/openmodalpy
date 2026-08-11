@@ -1,8 +1,11 @@
+import inspect
+
 import numpy as np
 import pytest
 
-from openmodalpy.core.base import PARALLEL_AVAILABLE, blocksfft, spod_function
+from openmodalpy.core.base import blocksfft, spod_function
 from openmodalpy.core.parallel import blocksfft_optimized
+from openmodalpy.core.welch import windowed_block_fft
 
 WINDOWS = ("hamming", "hann", "blackman", "bartlett", "sine")
 
@@ -25,16 +28,23 @@ def test_blocksfft_constant_signal():
     assert np.allclose(result, 0)
 
 
-@pytest.mark.parametrize("window_type", WINDOWS)
-def test_blocksfft_serial_parallel_window_identity(window_type):
-    """blocksfft and blocksfft_optimized must agree bit-for-bit for every window."""
-    rng = np.random.default_rng(0)
-    q = rng.standard_normal((64, 3))
-    ser = blocksfft(q, nfft=16, nblocks=3, novlap=0, window_type=window_type)
-    par = blocksfft_optimized(q, nfft=16, nblocks=3, novlap=0, window_type=window_type)
-    assert np.allclose(ser, par, rtol=0, atol=1e-12), (
-        f"serial/parallel disagree for window_type={window_type!r}: max|diff|={np.max(np.abs(ser - par)):.3e}"
-    )
+def test_public_blocksfft_names_delegate_to_windowed_block_fft():
+    """Both public names are thin wrappers around the single shared implementation.
+
+    Since cee9a89, blocksfft and blocksfft_optimized are not two algorithms —
+    they are two names for windowed_block_fft. The only contract still worth
+    pinning between them is that delegation. Numerical correctness is pinned
+    by the definition oracles in test_welch_analytical.py, not by comparing
+    the two names to each other.
+    """
+    assert "return windowed_block_fft(" in inspect.getsource(blocksfft)
+    assert "return windowed_block_fft(" in inspect.getsource(blocksfft_optimized)
+    # Same callable object on both wrapper modules (not a re-export copy).
+    from openmodalpy.core import base as base_mod
+    from openmodalpy.core import parallel as parallel_mod
+
+    assert base_mod.windowed_block_fft is windowed_block_fft
+    assert parallel_mod.windowed_block_fft is windowed_block_fft
 
 
 def test_blocksfft_hann_blackman_differ_from_hamming():
@@ -63,6 +73,7 @@ def test_normvar_divides_by_variance_two_scales():
     Provenance: spod_matlab opts.normvar / PySPOD normalize_data. Dividing by
     the standard deviation would yield unit variance and scale invariance;
     both scales must assert var -> 1/v so a "fix" to std would break this.
+    Absolute ddof=1 scaling is pinned in test_welch_analytical (definition oracle).
     """
     rng = np.random.default_rng(0)
     nfft, npts = 32, 3
@@ -72,7 +83,7 @@ def test_normvar_divides_by_variance_two_scales():
     for scale in (1.0, 7.0):
         q = base * scale
         v = np.var(q, axis=0, ddof=1)
-        # What the arithmetic does (same as base.py / parallel.py).
+        # What the arithmetic does under the documented definition.
         normalised = q / v
         got = np.var(normalised, axis=0, ddof=1)
         expected = 1.0 / v
@@ -96,85 +107,6 @@ def test_normvar_divides_by_variance_two_scales():
             window_type="boxcar",
         )
         np.testing.assert_allclose(out, out_base / scale, rtol=0, atol=1e-12)
-
-
-def test_normvar_serial_parallel_agree():
-    """blocksfft and blocksfft_optimized must agree with normvar=True.
-
-    Both paths implement the same divide-by-variance step; neither was
-    exercised with the flag on before this bead (two-paths-one-maintained).
-    """
-    rng = np.random.default_rng(42)
-    q = rng.standard_normal((64, 4))
-    kwargs = dict(nfft=16, nblocks=3, novlap=4, normvar=True, blockwise_mean=True)
-    ser = blocksfft(q, **kwargs)
-    par = blocksfft_optimized(q, **kwargs)
-    np.testing.assert_allclose(
-        ser,
-        par,
-        rtol=0,
-        atol=1e-12,
-        err_msg=f"serial/parallel disagree with normvar=True: max|diff|={np.max(np.abs(ser - par)):.3e}",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Serial/parallel identity across the real parameter surface
-# ---------------------------------------------------------------------------
-# Both paths own separate window_norm / mean / normvar / placement code. The
-# three point tests above pin windows@novlap=0, one normvar case, and boxcar
-# placement; this sweep covers the full cross product, including amplitude
-# normalization (no prior identity coverage).
-
-
-@pytest.mark.parametrize("window_type", ["hamming", "hann"])
-@pytest.mark.parametrize("window_norm", ["power", "amplitude"], ids=["power", "amplitude"])
-@pytest.mark.parametrize("blockwise_mean", [False, True], ids=["bwmean0", "bwmean1"])
-@pytest.mark.parametrize("normvar", [False, True], ids=["nv0", "nv1"])
-@pytest.mark.parametrize(
-    "novlap,nfft,Ns,nblocks",
-    [
-        # hop = nfft; Ns is a whole multiple of hop
-        (0, 16, 64, 3),
-        # hop = 12; Ns=70 is not a multiple of hop (remainder dropped)
-        (4, 16, 70, 5),
-    ],
-    ids=["ovl0", "ovl4-uneven"],
-)
-def test_blocksfft_serial_parallel_param_surface(
-    window_type, window_norm, blockwise_mean, normvar, novlap, nfft, Ns, nblocks
-):
-    """Serial == parallel across window_norm × blockwise_mean × normvar × novlap.
-
-    At least one case uses an uneven record (id token ``uneven``): Ns is not a
-    whole multiple of the block hop, so placement cannot hide behind a tidy
-    partition. The two paths agree to atol=1e-12 with rtol=0; flipping any one
-    of these options moves the output by ~1e-1, so the margin is real.
-    """
-    # Without this, a failed `openmodalpy.core.parallel` import would send both
-    # calls down the serial body (base.py sets PARALLEL_AVAILABLE=False on
-    # ImportError) and every case below would pass while comparing serial to
-    # itself. A broken parallel stack should be loud, not silently vacuous.
-    assert PARALLEL_AVAILABLE, "optimized path unavailable: this test would compare serial to serial"
-    rng = np.random.default_rng(0)
-    q = rng.standard_normal((Ns, 3))
-    kwargs = dict(
-        nfft=nfft,
-        nblocks=nblocks,
-        novlap=novlap,
-        window_type=window_type,
-        window_norm=window_norm,
-        blockwise_mean=blockwise_mean,
-        normvar=normvar,
-    )
-    ser = blocksfft(q, **kwargs)
-    par = blocksfft_optimized(q, **kwargs)
-    max_diff = float(np.max(np.abs(ser - par)))
-    assert np.allclose(ser, par, rtol=0, atol=1e-12), (
-        f"serial/parallel disagree: window={window_type!r} window_norm={window_norm!r} "
-        f"blockwise_mean={blockwise_mean} normvar={normvar} novlap={novlap} Ns={Ns}: "
-        f"max|diff|={max_diff:.3e}"
-    )
 
 
 def test_normvar_zero_variance_channel_isfinite():
@@ -211,33 +143,24 @@ def test_normvar_zero_variance_channel_isfinite():
         (64, 128, 0.5, "Ns <= novlap"),
     ],
 )
-@pytest.mark.parametrize(
-    "fn",
-    [blocksfft, blocksfft_optimized],
-    ids=["serial", "parallel"],
-)
-def test_short_record_raises_naming_Ns_and_nfft(Ns, nfft, overlap, label, fn):
+def test_short_record_raises_naming_Ns_and_nfft(Ns, nfft, overlap, label):
     """Short records must raise ValueError naming both Ns and nfft.
 
     Pre-fix: ceil/floor of a short record could yield nblocks=0 (silent empty)
     or a negative start (numpy wrap → garbage). Assert on the exception message,
-    not on an output shape.
+    not on an output shape. One public entry point is enough: both wrappers
+    share windowed_block_fft (see delegation test).
     """
     nb, novlap = _nblocks_floor(Ns, nfft, overlap)
     q = np.zeros((Ns, 4))
     with pytest.raises(ValueError) as ei:
-        fn(q, nfft, max(nb, 1), novlap)
+        blocksfft(q, nfft, max(nb, 1), novlap)
     msg = str(ei.value)
     assert str(Ns) in msg and str(nfft) in msg, f"{label}: message {msg!r} must name Ns and nfft"
 
 
 @pytest.mark.parametrize("Ns,nfft,overlap", [(500, 128, 0.5), (300, 128, 0.5)])
-@pytest.mark.parametrize(
-    "fn",
-    [blocksfft, blocksfft_optimized],
-    ids=["serial", "parallel"],
-)
-def test_oversize_nblocks_raises_not_clamp(Ns, nfft, overlap, fn):
+def test_oversize_nblocks_raises_not_clamp(Ns, nfft, overlap):
     """Old ceil nblocks that no longer fit must raise, not silently clamp."""
     nb_floor, novlap = _nblocks_floor(Ns, nfft, overlap)
     nb_ceil = int(np.ceil((Ns - novlap) / (nfft - novlap)))
@@ -245,7 +168,7 @@ def test_oversize_nblocks_raises_not_clamp(Ns, nfft, overlap, fn):
         pytest.skip("ceil and floor agree; clamp path not exercised")
     q = np.zeros((Ns, 4))
     with pytest.raises(ValueError) as ei:
-        fn(q, nfft, nb_ceil, novlap)
+        blocksfft(q, nfft, nb_ceil, novlap)
     msg = str(ei.value)
     assert str(Ns) in msg or str(nb_ceil) in msg, msg
 
@@ -265,58 +188,38 @@ def test_block_starts_strict_hop_and_fit(Ns, nfft, overlap):
     Asserted on the indices themselves (not merely on nblocks), via an impulse
     basis: column j is an impulse at time j; energy in block k recovers coverage.
     boxcar is required so edge impulses are not window-attenuated below threshold.
+
+    hop = nfft - novlap by definition (Welch / scipy.signal.welch). One entry
+    point is enough — both public names delegate to the same implementation.
     """
     nb, novlap = _nblocks_floor(Ns, nfft, overlap)
     hop = nfft - novlap
     expected_starts = _block_starts(nb, nfft, novlap)
     assert expected_starts[-1] + nfft <= Ns
 
-    def recovered_starts(fn):
-        qhat = fn(np.eye(Ns), nfft, nb, novlap, window_type="boxcar")
-        energy = np.sum(np.abs(qhat) ** 2, axis=0)  # [time, block]
-        starts = []
-        for k in range(nb):
-            idx = np.flatnonzero(energy[:, k] > 0.5 * energy[:, k].max())
-            assert idx.size > 0
-            starts.append(int(idx[0]))
-        return starts
+    qhat = blocksfft(np.eye(Ns), nfft, nb, novlap, window_type="boxcar")
+    energy = np.sum(np.abs(qhat) ** 2, axis=0)  # [time, block]
+    starts = []
+    for k in range(nb):
+        idx = np.flatnonzero(energy[:, k] > 0.5 * energy[:, k].max())
+        assert idx.size > 0
+        starts.append(int(idx[0]))
 
-    for fn, name in (
-        (blocksfft, "serial"),
-        (blocksfft_optimized, "parallel"),
-    ):
-        starts = recovered_starts(fn)
-        assert starts == expected_starts, f"{name}: starts {starts} != {expected_starts}"
-        assert all(s2 - s1 == hop for s1, s2 in zip(starts, starts[1:])), f"{name}: non-constant hop"
-        assert starts[-1] + nfft <= Ns
+    assert starts == expected_starts, f"starts {starts} != {expected_starts}"
+    assert all(s2 - s1 == hop for s1, s2 in zip(starts, starts[1:])), "non-constant hop"
+    assert starts[-1] + nfft <= Ns
 
 
-def test_serial_parallel_identical_placement_uneven_records():
-    """Serial and parallel paths place blocks identically, including uneven Ns."""
-    for Ns, nfft, overlap in ((500, 128, 0.5), (300, 128, 0.5), (256, 64, 0.25)):
-        nb, novlap = _nblocks_floor(Ns, nfft, overlap)
-        rng = np.random.default_rng(Ns)
-        q = rng.standard_normal((Ns, 3))
-        ser = blocksfft(q, nfft, nb, novlap, window_type="boxcar")
-        par = blocksfft_optimized(q, nfft, nb, novlap, window_type="boxcar")
-        np.testing.assert_allclose(ser, par, rtol=0, atol=1e-12)
-
-
-@pytest.mark.parametrize(
-    "fn",
-    [blocksfft, blocksfft_optimized],
-    ids=["serial", "parallel"],
-)
 @pytest.mark.parametrize(
     "novlap",
     [64, 65],  # == nfft and > nfft; both yield hop <= 0
     ids=["novlap_eq_nfft", "novlap_gt_nfft"],
 )
-def test_novlap_ge_nfft_raises_not_repeat_block0(fn, novlap):
+def test_novlap_ge_nfft_raises_not_repeat_block0(novlap):
     """hop <= 0 must raise: otherwise every block starts at 0 (identical members)."""
     q = np.zeros((300, 4))
     with pytest.raises(ValueError, match=r"hop|novlap|nfft"):
-        fn(q, 64, 3, novlap)
+        blocksfft(q, 64, 3, novlap)
 
 
 def test_apply_snapshot_limit_uses_floor_nblocks():
