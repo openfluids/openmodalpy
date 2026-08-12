@@ -403,6 +403,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- When the solver returns fewer modes than the caller's cap, `n_modes_save` is
+  lowered to match on POD, ST-POD, and multi-band mPOD. ST-POD and multi-band
+  mPOD used to leave the counter stale, so HDF5 attrs and plot loops believed a
+  wider array than existed. ST-POD's plot guards also bound by the array width,
+  not only by the counter.
 - The SVD route no longer returns a meaningless extra mode when a caller centers
   data whose mean dwarfs the fluctuation. `weighted_second_order(...,
   method="svd", n_keep=None)` used to trust a relative singular-value floor to

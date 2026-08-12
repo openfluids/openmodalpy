@@ -1337,6 +1337,13 @@ def spod_function(
 class BaseAnalyzer:
     """Base class for modal decomposition analyzers."""
 
+    # Declared here so shared helpers (e.g. ``_resync_mode_count``) type-check.
+    # Concrete analyzers populate them in ``__init__`` / after decomposition.
+    n_modes_save: int
+    modes: np.ndarray
+    eigenvalues: np.ndarray
+    time_coefficients: np.ndarray
+
     def __init__(
         self,
         file_path: str,
@@ -1765,6 +1772,33 @@ class BaseAnalyzer:
         logger.info("Completed in %.2f seconds.", end_time - start_time)
 
         return self
+
+    def _resync_mode_count(self) -> None:
+        """Lower ``n_modes_save`` to the solver's actual mode count and slice.
+
+        The SVD/eigh solver may return fewer modes than the caller's cap after
+        its relative cutoff. Keep the counter honest so save/plot paths never
+        believe a wider array than exists. Slicing arrays already at that
+        width is a no-op, so routes that truncate before calling this (ST-POD,
+        multi-band mPOD) get the counter fixed and the arrays left alone.
+
+        Call this only after the solver has assigned the three arrays: it
+        indexes them two-dimensionally, so it raises on the 1-D ``np.array([])``
+        they hold between ``__init__`` and the first decomposition. Mode count
+        is read from ``eigenvalues`` alone, which is the solver's contract.
+        """
+        n_available_modes = len(self.eigenvalues)
+        if self.n_modes_save > n_available_modes:
+            logger.warning(
+                "n_modes_save (%d) > available modes (%d). Using all available.",
+                self.n_modes_save,
+                n_available_modes,
+            )
+            self.n_modes_save = n_available_modes
+
+        self.modes = self.modes[:, : self.n_modes_save]
+        self.eigenvalues = self.eigenvalues[: self.n_modes_save]
+        self.time_coefficients = self.time_coefficients[:, : self.n_modes_save]
 
     def _get_metadata(self) -> dict[str, Any]:
         """Return a dictionary of common metadata for saving results."""

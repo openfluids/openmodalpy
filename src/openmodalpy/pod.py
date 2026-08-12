@@ -268,18 +268,7 @@ class PODAnalyzer(BaseAnalyzer):
 
         # Truncate to requested number of modes (solver may still return fewer
         # after its relative cutoff).
-        n_available_modes = len(self.eigenvalues)
-        if self.n_modes_save > n_available_modes:
-            logger.warning(
-                "n_modes_save (%d) > available modes (%d). Using all available.",
-                self.n_modes_save,
-                n_available_modes,
-            )
-            self.n_modes_save = n_available_modes
-
-        self.modes = self.modes[:, : self.n_modes_save]
-        self.eigenvalues = self.eigenvalues[: self.n_modes_save]
-        self.time_coefficients = self.time_coefficients[:, : self.n_modes_save]
+        self._resync_mode_count()
 
         end_time = time.time()
         logger.info(

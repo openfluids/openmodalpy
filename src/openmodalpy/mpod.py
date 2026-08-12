@@ -202,6 +202,8 @@ class MPODAnalyzer(PODAnalyzer):
         self.time_coefficients = np.real(coeffs[:, order][:, :keep])
         self.mode_band_indices = band_ids[order][:keep]
         self.band_mode_counts = np.asarray(band_mode_counts, dtype=int)
+        # keep may be < n_modes_save when bands yield fewer modes than the cap.
+        self._resync_mode_count()
 
     def _perform_decomposition(self) -> None:
         """mPOD one-call path: do not inherit POD's perform_pod dispatch."""

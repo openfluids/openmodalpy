@@ -231,6 +231,10 @@ class STPODAnalyzer(BaseAnalyzer):
         data_weighted = lifted * sqrt_weights
         n_samples = lifted.shape[0]
         self.total_energy = float(np.linalg.norm(data_weighted, "fro") ** 2 / n_samples)
+        # Solver may return fewer modes than the caller's cap; keep the counter
+        # honest before energy logging / save / plot paths read it.
+        self._resync_mode_count()
+
         if self.total_energy > 0:
             self.energy_captured_fraction = float(np.sum(self.eigenvalues) / self.total_energy)
         else:
@@ -489,7 +493,7 @@ class STPODAnalyzer(BaseAnalyzer):
         y_coords = self.data.get("y", np.arange(Ny))
         fig_aspect = get_fig_aspect_ratio(self.data)
 
-        n_modes = min(plot_n_modes, self.n_modes_save)
+        n_modes = min(plot_n_modes, self.modes.shape[1], self.n_modes_save)
         ncols = min(n_modes, 2)
         nrows = int(np.ceil(n_modes / ncols))
 
@@ -587,7 +591,7 @@ class STPODAnalyzer(BaseAnalyzer):
         x_coords = self.data.get("x")
         y_coords = self.data.get("y")
         z_coords = self.data.get("z")
-        n_modes = min(plot_n_modes, self.n_modes_save)
+        n_modes = min(plot_n_modes, self.modes.shape[1], self.n_modes_save)
         denom, label_suffix = self._energy_denominator()
         items = []
         for mode_idx in range(n_modes):
