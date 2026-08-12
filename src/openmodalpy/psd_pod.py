@@ -148,6 +148,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         self.eigenvalues = np.real(eigenvalues)
         self.time_coefficients = time_coefficients
         self.n_fourier_realizations = n_realizations
+        self._resync_mode_count()
 
     def _get_algorithm_metadata(self) -> dict:
         """Describe the PSD-POD contract recorded in result-file attributes."""

@@ -414,6 +414,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mPOD used to leave the counter stale, so HDF5 attrs and plot loops believed a
   wider array than existed. ST-POD's plot guards also bound by the array width,
   not only by the counter.
+- DMD and PSD-POD now lower `n_modes_save` to the number of modes they hold
+  after a solve, including a degenerate DMD that holds none. DMD `load_results`
+  lowers the cap to the eigenvalue count of the file it read, which is defined
+  even for a rank-0 file that holds a 1-D empty modes array.
 - The SVD route no longer returns a meaningless extra mode when a caller centers
   data whose mean dwarfs the fluctuation. `weighted_second_order(...,
   method="svd", n_keep=None)` used to trust a relative singular-value floor to

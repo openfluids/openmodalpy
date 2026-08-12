@@ -415,6 +415,7 @@ class DMDAnalyzer(BaseAnalyzer):
             self._dmd_method = method
             self._dmd_delays = delays
             self._dmd_named_variant = named_variant or "dmd"
+            self._resync_mode_count()
             return
 
         u_r = u[:, :r]
@@ -464,6 +465,7 @@ class DMDAnalyzer(BaseAnalyzer):
         self._dmd_method = method
         self._dmd_delays = delays
         self._dmd_named_variant = named_variant or "dmd"
+        self._resync_mode_count()
 
     def _get_algorithm_metadata(self) -> dict:
         """Describe the DMD contract currently implemented."""
@@ -601,6 +603,9 @@ class DMDAnalyzer(BaseAnalyzer):
             self.data["Ny"] = int(res.attrs["Ny"])
         if "Nz" in res.attrs:
             self.data["Nz"] = int(res.attrs["Nz"])
+        # eigenvalues is the mode-count authority and is always 1-D,
+        # so this reads a width even from an empty file.
+        self.n_modes_save = min(self.n_modes_save, len(self.eigenvalues))
         logger.info("DMD results loaded from %s", path)
 
     def _mode_freq(self, eigvals: np.ndarray) -> np.ndarray | None:

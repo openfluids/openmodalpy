@@ -1782,10 +1782,10 @@ class BaseAnalyzer:
         width is a no-op, so routes that truncate before calling this (ST-POD,
         multi-band mPOD) get the counter fixed and the arrays left alone.
 
-        Call this only after the solver has assigned the three arrays: it
-        indexes them two-dimensionally, so it raises on the 1-D ``np.array([])``
-        they hold between ``__init__`` and the first decomposition. Mode count
-        is read from ``eigenvalues`` alone, which is the solver's contract.
+        Call this only after the solver has assigned the three arrays. Mode
+        count is read from ``eigenvalues`` alone, which is the solver's contract.
+        Two-dimensional arrays are sliced to that width; a 1-D empty array
+        (the rank-0 / pre-decomposition default) is left alone.
         """
         n_available_modes = len(self.eigenvalues)
         if self.n_modes_save > n_available_modes:
@@ -1796,9 +1796,11 @@ class BaseAnalyzer:
             )
             self.n_modes_save = n_available_modes
 
-        self.modes = self.modes[:, : self.n_modes_save]
+        if self.modes.ndim == 2:
+            self.modes = self.modes[:, : self.n_modes_save]
         self.eigenvalues = self.eigenvalues[: self.n_modes_save]
-        self.time_coefficients = self.time_coefficients[:, : self.n_modes_save]
+        if self.time_coefficients.ndim == 2:
+            self.time_coefficients = self.time_coefficients[:, : self.n_modes_save]
 
     def _get_metadata(self) -> dict[str, Any]:
         """Return a dictionary of common metadata for saving results."""
