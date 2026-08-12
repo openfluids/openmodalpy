@@ -499,7 +499,7 @@ class MATDataLoader(DataLoader):
                 logger.warning("No 'dt' found in %r; dt left unset", file_path)
 
         if q.ndim == 2 and expected_nspace > 1:
-            nx = len(x_vec) if x_vec is not None else q.shape[1]
+            nx = len(x_vec) if x_vec is not None else 1
             ny = len(y_vec) if y_vec is not None else 1
             nz = len(z_vec) if z_vec is not None else 1
             if q.shape[1] == expected_nspace:

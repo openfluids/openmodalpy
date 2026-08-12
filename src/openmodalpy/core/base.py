@@ -1294,6 +1294,29 @@ def _coerce_spatial_weights(w: ArrayLike, expected_len: int) -> np.ndarray:
     return np.asarray(weights, dtype=float)
 
 
+def _reported_grid(data: Mapping[str, Any]) -> tuple[int, int, int] | None:
+    """Return ``(Nx, Ny, Nz)`` when ``data`` carries a grid claim, else ``None``.
+
+    A missing axis is extent 1. Absence of all three keys is not a grid —
+    callers must not invent one to check against ``q.shape[1]``. A set of
+    keys whose extents are all 1 also says nothing about extent (a leftover
+    ``Nz: 1`` is not a 1×1×1 claim against a wider matrix). A lone ``Nx``
+    that names a real extent is still a claim.
+    """
+    if not any(key in data for key in ("Nx", "Ny", "Nz")):
+        return None
+
+    def extent(name: str) -> int:
+        if name not in data or data[name] is None:
+            return 1
+        return int(data[name])
+
+    grid = extent("Nx"), extent("Ny"), extent("Nz")
+    if grid == (1, 1, 1):
+        return None
+    return grid
+
+
 def spod_function(
     qhat: np.ndarray,
     nblocks: int,
@@ -1445,6 +1468,23 @@ class BaseAnalyzer:
         if not self.data:
             self.data = self.data_loader(self.file_path)
 
+        # data_loader is any (str) -> dict. If the dataset reports a grid, its
+        # product must be the snapshot width. Skip when there is no claim
+        # (no keys, or extents that are all 1) rather than inventing one.
+        grid = _reported_grid(self.data)
+        q_array = np.asarray(self.data["q"])
+        # A q that is not (time, space) has no width to compare. Leave it to the
+        # error it already raised downstream rather than adding an IndexError here.
+        if grid is not None and q_array.ndim == 2:
+            nx, ny, nz = grid
+            n_space = int(q_array.shape[1])
+            grid_nspace = nx * ny * nz
+            if grid_nspace != n_space:
+                raise ValueError(
+                    f"grid product Nx*Ny*Nz={grid_nspace} does not match "
+                    f"q.shape[1]={n_space} (grid Nx={nx}, Ny={ny}, Nz={nz})"
+                )
+
         # Calculate spatial weights
         if self.spatial_weight_type == "prescribed":
             # n_space from the snapshot matrix (time × space); helpers check
@@ -1480,8 +1520,8 @@ class BaseAnalyzer:
         logger.info(
             "Data loaded: %s snapshots, %s×%s spatial points",
             self.data["Ns"],
-            self.data["Nx"],
-            self.data["Ny"],
+            self.data.get("Nx"),
+            self.data.get("Ny"),
         )
         if self.nfft > 1:
             logger.info(

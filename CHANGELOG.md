@@ -403,6 +403,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- The MAT loader no longer double-counts an absent coordinate. A `.mat` that
+  carried `y` and no `x` used to set `Nx` to the whole snapshot width, so
+  `Nx*Ny*Nz` counted `y` twice and the uniform/polar weight vector was that
+  long. An absent axis now contributes extent 1, matching the `y` and `z`
+  fallbacks. Analyzers also reject a custom loader whose reported grid product
+  disagrees with `q.shape[1]`, naming both numbers and the grid. Datasets with
+  no grid metadata are left alone. A leftover all-ones grid key (a lone
+  `Nz: 1`, or `Nx=Ny=Nz=1`) is not a claim either and is not raised against a
+  wider matrix; a lone `Nx` that names a real extent is still checked. No
+  numerical change on data that was already consistent.
 - `n_modes_saved` in POD, mPOD and ST-POD result files now reports how many
   modes the file holds. Before, it reported how many modes you asked for. The
   two disagree after `load_results`, so a re-saved file could claim more modes
