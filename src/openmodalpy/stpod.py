@@ -346,7 +346,9 @@ class STPODAnalyzer(BaseAnalyzer):
 
         attrs = self._get_metadata()
         attrs["embedding_dim"] = self.embedding_dim
-        attrs["n_modes_saved"] = self.n_modes_save
+        # Describe the file, not the request. An analyzer that never ran still
+        # holds the 1-D empty default, which has no second axis.
+        attrs["n_modes_saved"] = self.modes.shape[1] if self.modes.ndim == 2 else 0
         attrs["n_snapshots"] = self.data.get("Ns", 0)
         attrs["Nspace"] = self.modes.shape[0] // self.embedding_dim
         write_results(save_path, datasets, attrs=attrs)
@@ -427,6 +429,11 @@ class STPODAnalyzer(BaseAnalyzer):
             self.total_energy = float(res.attrs["total_energy"])
         if "energy_captured_fraction" in res.attrs:
             self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
+        # Cap may only fall to the loaded width — never rise, never slice modes.
+        # A file written before this was fixed can hold the 1-D empty default,
+        # which has no width to compare against.
+        if self.modes.ndim == 2:
+            self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
 
         logger.info("ST-POD results loaded.")
 

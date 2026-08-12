@@ -403,6 +403,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- `n_modes_saved` in POD, mPOD and ST-POD result files now reports how many
+  modes the file holds. Before, it reported how many modes you asked for. The
+  two disagree after `load_results`, so a re-saved file could claim more modes
+  than it held, or fewer.
+- `load_results` now lowers `n_modes_save` to the width of the file it read. It
+  never raises it, and it never drops modes the file holds.
 - When the solver returns fewer modes than the caller's cap, `n_modes_save` is
   lowered to match on POD, ST-POD, and multi-band mPOD. ST-POD and multi-band
   mPOD used to leave the counter stale, so HDF5 attrs and plot loops believed a
