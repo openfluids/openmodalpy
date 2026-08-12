@@ -408,6 +408,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- `test_prescribed_weights_change_the_eigenvalues` now uses an equal-mean
+  weight pair (ones vs a renormalised off-centre bump) so a solver that
+  consulted only `mean(W)` no longer passes. The previous ones-vs-ramp pair
+  was isospectral on that fixture. The DMD branch now compares modes, which
+  would move if the regression started using W; eigenvalues there are
+  isospectral even under a true metric. The neighbouring survival test
+  writes into pytest's `tmp_path` instead of `./results` and `./figures`.
 - Prescribed spatial weights now have the same column shape as the uniform
   and polar builders (`(n_space, 1)`). The prescribed path used to store a
   flat `(n_space,)` vector, so BSMD's `W * prod` against an

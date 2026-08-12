@@ -105,6 +105,16 @@ def test_plot_eigenspectra_stem_compat(monkeypatch, tmp_path):
 
 
 def test_dmd_uses_raw_shifted_snapshots_without_weighting():
+    """Exact DMD on raw shifted snapshots, independent of a post-hoc W.
+
+    This pins the paired-data contract (no mean subtraction; the regression
+    matches the unweighted exact-DMD oracle). The two W vectors have the same
+    mean, so a mean-preserving use of W would still match ``expected_raw`` —
+    eigenvalues of a uniformly scaled metric are isospectral for exact DMD.
+    The spatial-structure tripwire lives in
+    ``test_prescribed_weights_change_the_eigenvalues``, which compares DMD
+    modes under an equal-mean pair. This test stays about the oracle contract.
+    """
     data = {
         "q": np.array(
             [

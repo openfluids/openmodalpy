@@ -269,7 +269,7 @@ _SURVIVAL_WEIGHTS = np.linspace(0.5, 1.5, _SURVIVAL_NSPACE)
     ],
     ids=["POD", "ST-POD", "mPOD", "DMD", "SPOD", "BSMD", "PSD-POD"],
 )
-def test_prescribed_weights_survive_decomposition(analyzer_cls, extra_kwargs, method, needs_fft):
+def test_prescribed_weights_survive_decomposition(analyzer_cls, extra_kwargs, method, needs_fft, tmp_path):
     """A prescribed metric must still be analyzer.W after the eigenproblem runs.
 
     Coverage used to exist only for POD. This checks presence, not use: the
@@ -284,6 +284,8 @@ def test_prescribed_weights_survive_decomposition(analyzer_cls, extra_kwargs, me
         data_loader=lambda _: _SURVIVAL_GRID,
         spatial_weights=_SURVIVAL_WEIGHTS,
         use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
         **extra_kwargs,
     )
     analyzer.load_and_preprocess()
@@ -294,8 +296,14 @@ def test_prescribed_weights_survive_decomposition(analyzer_cls, extra_kwargs, me
     np.testing.assert_array_equal(np.asarray(analyzer.W).ravel(), _SURVIVAL_WEIGHTS)
 
 
-_ONES_WEIGHTS = np.ones(_SURVIVAL_NSPACE)
-_SKEW_WEIGHTS = np.linspace(0.2, 3.0, _SURVIVAL_NSPACE)
+# Equal-mean pair on purpose. ones vs linspace(0.2, 3.0) is blind here: the
+# field is q = 1 + outer(sin(t), g) with g odd, so g² is a palindrome and every
+# palindromic pair of that ramp sums to 3.2. The ramp then acts exactly like
+# mean(ramp)*ones, and a solver that used only a scalar derived from W still
+# passed. Both of these have mean 1.0; any movement is spatial structure.
+_FLAT_WEIGHTS = np.ones(_SURVIVAL_NSPACE)
+_BUMP_WEIGHTS = np.exp(-(((np.arange(_SURVIVAL_NSPACE) - 1.5) / 1.2) ** 2))
+_BUMP_WEIGHTS = _BUMP_WEIGHTS / _BUMP_WEIGHTS.mean()
 
 
 def _copy_survival_grid() -> dict:
@@ -310,7 +318,7 @@ def _copy_survival_grid() -> dict:
     }
 
 
-def _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp_path, tag):
+def _analyzer_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp_path, tag):
     analyzer = analyzer_cls(
         file_path="dummy",
         data_loader=lambda _: _copy_survival_grid(),
@@ -324,7 +332,7 @@ def _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp
     if needs_fft:
         analyzer.compute_fft_blocks()
     getattr(analyzer, method)()
-    return np.asarray(analyzer.eigenvalues)
+    return analyzer
 
 
 @pytest.mark.parametrize(
@@ -343,24 +351,37 @@ def _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp
 def test_prescribed_weights_change_the_eigenvalues(
     analyzer_cls, extra_kwargs, method, needs_fft, uses_metric, tmp_path
 ):
-    """Two prescribed metrics must change the answer if and only if the solver uses W.
+    """Two equal-mean metrics must change the answer iff the solver uses W.
 
     Survival of analyzer.W after the run is not enough: a refactor could stop
-    consulting the metric and leave the vector on the object. ones(n) against
-    linspace(0.2, 3.0, n) on the same field is the cheap check. DMD documents
-    at dmd.py:350 that the regression does not use the spatial metric, so its
-    eigenvalues must stay put rather than being forced into the using group.
+    consulting the metric and leave the vector on the object. The pair is
+    ones(n) against an off-centre Gaussian bump renormalised to mean 1. The
+    means are equal on purpose: a ones-vs-ramp pair is isospectral on this
+    field (g odd ⇒ g² palindromic, so the ramp equals mean(ramp)*ones). A
+    solver that used only a scalar derived from W would still pass that pair.
+
+    DMD documents at dmd.py:350 that the regression does not use the spatial
+    metric. Eigenvalues are the wrong tripwire there — rank-2 DMD is
+    isospectral under weighting on this fixture — so the check is on modes,
+    which stay put today only because W is unused and would move if the
+    regression started consulting it.
     """
-    ones = _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, _ONES_WEIGHTS, tmp_path, "ones")
-    skew = _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, _SKEW_WEIGHTS, tmp_path, "skew")
-    changed = ones.shape != skew.shape or not np.allclose(ones, skew)
+    assert np.isclose(_FLAT_WEIGHTS.mean(), _BUMP_WEIGHTS.mean()), (
+        "the pair must share a mean; otherwise a mean(W)*ones solver still passes"
+    )
+    flat = _analyzer_for(analyzer_cls, extra_kwargs, method, needs_fft, _FLAT_WEIGHTS, tmp_path, "flat")
+    bump = _analyzer_for(analyzer_cls, extra_kwargs, method, needs_fft, _BUMP_WEIGHTS, tmp_path, "bump")
+    evals_changed = flat.eigenvalues.shape != bump.eigenvalues.shape or not np.allclose(
+        flat.eigenvalues, bump.eigenvalues
+    )
     if uses_metric:
-        assert changed, (
+        assert evals_changed, (
             f"{analyzer_cls.__name__} eigenvalues were identical under ones() "
-            "and linspace(0.2, 3.0); the metric never reached the eigenproblem"
+            "and an equal-mean off-centre bump; the metric never reached the eigenproblem"
         )
     else:
-        assert not changed, (
-            "DMD eigenvalues changed under a different spatial metric, but "
+        modes_changed = flat.modes.shape != bump.modes.shape or not np.allclose(flat.modes, bump.modes)
+        assert not modes_changed, (
+            "DMD modes changed under a different spatial metric, but "
             "dmd.py documents that the regression does not use self.W"
         )
