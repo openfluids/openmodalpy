@@ -1491,7 +1491,9 @@ class BaseAnalyzer:
             # length/shape and that the metric is an inner product.
             n_space = int(np.asarray(self.data["q"]).shape[1])
             # Invariant from __init__: prescribed type always carries a vector.
-            self.W = _coerce_spatial_weights(cast(ArrayLike, self._prescribed_spatial_weights), n_space)
+            # Column, matching calculate_uniform_weights / calculate_polar_weights.
+            # The helper stays flat: other callers reshape themselves.
+            self.W = _coerce_spatial_weights(cast(ArrayLike, self._prescribed_spatial_weights), n_space).reshape(-1, 1)
             logger.info("Using prescribed spatial weights.")
         elif self.spatial_weight_type == "polar":
             self.W = calculate_polar_weights(self.data["x"], self.data["y"], use_parallel=self.use_parallel)

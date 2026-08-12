@@ -176,6 +176,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now raises rather than filling the high-index rows with NaN.
 
 ### Added
+- A test that two prescribed spatial metrics give two different eigenvalues
+  on POD, ST-POD, mPOD, SPOD, PSD-POD and BSMD, and the same eigenvalues on
+  DMD (the regression documents that it does not use `self.W`). Complements
+  the survival test that only checks the vector is still on `analyzer.W`
+  after the run.
 - `openmodalpy analyze` accepts `--solver {eigh,svd}` and forwards it to POD.
   The solver route was documented under `methods show pod` but reachable only
   from a config file; the CLI flag closes that gap. Omitting the flag leaves
@@ -403,6 +408,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- Prescribed spatial weights now have the same column shape as the uniform
+  and polar builders (`(n_space, 1)`). The prescribed path used to store a
+  flat `(n_space,)` vector, so BSMD's `W * prod` against an
+  `(Nspace, Nblocks)` field raised `ValueError` and never ran. The other six
+  analyzers already accepted either shape. A prescribed `W` written into a
+  results file is therefore now a column rather than a flat vector; the
+  reader already accepts both (`ndim == 1` or `shape[1] == 1`). BSMD could
+  never have written such a file because it raised. Weight values are
+  unchanged.
 - The MAT loader no longer double-counts an absent coordinate. A `.mat` that
   carried `y` and no `x` used to set `Nx` to the whole snapshot width, so
   `Nx*Ny*Nz` counted `y` twice and the uniform/polar weight vector was that

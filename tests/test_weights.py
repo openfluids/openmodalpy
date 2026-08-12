@@ -236,3 +236,131 @@ def test_omitted_weight_type_resolves_to_uniform(analyzer_cls, extra_kwargs):
     weights = np.arange(1.0, 7.0)  # Nx * Ny = 6
     prescribed = analyzer_cls(spatial_weights=weights, **kwargs)
     assert prescribed.spatial_weight_type == "prescribed"
+
+
+_SURVIVAL_NS = 16
+_SURVIVAL_NX = 4
+_SURVIVAL_NY = 2
+_SURVIVAL_NSPACE = _SURVIVAL_NX * _SURVIVAL_NY
+_SURVIVAL_T = np.linspace(0.0, 2.0 * np.pi, _SURVIVAL_NS, endpoint=False)
+_SURVIVAL_X = np.linspace(0.0, 1.0, _SURVIVAL_NSPACE)
+_SURVIVAL_GRID = {
+    "q": 1.0 + np.outer(np.sin(_SURVIVAL_T), np.sin(2.0 * np.pi * _SURVIVAL_X)),
+    "x": np.linspace(0.0, 1.0, _SURVIVAL_NX),
+    "y": np.linspace(0.0, 1.0, _SURVIVAL_NY),
+    "dt": 1.0,
+    "Nx": _SURVIVAL_NX,
+    "Ny": _SURVIVAL_NY,
+    "Ns": _SURVIVAL_NS,
+}
+_SURVIVAL_WEIGHTS = np.linspace(0.5, 1.5, _SURVIVAL_NSPACE)
+
+
+@pytest.mark.parametrize(
+    "analyzer_cls, extra_kwargs, method, needs_fft",
+    [
+        (PODAnalyzer, {"n_modes_save": 2}, "perform_pod", False),
+        (STPODAnalyzer, {"n_modes_save": 2, "embedding_dim": 2}, "perform_stpod", False),
+        (MPODAnalyzer, {"n_modes_save": 2}, "perform_mpod", False),
+        (DMDAnalyzer, {"rank": 2}, "perform_dmd", False),
+        (SPODAnalyzer, {"nfft": 8, "overlap": 0.5}, "perform_spod", True),
+        (BSMDAnalyzer, {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}, "perform_bsmd", True),
+        (PSDPODAnalyzer, {"nfft": 8, "overlap": 0.5, "n_modes_save": 2}, "perform_psd_pod", True),
+    ],
+    ids=["POD", "ST-POD", "mPOD", "DMD", "SPOD", "BSMD", "PSD-POD"],
+)
+def test_prescribed_weights_survive_decomposition(analyzer_cls, extra_kwargs, method, needs_fft):
+    """A prescribed metric must still be analyzer.W after the eigenproblem runs.
+
+    Coverage used to exist only for POD. This checks presence, not use: the
+    vector is still on the object afterwards. Whether the solver consulted it
+    is a separate question, answered by
+    ``test_prescribed_weights_change_the_eigenvalues`` below. What a run alone
+    proves is that the decomposition completes at all with a prescribed metric,
+    which BSMD did not — it raised on the flat prescribed shape.
+    """
+    analyzer = analyzer_cls(
+        file_path="dummy",
+        data_loader=lambda _: _SURVIVAL_GRID,
+        spatial_weights=_SURVIVAL_WEIGHTS,
+        use_parallel=False,
+        **extra_kwargs,
+    )
+    analyzer.load_and_preprocess()
+    np.testing.assert_array_equal(np.asarray(analyzer.W).ravel(), _SURVIVAL_WEIGHTS)
+    if needs_fft:
+        analyzer.compute_fft_blocks()
+    getattr(analyzer, method)()
+    np.testing.assert_array_equal(np.asarray(analyzer.W).ravel(), _SURVIVAL_WEIGHTS)
+
+
+_ONES_WEIGHTS = np.ones(_SURVIVAL_NSPACE)
+_SKEW_WEIGHTS = np.linspace(0.2, 3.0, _SURVIVAL_NSPACE)
+
+
+def _copy_survival_grid() -> dict:
+    return {
+        "q": np.array(_SURVIVAL_GRID["q"], copy=True),
+        "x": np.array(_SURVIVAL_GRID["x"], copy=True),
+        "y": np.array(_SURVIVAL_GRID["y"], copy=True),
+        "dt": _SURVIVAL_GRID["dt"],
+        "Nx": _SURVIVAL_GRID["Nx"],
+        "Ny": _SURVIVAL_GRID["Ny"],
+        "Ns": _SURVIVAL_GRID["Ns"],
+    }
+
+
+def _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp_path, tag):
+    analyzer = analyzer_cls(
+        file_path="dummy",
+        data_loader=lambda _: _copy_survival_grid(),
+        spatial_weights=weights,
+        use_parallel=False,
+        results_dir=str(tmp_path / tag / "results"),
+        figures_dir=str(tmp_path / tag / "figures"),
+        **extra_kwargs,
+    )
+    analyzer.load_and_preprocess()
+    if needs_fft:
+        analyzer.compute_fft_blocks()
+    getattr(analyzer, method)()
+    return np.asarray(analyzer.eigenvalues)
+
+
+@pytest.mark.parametrize(
+    "analyzer_cls, extra_kwargs, method, needs_fft, uses_metric",
+    [
+        (PODAnalyzer, {"n_modes_save": 2}, "perform_pod", False, True),
+        (STPODAnalyzer, {"n_modes_save": 2, "embedding_dim": 2}, "perform_stpod", False, True),
+        (MPODAnalyzer, {"n_modes_save": 2}, "perform_mpod", False, True),
+        (SPODAnalyzer, {"nfft": 8, "overlap": 0.5}, "perform_spod", True, True),
+        (BSMDAnalyzer, {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}, "perform_bsmd", True, True),
+        (PSDPODAnalyzer, {"nfft": 8, "overlap": 0.5, "n_modes_save": 2}, "perform_psd_pod", True, True),
+        (DMDAnalyzer, {"rank": 2}, "perform_dmd", False, False),
+    ],
+    ids=["POD", "ST-POD", "mPOD", "SPOD", "BSMD", "PSD-POD", "DMD"],
+)
+def test_prescribed_weights_change_the_eigenvalues(
+    analyzer_cls, extra_kwargs, method, needs_fft, uses_metric, tmp_path
+):
+    """Two prescribed metrics must change the answer if and only if the solver uses W.
+
+    Survival of analyzer.W after the run is not enough: a refactor could stop
+    consulting the metric and leave the vector on the object. ones(n) against
+    linspace(0.2, 3.0, n) on the same field is the cheap check. DMD documents
+    at dmd.py:350 that the regression does not use the spatial metric, so its
+    eigenvalues must stay put rather than being forced into the using group.
+    """
+    ones = _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, _ONES_WEIGHTS, tmp_path, "ones")
+    skew = _eigenvalues_for(analyzer_cls, extra_kwargs, method, needs_fft, _SKEW_WEIGHTS, tmp_path, "skew")
+    changed = ones.shape != skew.shape or not np.allclose(ones, skew)
+    if uses_metric:
+        assert changed, (
+            f"{analyzer_cls.__name__} eigenvalues were identical under ones() "
+            "and linspace(0.2, 3.0); the metric never reached the eigenproblem"
+        )
+    else:
+        assert not changed, (
+            "DMD eigenvalues changed under a different spatial metric, but "
+            "dmd.py documents that the regression does not use self.W"
+        )
