@@ -185,6 +185,35 @@ def _as_weight_vector(metric: SpatialMetric | np.ndarray, n_space: int) -> np.nd
     return _coerce_spatial_weights(metric, n_space)
 
 
+# Row-centeredness discriminator for the SVD route when ``n_keep is None``.
+# Statistic: max|mean over axis 0| / std(data). Real ST-POD delay lifts bottom
+# out near 2e-3 (~2000x above this). Centered data stays below it through
+# offsets ~1e9 x the fluctuation; beyond that detection is lost (see
+# ``_solve_svd``). The two mistakes are not symmetric: a false "centered" on a
+# delay lift drops a real mode (unacceptable), a false "not centered" keeps
+# today's behaviour. When unsure, do not declare centered.
+CENTERED_ROW_MEAN_RATIO = 1e-6
+
+
+def _row_mean_to_std_ratio(data: np.ndarray) -> float:
+    """max|column-mean| / std(data); infinite when the array has no spread.
+
+    A constant array has no spread, so the ratio is mathematically infinite, not
+    zero: every column mean equals the constant. Reporting zero would call it
+    centered and tighten the cap, which costs a single-sample constant array its
+    only mode. Infinity keeps it on the safe side of the asymmetry.
+    """
+    spread = float(np.std(data))
+    if spread == 0.0:
+        return float("inf")
+    return float(np.max(np.abs(np.mean(data, axis=0))) / spread)
+
+
+def _measures_as_centered(data: np.ndarray) -> bool:
+    """True only when the row-mean / std statistic is clearly below threshold."""
+    return _row_mean_to_std_ratio(data) < CENTERED_ROW_MEAN_RATIO
+
+
 def _unweight_modes(weighted_modes: np.ndarray, weights: np.ndarray) -> np.ndarray:
     """Recover physical modes from sqrt(W)-weighted ones.
 
@@ -469,20 +498,26 @@ def _solve_svd(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Weighted SVD route (ST-POD). ``data`` is samples × features.
 
-    Caps the mode count at the matrix bound ``min(n_samples, n_space)``. Does
-    not assume mean-centered rows: a delay-embedded window of a zero-mean
-    series is not itself zero-mean, so the all-ones left-null that centering
-    would create is not present.
+    Caps the mode count at the matrix bound ``min(n_samples, n_space)`` when
+    the input does not measure as row-centered. A delay-embedded window of a
+    zero-mean series is not itself zero-mean, so the all-ones left-null that
+    centering would create is not present and the full matrix bound applies.
 
-    Centered input, and the limit of the floor. Centering nulls one direction;
-    the relative singular-value floor recognises it only while the removed mean
-    is comparable to the fluctuation. Measured on Gaussian data: the residual
-    null sits 3x to 70x below the floor for a mean of order the fluctuation,
-    but centering a mean 1e3 times larger loses enough digits to lift it ABOVE
-    the floor, and the route then returns one numerically null extra mode.
-    Callers that center are expected to pass ``n_keep`` from their own
-    ``min(n_samples - 1, n_space)`` bound, which is what shields POD here — the
-    floor is a backstop for that case, not the guarantee.
+    When ``n_keep is None``, centeredness is *measured* on the input via
+    :data:`CENTERED_ROW_MEAN_RATIO` (max |column-mean| / std). If the input
+    measures as centered, the cap tightens to ``min(n_samples - 1, n_space)``
+    because row-centering nulls one direction. Callers that pass an explicit
+    ``n_keep`` have declared their own bound; that path is untouched.
+
+    Detection ceiling near offset 1e9. The statistic separates centered data
+    from genuine delay lifts up to a mean offset of roughly 1e9 times the
+    fluctuation. Beyond that the residual null no longer measures as centered
+    and the route falls back to today's behaviour (keep the extra mode). At
+    those offsets centering has already destroyed most significant digits, so
+    the decomposition is meaningless regardless of the mode count — the fix is
+    not universal past that ceiling. The asymmetric risk is intentional: a
+    false "centered" on a delay lift would drop a real mode; a false "not
+    centered" only preserves the prior junk-mode behaviour.
     """
     n_samples, n_space = data.shape
     weights = _as_weight_vector(metric, n_space)
@@ -493,11 +528,14 @@ def _solve_svd(
     # would have been factored (temporal if n_samples < n_space, else spatial).
     # Distinct from the mode-count cap below — do not reuse one for the other.
     n_kernel = min(n_samples, n_space)
-    # Honest matrix rank bound. ST-POD's lifted matrix is full row rank; POD
-    # loses one direction to its OWN caller-side cap, before this route is
-    # asked for k modes — not to the floor below. See the docstring.
+    # Honest matrix rank bound. ST-POD's lifted matrix is full row rank. When
+    # the caller leaves n_keep unset and the input measures as row-centered,
+    # tighten by one (centering nulls a direction). Explicit n_keep is the
+    # caller's bound and is never rewritten here.
     max_rank = max(min(n_samples, n_space), 0)
     if n_keep is None:
+        if _measures_as_centered(data):
+            max_rank = max(min(n_samples - 1, n_space), 0)
         k = max_rank
     else:
         k = min(int(n_keep), max_rank)

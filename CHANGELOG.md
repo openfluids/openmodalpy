@@ -394,6 +394,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- The SVD route no longer returns a meaningless extra mode when a caller centers
+  data whose mean dwarfs the fluctuation. `weighted_second_order(...,
+  method="svd", n_keep=None)` used to trust a relative singular-value floor to
+  drop the direction that centering nulls. That floor stops recognising it once
+  the removed mean is about a thousand times the fluctuation, because subtracting
+  it destroys too many digits. The route now measures whether the input is
+  row-centered, and tightens the bound to `min(m - 1, n)` only when the
+  measurement says so. Detection holds to a mean about 1e9 times the fluctuation;
+  past that the data itself is too damaged for the mode count to mean anything.
+  Callers that pass an explicit `n_keep` are unaffected, which includes POD and
+  ST-POD, so no analyzer output changes.
 - ST-POD returns one more mode in the temporal-lift regime. The SVD route and
   ST-POD's caller both capped the mode count at `min(m - 1, n)`, the bound that
   mean-centering would justify — but the matrix they factor is the delay-embedded
