@@ -164,7 +164,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         }
 
     def save_results(self, filename: str | None = None) -> None:
-        """Write modes, eigenvalues, time coefficients, freq and st to HDF5."""
+        """Write modes, eigenvalues, time coefficients, freq, st and W to HDF5."""
         from openmodalpy.core.results import write_results
 
         if not filename:
@@ -180,15 +180,18 @@ class PSDPODAnalyzer(BaseAnalyzer):
 
         attrs = self._get_metadata()
         attrs["analysis_type"] = "psd_pod"
+        datasets: dict = {
+            "eigenvalues": np.asarray(self.eigenvalues),
+            "modes": self.modes,
+            "time_coefficients": self.time_coefficients,
+            "freq": self.freq,
+            "st": self.St,
+        }
+        if self.W.size > 0:
+            datasets["W"] = self.W
         write_results(
             save_path,
-            {
-                "eigenvalues": np.asarray(self.eigenvalues),
-                "modes": self.modes,
-                "time_coefficients": self.time_coefficients,
-                "freq": self.freq,
-                "st": self.St,
-            },
+            datasets,
             attrs=attrs,
         )
         self.results_path = save_path

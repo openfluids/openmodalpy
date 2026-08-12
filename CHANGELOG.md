@@ -408,6 +408,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- PSD-POD now writes the spatial metric `W` into the results file. The
+  eigenproblem already used `self.W`, but `save_results` omitted it, so two
+  runs of the same data under different metrics produced different modes and
+  files whose provenance looked identical. The dataset is the column
+  `(n_space, 1)` the rest of the package stores, and is omitted when `W` is
+  empty (an analyzer that never loaded data). Weight values and the
+  eigenproblem are unchanged.
 - The spatial metric `self.W` is always a column `(n_space, 1)` after load,
   after a run, and after a save/load round trip. POD's default (uniform) path
   used to overwrite that column with a flat vector, so a default POD result

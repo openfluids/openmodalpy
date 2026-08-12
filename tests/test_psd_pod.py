@@ -112,3 +112,39 @@ def test_psdpod_config_and_api_agree(tmp_path: Path) -> None:
             "spectral_estimator",
         ):
             assert cfg.attrs[key] == api.attrs[key]
+
+
+def test_psdpod_save_results_records_prescribed_metric(tmp_path: Path) -> None:
+    """A saved PSD-POD file holds the prescribed W that produced it, as a column."""
+    data = generate_example_dataset("double_gyre", {"Nx": 8, "Ny": 4, "Nt": 24})
+    n_space = 8 * 4
+    weights = np.linspace(0.5, 2.0, n_space)
+
+    analyzer = PSDPODAnalyzer(
+        file_path="double_gyre",
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+        data_loader=lambda _: data,
+        spatial_weight_type="prescribed",
+        spatial_weights=weights,
+        nfft=8,
+        overlap=0.5,
+        n_modes_save=3,
+        use_parallel=False,
+    )
+    analyzer.load_and_preprocess()
+    analyzer.compute_fft_blocks()
+    analyzer.perform_psd_pod()
+    analyzer.save_results("psd_pod_w.hdf5")
+
+    assert analyzer.results_path is not None
+    with h5py.File(analyzer.results_path, "r") as handle:
+        assert "W" in handle
+        stored = np.asarray(handle["W"])
+    used = np.asarray(analyzer.W)
+    np.testing.assert_array_equal(stored, used)
+    assert stored.shape == (n_space, 1)
+    # Pin the file to the weights that were ASKED for, not only to whatever sits
+    # on the object at save time. Without this, a save that faithfully records a
+    # metric the run had already replaced would still pass.
+    np.testing.assert_array_equal(stored, weights.reshape(-1, 1))
