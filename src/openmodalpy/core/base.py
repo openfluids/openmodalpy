@@ -1294,6 +1294,26 @@ def _coerce_spatial_weights(w: ArrayLike, expected_len: int) -> np.ndarray:
     return np.asarray(weights, dtype=float)
 
 
+def _as_spatial_weight_column(w: ArrayLike, n_space: int | None = None) -> np.ndarray:
+    """Accepted weight shapes -> column of shape ``(n_space, 1)``.
+
+    ``n_space`` defaults to the length ``_coerce_spatial_weights`` would
+    produce from ``w`` (vector length, column height, or square side).
+    Pass it explicitly to reject a wrong-length input.
+    """
+    arr = np.asarray(w)
+    if n_space is None:
+        if arr.ndim == 3:
+            if arr.shape[0] != arr.shape[1]:
+                raise ValueError("weight array's first two dimensions must be equal")
+            n_space = int(arr.shape[0] * arr.shape[2])
+        elif arr.ndim == 2 and arr.shape[0] == arr.shape[1] and arr.shape[1] != 1:
+            n_space = int(arr.shape[0])
+        else:
+            n_space = int(arr.size)
+    return _coerce_spatial_weights(arr, int(n_space)).reshape(-1, 1)
+
+
 def _reported_grid(data: Mapping[str, Any]) -> tuple[int, int, int] | None:
     """Return ``(Nx, Ny, Nz)`` when ``data`` carries a grid claim, else ``None``.
 
@@ -1485,21 +1505,23 @@ class BaseAnalyzer:
                     f"q.shape[1]={n_space} (grid Nx={nx}, Ny={ny}, Nz={nz})"
                 )
 
-        # Calculate spatial weights
+        # Calculate spatial weights. Every type is a column (n_space, 1).
         if self.spatial_weight_type == "prescribed":
             # n_space from the snapshot matrix (time × space); helpers check
             # length/shape and that the metric is an inner product.
             n_space = int(np.asarray(self.data["q"]).shape[1])
             # Invariant from __init__: prescribed type always carries a vector.
-            # Column, matching calculate_uniform_weights / calculate_polar_weights.
-            # The helper stays flat: other callers reshape themselves.
-            self.W = _coerce_spatial_weights(cast(ArrayLike, self._prescribed_spatial_weights), n_space).reshape(-1, 1)
+            self.W = _as_spatial_weight_column(cast(ArrayLike, self._prescribed_spatial_weights), n_space)
             logger.info("Using prescribed spatial weights.")
         elif self.spatial_weight_type == "polar":
-            self.W = calculate_polar_weights(self.data["x"], self.data["y"], use_parallel=self.use_parallel)
+            self.W = _as_spatial_weight_column(
+                calculate_polar_weights(self.data["x"], self.data["y"], use_parallel=self.use_parallel)
+            )
             logger.info("Using polar (cylindrical) spatial weights.")
         else:
-            self.W = calculate_uniform_weights(self.data["x"], self.data["y"], self.data.get("z"))
+            self.W = _as_spatial_weight_column(
+                calculate_uniform_weights(self.data["x"], self.data["y"], self.data.get("z"))
+            )
             logger.info("Using uniform spatial weights (rectangular grid).")
 
         # Welch floor partitioning (scipy.signal.welch): drop the remainder so

@@ -408,6 +408,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- The spatial metric `self.W` is always a column `(n_space, 1)` after load,
+  after a run, and after a save/load round trip. POD's default (uniform) path
+  used to overwrite that column with a flat vector, so a default POD result
+  file stored `W` as `(n_space,)`. Loading any result file — including a
+  legacy file whose `W` dataset is flat — now reshapes on the way in.
+  Weight values are unchanged.
+- A spatial metric that is not an inner product is now rejected as soon as the
+  data is loaded, instead of later inside the solver. The polar and uniform
+  paths previously skipped this check, so a grid whose radial coordinate is 0 —
+  where every annulus area is `pi*r**2 = 0` — built a zero metric at load and
+  only failed once an analysis ran. Negative, non-finite and complex weights
+  loaded from a result file are caught at the same point. The error text is
+  unchanged; only where it surfaces.
 - `test_prescribed_weights_change_the_eigenvalues` now uses an equal-mean
   weight pair (ones vs a renormalised off-centre bump) so a solver that
   consulted only `mean(W)` no longer passes. The previous ones-vs-ramp pair

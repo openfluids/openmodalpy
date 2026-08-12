@@ -368,7 +368,13 @@ def test_bsmd_accepts_isolated_zero_weight(tmp_path):
 
 
 def test_bsmd_polar_ny1_zero_measure_raises(tmp_path):
-    """Polar weights on a single radial station at r=0 have zero total measure."""
+    """Polar weights on a single radial station at r=0 have zero total measure.
+
+    The rejection happens as soon as the data is loaded, not later when the
+    solver runs: load_and_preprocess builds the metric and checks it there.
+    That is the earliest point the fault can be seen, and it is where the
+    error text points the reader.
+    """
     rng = np.random.default_rng(20)
     ns, nx, ny = 24, 4, 1
     data = {
@@ -392,10 +398,8 @@ def test_bsmd_polar_ny1_zero_measure_raises(tmp_path):
         static_triads=[(1, 1, 2)],
         use_parallel=False,
     )
-    analyzer.load_and_preprocess()
-    analyzer.compute_fft_blocks()
     with pytest.raises(ValueError, match="zero total measure"):
-        analyzer._perform_static_bsmd_core()
+        analyzer.load_and_preprocess()
 
 
 def test_nyquist_index_is_accepted(tmp_path):

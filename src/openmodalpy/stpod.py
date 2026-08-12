@@ -38,6 +38,7 @@ from fftkit import find_peaks, periodogram_rfft
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.base import (
     BaseAnalyzer,
+    _as_spatial_weight_column,
     get_fig_aspect_ratio,
     plot_modes_3d,
     print_summary,
@@ -397,7 +398,7 @@ class STPODAnalyzer(BaseAnalyzer):
         self.eigenvalues = res.eigenvalues
         self.time_coefficients = res.time_coefficients
         if res.W is not None:
-            self.W = res.W
+            self.W = _as_spatial_weight_column(res.W)
         if res.temporal_mean is not None:
             self.temporal_mean = res.temporal_mean
         for coord_key in ("x", "y", "z"):

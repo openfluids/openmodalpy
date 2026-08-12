@@ -47,6 +47,7 @@ from tqdm import tqdm
 
 from openmodalpy.core.base import (
     BaseAnalyzer,
+    _as_spatial_weight_column,
     _hdf5_write_mode,
     add_inset_colorbar,
     canonicalize_modes,
@@ -835,7 +836,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         if res.energy_map is not None:
             self.energy_map = res.energy_map
         if res.W is not None:
-            self.W = res.W
+            self.W = _as_spatial_weight_column(res.W)
         for coord_key in ("x", "y", "z"):
             value = getattr(res, coord_key, None)
             if value is not None:

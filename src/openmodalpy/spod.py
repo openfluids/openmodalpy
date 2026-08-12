@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from openmodalpy.core.base import (
     BaseAnalyzer,
+    _as_spatial_weight_column,
     _write_qhat_stamp,
     add_inset_colorbar,
     format_mode_title,
@@ -411,7 +412,7 @@ class SPODAnalyzer(BaseAnalyzer):
         if res.FFTBlocks is not None:
             self.qhat = res.FFTBlocks
         if res.W is not None:
-            self.W = res.W
+            self.W = _as_spatial_weight_column(res.W)
         for coord_key in ("x", "y", "z"):
             value = getattr(res, coord_key, None)
             if value is not None:

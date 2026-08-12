@@ -34,6 +34,7 @@ from numpy.typing import ArrayLike
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.base import (
     BaseAnalyzer,
+    _as_spatial_weight_column,
     add_inset_colorbar,
     format_mode_title,
     get_fig_aspect_ratio,
@@ -202,7 +203,7 @@ class PODAnalyzer(BaseAnalyzer):
 
         # 2. Spatial metric (inner-product weights)
         if self.spatial_weight_type == "uniform":
-            self.W = np.ones(num_space_points, dtype=np.float64)
+            self.W = np.ones((num_space_points, 1), dtype=np.float64)
 
         # Ensure W is a 1D array for efficient broadcasting
         if self.W.ndim == 2:
@@ -364,7 +365,7 @@ class PODAnalyzer(BaseAnalyzer):
         self.eigenvalues = res.eigenvalues
         self.time_coefficients = res.time_coefficients
         if res.W is not None:
-            self.W = res.W
+            self.W = _as_spatial_weight_column(res.W)
         if res.temporal_mean is not None:
             self.temporal_mean = res.temporal_mean
         for coord_key in ("x", "y", "z"):
