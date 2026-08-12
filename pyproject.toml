@@ -135,38 +135,9 @@ include = [
 python_version = "3.11"
 exclude = ["tests/", "examples/"]
 ignore_missing_imports = true
-
-# mypy ratchet: modules listed here have fully annotated defs and are pinned with
-# disallow_untyped_defs so they cannot quietly regress. A module joins only once
-# its defs are annotated.
-[[tool.mypy.overrides]]
-module = [
-    "openmodalpy",
-    "openmodalpy.__main__",
-    "openmodalpy.cli",
-    "openmodalpy.config_io",
-    "openmodalpy.core",
-    "openmodalpy.core.config",
-    "openmodalpy.core.decomposition",
-    "openmodalpy.core.provenance",
-    "openmodalpy.core.results",
-    "openmodalpy.core.threads",
-    "openmodalpy.example_data",
-    "openmodalpy.examples",
-    "openmodalpy.specs",
-    "openmodalpy.commands",
-    "openmodalpy.stpod",
-    "openmodalpy.psd_pod",
-    "openmodalpy.core.welch",
-    "openmodalpy.core.parallel",
-    "openmodalpy.core.base",
-    "openmodalpy.core.io",
-    "openmodalpy.pod",
-    "openmodalpy.mpod",
-    "openmodalpy.spod",
-    "openmodalpy.dmd",
-    "openmodalpy.bsmd",
-]
+# Every def under src/openmodalpy is annotated, so this is set once globally
+# rather than per module. A new file is checked the day it is added, instead
+# of staying unchecked until someone remembers to list it.
 disallow_untyped_defs = true
 
 [tool.ruff]
