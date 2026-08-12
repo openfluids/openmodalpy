@@ -31,7 +31,6 @@ from openmodalpy.core.config import (
     CMAP_DIV,
     FFT_BACKEND,
 )
-from openmodalpy.core.io import auto_detect_weight_type as di_auto_detect_weight_type
 from openmodalpy.core.io import load_data as di_load_data
 from openmodalpy.core.io import load_jetles_data as di_load_jetles_data
 from openmodalpy.core.io import load_mat_data as di_load_mat_data
@@ -1228,13 +1227,6 @@ def blocksfft(
     )
 
 
-def auto_detect_weight_type(file_path: str) -> str:
-    # Always return 'uniform' for dNamiX consolidated .npz files
-    if file_path.lower().endswith(".npz"):
-        return "uniform"
-    return di_auto_detect_weight_type(file_path)
-
-
 def require_spatial_metric(weights: ArrayLike) -> None:
     """Raise ``ValueError`` if ``weights`` do not define an inner product.
 
@@ -1353,7 +1345,7 @@ class BaseAnalyzer:
         results_dir: str = "./preprocess",
         figures_dir: str = "./figs",
         data_loader: Callable[..., dict[str, Any]] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
     ) -> None:
@@ -1366,8 +1358,9 @@ class BaseAnalyzer:
             results_dir (str): Directory to save results.
             figures_dir (str): Directory to save figures.
             data_loader (callable): Function to load data.
-            spatial_weight_type (str): Type of spatial weighting
-                (``"auto"``, ``"uniform"``, ``"polar"``, or ``"prescribed"``).
+            spatial_weight_type (str | None): Type of spatial weighting
+                (``None`` → ``"uniform"``, or ``"uniform"``, ``"polar"``,
+                ``"prescribed"``). ``"auto"`` is not accepted.
             spatial_weights: Optional array of spatial integration weights.
                 When given, the weight type becomes ``"prescribed"`` and the
                 vector is checked against the grid in ``load_and_preprocess``.
@@ -1383,27 +1376,30 @@ class BaseAnalyzer:
         self.use_parallel = use_parallel
 
         # Weight type / prescribed vector — one validation site for all analyzers.
-        accepted = ("auto", "uniform", "polar", "prescribed")
+        # None means "not specified" and resolves to uniform (same numeric default
+        # as the former unconditional "auto" path). Keep None out of the conflict
+        # check so spatial_weights=array with no type still prescribes a metric.
+        accepted = ("uniform", "polar", "prescribed")
         self._prescribed_spatial_weights: ArrayLike | None
         if spatial_weights is not None:
-            if spatial_weight_type not in ("auto", "prescribed"):
+            if spatial_weight_type not in (None, "prescribed"):
                 raise ValueError(
                     f"spatial_weights was given, but spatial_weight_type={spatial_weight_type!r} "
-                    f"conflicts with it. Use spatial_weight_type='prescribed' (or omit / 'auto'), "
+                    f"conflicts with it. Use spatial_weight_type='prescribed' (or omit / None), "
                     f"or drop spatial_weights. Accepted types: {', '.join(accepted)}."
                 )
             self.spatial_weight_type = "prescribed"
             self._prescribed_spatial_weights = spatial_weights
         else:
-            if spatial_weight_type not in accepted:
+            if spatial_weight_type is None:
+                self.spatial_weight_type = "uniform"
+            elif spatial_weight_type not in accepted:
                 raise ValueError(
                     f"spatial_weight_type={spatial_weight_type!r} is not recognised. "
                     f"Accepted values: {', '.join(accepted)}."
                 )
-            if spatial_weight_type == "prescribed":
+            elif spatial_weight_type == "prescribed":
                 raise ValueError("spatial_weight_type='prescribed' requires a spatial_weights array.")
-            if spatial_weight_type == "auto":
-                self.spatial_weight_type = auto_detect_weight_type(file_path)
             else:
                 self.spatial_weight_type = spatial_weight_type
             self._prescribed_spatial_weights = None

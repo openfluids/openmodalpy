@@ -1154,9 +1154,3 @@ def load_dnami_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
 
 
 DNamiXNPZLoader = DNamiDataLoader
-
-
-def auto_detect_weight_type(file_path: str) -> str:
-    """Return spatial weight type for ``file_path``."""
-    del file_path
-    return "uniform"

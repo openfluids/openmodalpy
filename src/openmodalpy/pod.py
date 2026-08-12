@@ -94,7 +94,7 @@ class PODAnalyzer(BaseAnalyzer):
         results_dir: str = RESULTS_DIR_POD,
         figures_dir: str = FIGURES_DIR_POD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         n_modes_save: int = 10,
         use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
@@ -111,9 +111,8 @@ class PODAnalyzer(BaseAnalyzer):
             data_loader (callable, optional): Custom function to load data from `file_path`.
                                               If None, `BaseAnalyzer` attempts to auto-detect.
                                               Defaults to None.
-            spatial_weight_type (str, optional): Type of spatial weights to apply
-                ('auto', 'uniform', 'polar', 'prescribed'). 'auto' attempts to detect
-                from filename. Defaults to 'auto'.
+            spatial_weight_type (str | None, optional): Type of spatial weights to apply
+                (None → 'uniform', or 'uniform', 'polar', 'prescribed'). Defaults to None.
             n_modes_save (int, optional): Number of dominant POD modes to compute, save,
                                           and consider for plotting/reconstruction.
                                           Defaults to 10.

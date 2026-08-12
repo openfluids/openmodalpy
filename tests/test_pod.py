@@ -614,12 +614,48 @@ def test_mpod_energy_label_says_retained_only(tmp_path):
 
 def test_unknown_spatial_weight_type_raises_at_construction():
     """A typo is a construction error naming the accepted values, not silent keep."""
-    with pytest.raises(ValueError, match=r"uniform.*polar|auto.*prescribed|prescribed.*auto"):
+    with pytest.raises(ValueError, match=r"uniform.*polar|polar.*prescribed"):
         PODAnalyzer(
             file_path="dummy",
             data_loader=lambda _: {},
             spatial_weight_type="unifrom",
         )
+
+
+def test_auto_spatial_weight_type_raises_at_construction():
+    """'auto' is gone: raise, and name the real choices instead of only echoing."""
+    with pytest.raises(ValueError, match=r"Accepted values:\s*uniform,\s*polar,\s*prescribed") as excinfo:
+        PODAnalyzer(
+            file_path="dummy",
+            data_loader=lambda _: {},
+            spatial_weight_type="auto",
+        )
+    # The message may echo 'auto' as the rejected input, but must not offer it
+    # back as a remedy. Match only the accepted list, not the whole message.
+    remedy = str(excinfo.value).split("Accepted values:", 1)[1]
+    assert "auto" not in remedy
+
+
+def test_array_without_type_still_prescribes():
+    """spatial_weights=array with default type None remains a valid prescribe path."""
+    data = {
+        "q": np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+        "x": np.array([0.0, 1.0]),
+        "y": np.array([0.0]),
+        "dt": 1.0,
+        "Nx": 2,
+        "Ny": 1,
+        "Ns": 3,
+    }
+    weights = np.array([2.0, 3.0])
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: data,
+        spatial_weights=weights,
+    )
+    assert analyzer.spatial_weight_type == "prescribed"
+    analyzer.load_and_preprocess()
+    np.testing.assert_allclose(np.asarray(analyzer.W).ravel(), weights)
 
 
 def test_prescribed_without_array_raises_at_construction():

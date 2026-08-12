@@ -3,7 +3,17 @@ import warnings
 import numpy as np
 import pytest
 
+from openmodalpy import (
+    BSMDAnalyzer,
+    DMDAnalyzer,
+    MPODAnalyzer,
+    PODAnalyzer,
+    PSDPODAnalyzer,
+    SPODAnalyzer,
+    STPODAnalyzer,
+)
 from openmodalpy.core.base import (
+    BaseAnalyzer,
     _coerce_spatial_weights,
     calculate_polar_weights,
     calculate_uniform_weights,
@@ -185,3 +195,44 @@ def test_uniform_weights_3d_length():
     z = np.array([0.0, 1.0])
     w = calculate_uniform_weights(x, y, z)
     assert w.shape == (len(x) * len(y) * len(z), 1)
+
+
+_SENTINEL_GRID = {
+    "q": np.arange(24.0).reshape(4, 6),
+    "x": np.array([0.0, 1.0, 2.0]),
+    "y": np.array([0.0, 1.0]),
+    "dt": 1.0,
+    "Nx": 3,
+    "Ny": 2,
+    "Ns": 4,
+}
+
+
+@pytest.mark.parametrize(
+    "analyzer_cls, extra_kwargs",
+    [
+        (BaseAnalyzer, {}),
+        (PODAnalyzer, {}),
+        (MPODAnalyzer, {}),
+        (SPODAnalyzer, {}),
+        (STPODAnalyzer, {}),
+        (DMDAnalyzer, {"rank": 2}),
+        (BSMDAnalyzer, {}),
+        (PSDPODAnalyzer, {}),
+    ],
+)
+def test_omitted_weight_type_resolves_to_uniform(analyzer_cls, extra_kwargs):
+    """Omitting the weight type means uniform, on every analyzer.
+
+    The default lives as a separate ``spatial_weight_type=None`` in eight
+    signatures, and only POD's is covered elsewhere. The second assert is the
+    one that bites: ``None`` is a sentinel for "not specified", so replacing it
+    with a plain ``"uniform"`` string would keep this first assert passing while
+    making an array with no type raise instead of prescribing a metric.
+    """
+    kwargs = {"file_path": "dummy", "data_loader": lambda _: _SENTINEL_GRID, **extra_kwargs}
+    assert analyzer_cls(**kwargs).spatial_weight_type == "uniform"
+
+    weights = np.arange(1.0, 7.0)  # Nx * Ny = 6
+    prescribed = analyzer_cls(spatial_weights=weights, **kwargs)
+    assert prescribed.spatial_weight_type == "prescribed"

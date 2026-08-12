@@ -95,7 +95,7 @@ class SPODAnalyzer(BaseAnalyzer):
         window_norm: str = WINDOW_NORM,
         window_type: str = WINDOW_TYPE,
         data_loader: Callable[..., dict[str, Any]] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         use_parallel: bool = True,
         characteristic_length: float | None = None,
         characteristic_velocity: float | None = None,
@@ -130,9 +130,8 @@ class SPODAnalyzer(BaseAnalyzer):
             data_loader (callable, optional): Custom function to load data from `file_path`.
                                               If None, `BaseAnalyzer` attempts to auto-detect.
                                               Defaults to None.
-            spatial_weight_type (str, optional): Type of spatial weights to apply
-                ('auto', 'uniform', 'polar', 'prescribed'). 'auto' attempts to detect
-                from filename. Defaults to 'auto'.
+            spatial_weight_type (str | None, optional): Type of spatial weights to apply
+                (None → 'uniform', or 'uniform', 'polar', 'prescribed'). Defaults to None.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed'.
         """

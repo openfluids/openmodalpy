@@ -187,7 +187,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         results_dir: str = RESULTS_DIR_BSMD,
         figures_dir: str = FIGURES_DIR_BSMD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         use_static_triads: bool = True,
         static_triads: Sequence[tuple[int, int, int]] | None = None,
         use_parallel: bool = True,
@@ -210,9 +210,8 @@ class BSMDAnalyzer(BaseAnalyzer):
             data_loader (callable, optional): Custom function to load data from `file_path`.
                                               If None, `BaseAnalyzer` attempts to auto-detect.
                                               Defaults to None.
-            spatial_weight_type (str, optional): Type of spatial weights to apply
-                ('auto', 'uniform', 'polar', 'prescribed'). 'auto' attempts to detect
-                from filename. Defaults to 'auto'.
+            spatial_weight_type (str | None, optional): Type of spatial weights to apply
+                (None → 'uniform', or 'uniform', 'polar', 'prescribed'). Defaults to None.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed'.
             use_static_triads (bool, optional): If True, use the `static_triads` list.

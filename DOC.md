@@ -107,13 +107,15 @@ named lifts (`IdentityLift`, `DelayEmbeddingLift`, `BandFilteredLift`), a
 PSD-POD all call that solver; `lift_kind` metadata comes from `lift.kind`.
 
 **Spatial weights.** Every analyzer accepts `spatial_weight_type` in
-`{"auto", "uniform", "polar", "prescribed"}` (anything else raises at
-construction). Pass an array as `spatial_weights=` to prescribe a metric: the
+`{"uniform", "polar", "prescribed"}` (anything else — including the former
+`"auto"` — raises at construction). Omitting the argument (`None`) resolves to
+`"uniform"`. Pass an array as `spatial_weights=` to prescribe a metric: the
 type becomes `"prescribed"`, and the vector is checked against the snapshot
 grid (`n_space`) in `load_and_preprocess` (length/shape, finite, non-negative,
 non-zero total). `"prescribed"` without an array, or an array together with
-`"uniform"`/`"polar"`, raises at construction. Config/CLI still only expose
-the type string; prescribing a vector is a library argument.
+`"uniform"`/`"polar"`, raises at construction. An array with no type still
+prescribes. Config/CLI still only expose the type string; prescribing a vector
+is a library argument.
 
 **Limitation — uniform W is not a domain integral.** With
 `spatial_weight_type="uniform"`, W is the all-ones vector, not cell volumes or
@@ -153,9 +155,9 @@ Every analyzer expects a Python dict with these keys:
 
 | Type | When to use |
 |------|------------|
-| `"uniform"` | Cartesian grids, single-component data |
+| `"uniform"` | Cartesian grids, single-component data (also the default when omitted) |
 | `"polar"` | Cylindrical grids (jet nozzle coordinates) |
-| `"auto"` | Auto-detect from data/filename |
+| `"prescribed"` | Caller-supplied metric via `spatial_weights=` |
 
 `"uniform"` currently returns ones (`calculate_uniform_weights`); it does **not**
 apply Δx·Δy cell volumes. Polar weights do use radial spacing. Until cell-volume
@@ -475,7 +477,7 @@ implemented and raises `NotImplementedError`.
       "kind": "file",              // "file", "generator", or "dnami"
       "path": "../data/file.mat"   // relative to this config file
     },
-    "spatial_weight_type": "uniform",  // "uniform", "polar", or "auto" (library also accepts "prescribed" + spatial_weights=)
+    "spatial_weight_type": "uniform",  // "uniform" or "polar" (library also accepts "prescribed" + spatial_weights=)
     "n_modes_save": 10,
     "rank": 10,                    // DMD only (required): positive int | "svht" | "energy"
     "energy_fraction": 0.999,      // DMD only: cumulative s² target when rank is "energy" (analyzer default 0.999)

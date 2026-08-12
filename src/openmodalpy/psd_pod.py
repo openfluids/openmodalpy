@@ -48,7 +48,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         results_dir: str = RESULTS_DIR,
         figures_dir: str = FIGURES_DIR,
         data_loader: Callable[[str], dict] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         nfft: int = 128,
         overlap: float = 0.5,
         n_modes_save: int = 10,

@@ -224,7 +224,7 @@ class DMDAnalyzer(BaseAnalyzer):
         results_dir: str = RESULTS_DIR_DMD,
         figures_dir: str = FIGURES_DIR_DMD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         n_modes_save: int = 10,
         rank: int | np.integer | Literal["svht", "energy"] | None = None,  # required: positive int | "svht" | "energy"
         energy_fraction: float = 0.999,

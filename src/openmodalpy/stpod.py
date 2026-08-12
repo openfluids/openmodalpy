@@ -86,7 +86,7 @@ class STPODAnalyzer(BaseAnalyzer):
         results_dir: str = RESULTS_DIR_STPOD,
         figures_dir: str = FIGURES_DIR_STPOD,
         data_loader: Callable[[str], dict] | None = None,
-        spatial_weight_type: str = "auto",
+        spatial_weight_type: str | None = None,
         use_parallel: bool = True,
         spatial_weights: np.ndarray | None = None,
     ):
@@ -100,7 +100,7 @@ class STPODAnalyzer(BaseAnalyzer):
             figures_dir: Directory to save figures.
             data_loader: Custom function to load data.
             spatial_weight_type: Type of spatial weights
-                ('auto', 'uniform', 'polar', 'prescribed').
+                (None → 'uniform', or 'uniform', 'polar', 'prescribed').
             use_parallel: Whether to use parallel computation where available.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed'.
