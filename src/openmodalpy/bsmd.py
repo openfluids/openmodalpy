@@ -351,6 +351,36 @@ class BSMDAnalyzer(BaseAnalyzer):
             self._qhat_dataset = None
             self._qhat_on_disk = False
 
+    def _rebind_qhat_dataset(self, cache_path: str | None) -> None:
+        """Re-open ``FFTBlocks`` after a write that needed the cache handle closed.
+
+        Restores the disk-backed binding when the dataset is still on disk.
+        If the path or ``FFTBlocks`` is gone, or the open fails, the on-disk
+        flag is cleared so ``_qhat_on_disk`` never outlives a live dataset.
+        """
+        self._qhat_file = None
+        self._qhat_dataset = None
+        self._qhat_on_disk = False
+        if cache_path is None or not os.path.isfile(cache_path):
+            return
+        handle = None
+        try:
+            handle = h5py.File(cache_path, "r")
+            if "FFTBlocks" not in handle:
+                handle.close()
+                return
+            dataset = handle["FFTBlocks"]
+        except Exception:
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+            return
+        self._qhat_file = handle
+        self._qhat_dataset = dataset
+        self._qhat_on_disk = True
+
     def __del__(self) -> None:
         try:
             self.close()
@@ -775,12 +805,14 @@ class BSMDAnalyzer(BaseAnalyzer):
         using_cache_file = qhat_cache_path is not None and os.path.abspath(results_path) == os.path.abspath(
             qhat_cache_path
         )
+        was_on_disk = self._qhat_on_disk
         if using_cache_file and self._qhat_file is not None:
             # The FFT cache may already hold an open handle to this same path.
             # Close it before updating the file in append mode.
             self._qhat_file.close()
             self._qhat_file = None
             self._qhat_dataset = None
+            self._qhat_on_disk = False
 
         file_mode = _hdf5_write_mode(results_path) if using_cache_file else "w"
         datasets: dict = {
@@ -796,7 +828,14 @@ class BSMDAnalyzer(BaseAnalyzer):
             datasets["z"] = self.data["z"]
         if self.energy_map.size:
             datasets["energy_map"] = self.energy_map
-        write_results(results_path, datasets, attrs=self._get_metadata(), mode=file_mode, compression=None)
+        try:
+            write_results(results_path, datasets, attrs=self._get_metadata(), mode=file_mode, compression=None)
+        finally:
+            # Restore the binding we dropped to avoid two handles on one path.
+            # The honest end state is the one we started with; if FFTBlocks is
+            # gone, _rebind_qhat_dataset clears the flag instead.
+            if was_on_disk and using_cache_file:
+                self._rebind_qhat_dataset(qhat_cache_path)
         logger.info("Results saved to %s", results_path)
 
     def load_results(self, filename: str | None = None) -> None:

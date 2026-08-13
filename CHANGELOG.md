@@ -416,6 +416,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- A large BSMD analyzer stays usable after `save_results`. When the FFT blocks
+  are too large for memory, BSMD reads them from a cache file. To write results
+  onto that same file, `save_results` must first close the handle it reads
+  through. It closed the handle but still recorded the blocks as available on
+  disk, so any later use — a second `perform_bsmd` with different triads, or a
+  read of the number of frequency bins — reached a file that was no longer open.
+  The handle is now reopened once the write finishes, including when the write
+  fails, and the analyzer never records the blocks as available unless a file is
+  really open behind them. If the blocks are gone from the file, the analyzer
+  reports no data instead. `close()` and the saved numbers are unchanged. This
+  never affected `run_analysis`, which closes the file immediately after saving.
 - A multi-band mPOD run now announces the decomposition it performed. The
   single-band shortcut inherited POD's start, timing and mode-count INFO
   lines; two or more bands ran the multiscale loop in silence. The multi-band

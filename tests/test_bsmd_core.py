@@ -865,3 +865,158 @@ def test_bsmd_save_preserves_fftblocks_on_the_cache_file(tmp_path):
         assert "triads" in handle
         assert "eigenvalues" in handle
         assert "modes1" in handle
+
+
+def test_qhat_disk_state_consistent_after_save_results(tmp_path):
+    """save_results onto the FFT cache must leave disk-backed qhat readable.
+
+    Closing the cache handle (needed so the append does not open a second
+    writer on the same path) used to leave ``_qhat_on_disk`` True with
+    ``_qhat_dataset`` None. Readers then hit that None dataset. This test
+    saves to the cache filename so it reaches that branch.
+    """
+    from pathlib import Path
+
+    first_triads = [(1, -1, 0), (0, 0, 0)]
+    second_triads = [(1, 1, 2), (2, -2, 0)]
+
+    disk_dir = tmp_path / "disk"
+    disk_dir.mkdir()
+    disk = _make_analyzer(disk_dir, triads=first_triads, nfft=8, Ns=24, max_qhat_gb=0)
+    assert disk._qhat_on_disk, "Expected disk-backed mode with max_qhat_gb=0"
+    assert disk._qhat_dataset is not None
+    cache_path = disk._qhat_cache_path
+    assert cache_path is not None
+    cache_name = Path(cache_path).name
+    save_path = Path(disk.results_dir) / cache_name
+    assert save_path.resolve() == Path(cache_path).resolve(), (
+        "save must target the cache file to hit the using_cache_file branch"
+    )
+
+    n_freq_before = disk._n_freq_bins
+    n_spatial_before = disk._n_spatial
+    disk.perform_bsmd()
+    disk.save_results(cache_name)
+
+    # Invariant: flag True implies a live dataset (not a None leftover).
+    if disk._qhat_on_disk:
+        assert disk._qhat_dataset is not None, "_qhat_on_disk is True but _qhat_dataset is None after save_results"
+    assert disk._qhat_on_disk, "disk-backed reuse must survive save_results"
+    assert disk._n_freq_bins == n_freq_before
+    assert disk._n_spatial == n_spatial_before
+
+    disk.static_triads_list = list(second_triads)
+    disk.perform_bsmd()
+    eigs_after_save = np.asarray(disk.eigenvalues)
+
+    control_dir = tmp_path / "control"
+    control_dir.mkdir()
+    control = _make_analyzer(control_dir, triads=second_triads, nfft=8, Ns=24, max_qhat_gb=0)
+    control.perform_bsmd()
+    np.testing.assert_allclose(eigs_after_save, control.eigenvalues, rtol=1e-12, atol=1e-12)
+
+    disk.close()
+    assert disk._qhat_file is None
+    assert disk._qhat_dataset is None
+    assert disk._qhat_on_disk is False
+    control.close()
+
+
+def test_qhat_disk_state_consistent_when_save_results_raises(tmp_path, monkeypatch):
+    """A failed save onto the FFT cache must leave disk-backed qhat consistent.
+
+    Closing the cache handle (needed so the append does not open a second
+    writer on the same path) used to leave ``_qhat_on_disk`` True with
+    ``_qhat_dataset`` None. If the write then failed, ``close()`` could not
+    repair it because the handle was already None. The flag must not outlive
+    a live dataset, including when rebind itself cannot open the cache.
+    """
+    from pathlib import Path
+
+    import openmodalpy.bsmd as bsmd
+    import openmodalpy.core.results as results_mod
+
+    disk = _make_analyzer(tmp_path, triads=[(1, -1, 0)], nfft=8, Ns=24, max_qhat_gb=0)
+    assert disk._qhat_on_disk, "Expected disk-backed mode with max_qhat_gb=0"
+    assert disk._qhat_dataset is not None
+    cache_path = disk._qhat_cache_path
+    assert cache_path is not None
+    cache_name = Path(cache_path).name
+    save_path = Path(disk.results_dir) / cache_name
+    assert save_path.resolve() == Path(cache_path).resolve(), (
+        "save must target the cache file to hit the using_cache_file branch"
+    )
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("forced write_results failure")
+
+    monkeypatch.setattr(results_mod, "write_results", _boom)
+
+    with pytest.raises(RuntimeError, match="forced write_results failure"):
+        disk.save_results(cache_name)
+
+    if disk._qhat_on_disk:
+        assert disk._qhat_dataset is not None, (
+            "_qhat_on_disk is True but _qhat_dataset is None after failed save_results"
+        )
+    disk.close()
+    assert disk._qhat_file is None
+    assert disk._qhat_dataset is None
+    assert disk._qhat_on_disk is False
+
+    # Rebind whose open fails must leave the flag False, not True.
+    junk = tmp_path / "not-an-hdf5.txt"
+    junk.write_text("not hdf5", encoding="utf-8")
+    disk._qhat_on_disk = True
+    disk._rebind_qhat_dataset(str(junk))
+    assert disk._qhat_on_disk is False
+    assert disk._qhat_file is None
+    assert disk._qhat_dataset is None
+
+    def _bad_open(*_args, **_kwargs):
+        raise TypeError("forced non-OSError open failure")
+
+    monkeypatch.setattr(bsmd.h5py, "File", _bad_open)
+    disk._qhat_on_disk = True
+    disk._rebind_qhat_dataset(cache_path)
+    assert disk._qhat_on_disk is False
+    assert disk._qhat_file is None
+    assert disk._qhat_dataset is None
+
+
+def test_qhat_disk_state_consistent_when_write_mode_probe_raises(tmp_path, monkeypatch):
+    """A raise BEFORE the write must not leave the flag set with no dataset.
+
+    The write mode is probed, and the dataset dict built, after the cache
+    handle has been closed but before the write is attempted. A raise in that
+    window used to exit with ``_qhat_on_disk`` True and ``_qhat_dataset`` None
+    -- the one state ``close()`` cannot repair, because its clear is guarded on
+    the handle still being non-None. Distinct from the failed-write test above,
+    which exercises the window the ``finally`` already covers.
+    """
+    from pathlib import Path
+
+    import openmodalpy.bsmd as bsmd
+
+    disk = _make_analyzer(tmp_path, triads=[(1, -1, 0)], nfft=8, Ns=24, max_qhat_gb=0)
+    assert disk._qhat_on_disk, "Expected disk-backed mode with max_qhat_gb=0"
+    cache_path = disk._qhat_cache_path
+    assert cache_path is not None
+    cache_name = Path(cache_path).name
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("forced write-mode probe failure")
+
+    monkeypatch.setattr(bsmd, "_hdf5_write_mode", _boom)
+
+    with pytest.raises(OSError, match="forced write-mode probe failure"):
+        disk.save_results(cache_name)
+
+    assert not (disk._qhat_on_disk and disk._qhat_dataset is None), (
+        "_qhat_on_disk is True but _qhat_dataset is None after a pre-write failure"
+    )
+
+    disk.close()
+    assert disk._qhat_file is None
+    assert disk._qhat_dataset is None
+    assert disk._qhat_on_disk is False
