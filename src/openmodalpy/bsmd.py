@@ -836,7 +836,10 @@ class BSMDAnalyzer(BaseAnalyzer):
         if res.energy_map is not None:
             self.energy_map = res.energy_map
         if res.W is not None:
-            self.W = _as_spatial_weight_column(res.W)
+            # Modes are (n_triads, n_space). Any other rank means the file
+            # carries no usable size, so leave the length unchecked.
+            n_space = int(res.modes1.shape[1]) if res.modes1 is not None and res.modes1.ndim == 2 else None
+            self.W = _as_spatial_weight_column(res.W, n_space)
         for coord_key in ("x", "y", "z"):
             value = getattr(res, coord_key, None)
             if value is not None:

@@ -412,7 +412,10 @@ class SPODAnalyzer(BaseAnalyzer):
         if res.FFTBlocks is not None:
             self.qhat = res.FFTBlocks
         if res.W is not None:
-            self.W = _as_spatial_weight_column(res.W)
+            # Modes are (n_freq, n_space, nblocks). Any other rank means the
+            # file carries no usable size, so leave the length unchecked.
+            n_space = int(res.modes.shape[1]) if res.modes is not None and res.modes.ndim == 3 else None
+            self.W = _as_spatial_weight_column(res.W, n_space)
         for coord_key in ("x", "y", "z"):
             value = getattr(res, coord_key, None)
             if value is not None:

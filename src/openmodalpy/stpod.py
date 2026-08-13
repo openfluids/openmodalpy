@@ -398,7 +398,14 @@ class STPODAnalyzer(BaseAnalyzer):
         self.eigenvalues = res.eigenvalues
         self.time_coefficients = res.time_coefficients
         if res.W is not None:
-            self.W = _as_spatial_weight_column(res.W)
+            n_space = None
+            embedding_dim = res.attrs.get("embedding_dim")
+            # Modes are (d * n_space, n_modes) with d the embedding dimension.
+            # Any other rank, or a missing d, means the file carries no usable
+            # size, so leave the length unchecked.
+            if res.modes is not None and res.modes.ndim == 2 and embedding_dim is not None and int(embedding_dim) > 0:
+                n_space = int(res.modes.shape[0]) // int(embedding_dim)
+            self.W = _as_spatial_weight_column(res.W, n_space)
         if res.temporal_mean is not None:
             self.temporal_mean = res.temporal_mean
         for coord_key in ("x", "y", "z"):

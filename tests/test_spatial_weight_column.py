@@ -112,3 +112,81 @@ def test_legacy_flat_w_dataset_loads_as_column(name, cls, perform_name, extra, t
     loaded.load_results(fname)
     assert _is_column(loaded.W), f"{name} legacy flat W loaded as {np.asarray(loaded.W).shape}"
     np.testing.assert_allclose(loaded.W.ravel(), flat)
+
+
+@pytest.mark.parametrize("name, cls, perform_name, extra", _ANALYZERS, ids=[c[0] for c in _ANALYZERS])
+def test_load_results_rejects_mismatched_w_and_keeps_matching_w(name, cls, perform_name, extra, tmp_path):
+    analyzer = _build(cls, extra, "prescribed", tmp_path, "mismatch")
+    analyzer.load_and_preprocess()
+    if hasattr(analyzer, "compute_fft_blocks"):
+        analyzer.compute_fft_blocks()
+    getattr(analyzer, perform_name)()
+    fname = f"mismatch_{name.replace('-', '')}.hdf5"
+    analyzer.save_results(fname)
+
+    matching = _build(cls, extra, "prescribed", tmp_path, "mismatch")
+    matching.load_results(fname)
+    assert _is_column(matching.W), f"{name} matching W loaded as {np.asarray(matching.W).shape}"
+    np.testing.assert_allclose(np.asarray(matching.W), np.asarray(analyzer.W))
+
+    path = tmp_path / "mismatch" / "results" / fname
+    wrong_len = 3
+    with h5py.File(path, "r+") as h5:
+        del h5["W"]
+        h5.create_dataset("W", data=np.linspace(1.0, 2.0, wrong_len))
+
+    loaded = _build(cls, extra, "prescribed", tmp_path, "mismatch")
+    with pytest.raises(ValueError, match=rf"length {wrong_len}.*n_space={NSPACE}"):
+        loaded.load_results(fname)
+
+
+_MODE_KEY = {"POD": "modes", "ST-POD": "modes", "SPOD": "modes", "BSMD": "modes1"}
+
+
+@pytest.mark.parametrize("name, cls, perform_name, extra", _ANALYZERS, ids=[c[0] for c in _ANALYZERS])
+def test_load_results_skips_the_length_check_without_a_usable_mode_array(name, cls, perform_name, extra, tmp_path):
+    """No usable rank means no size on the file, so W loads unchecked as it did before.
+
+    Reachable without touching a file by hand: saving before the decomposition
+    runs writes an empty, rank-1 mode array.
+    """
+    analyzer = _build(cls, extra, "prescribed", tmp_path, "nosize")
+    analyzer.load_and_preprocess()
+    if hasattr(analyzer, "compute_fft_blocks"):
+        analyzer.compute_fft_blocks()
+    getattr(analyzer, perform_name)()
+    fname = f"nosize_{name.replace('-', '')}.hdf5"
+    analyzer.save_results(fname)
+
+    path = tmp_path / "nosize" / "results" / fname
+    wrong = np.linspace(1.0, 2.0, 3)
+    with h5py.File(path, "r+") as h5:
+        del h5[_MODE_KEY[name]]
+        h5.create_dataset(_MODE_KEY[name], data=np.array([]))
+        del h5["W"]
+        h5.create_dataset("W", data=wrong)
+
+    loaded = _build(cls, extra, "prescribed", tmp_path, "nosize")
+    loaded.load_results(fname)
+    np.testing.assert_allclose(np.asarray(loaded.W).ravel(), wrong)
+
+
+def test_bsmd_load_results_skips_w_length_check_without_modes1(tmp_path):
+    extra = {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}
+    analyzer = _build(BSMDAnalyzer, extra, "prescribed", tmp_path, "nosize")
+    analyzer.load_and_preprocess()
+    analyzer.compute_fft_blocks()
+    analyzer.perform_bsmd()
+    fname = "bsmd_nosize.hdf5"
+    analyzer.save_results(fname)
+
+    path = tmp_path / "nosize" / "results" / fname
+    wrong = np.linspace(1.0, 2.0, 3)
+    with h5py.File(path, "r+") as h5:
+        del h5["modes1"]
+        del h5["W"]
+        h5.create_dataset("W", data=wrong)
+
+    loaded = _build(BSMDAnalyzer, extra, "prescribed", tmp_path, "nosize")
+    loaded.load_results(fname)
+    np.testing.assert_allclose(np.asarray(loaded.W).ravel(), wrong)

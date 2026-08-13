@@ -365,7 +365,10 @@ class PODAnalyzer(BaseAnalyzer):
         self.eigenvalues = res.eigenvalues
         self.time_coefficients = res.time_coefficients
         if res.W is not None:
-            self.W = _as_spatial_weight_column(res.W)
+            # Modes are (n_space, n_modes). Any other rank means the file
+            # carries no usable size, so leave the length unchecked.
+            n_space = int(res.modes.shape[0]) if res.modes is not None and res.modes.ndim == 2 else None
+            self.W = _as_spatial_weight_column(res.W, n_space)
         if res.temporal_mean is not None:
             self.temporal_mean = res.temporal_mean
         for coord_key in ("x", "y", "z"):

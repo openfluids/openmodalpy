@@ -408,6 +408,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- `load_results` now rejects a results file whose spatial metric `W` does not
+  match the file's own spatial size. The four readers (POD, ST-POD, SPOD,
+  BSMD) used to call `_as_spatial_weight_column` without `n_space`, so a
+  3-entry `W` beside a 32-point field loaded as `(3, 1)` and the analysis
+  ran on a metric that does not belong to the data. Each site now passes the
+  size already on the file (POD `modes.shape[0]`, ST-POD
+  `modes.shape[0] // embedding_dim` from `attrs`, SPOD `modes.shape[1]`,
+  BSMD `modes1.shape[1]`). A file with no usable size source still loads as
+  before. The error names both lengths. Weight values on matching files are
+  unchanged.
 - PSD-POD now writes the spatial metric `W` into the results file. The
   eigenproblem already used `self.W`, but `save_results` omitted it, so two
   runs of the same data under different metrics produced different modes and
