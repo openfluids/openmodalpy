@@ -834,3 +834,201 @@ def test_coerce_energy_fraction_rejects_boolean():
         _coerce_energy_fraction(True)
     with pytest.raises(ValueError, match=r"energy_fraction"):
         _coerce_energy_fraction(False)
+
+
+def _minimal_analysis_payload(tmp_path: Path) -> dict[str, object]:
+    return {
+        "name": "Toy case",
+        "description": "Toy case",
+        "case": {
+            "name": "toy_case",
+            "case_type": "analytical",
+            "data": {
+                "kind": "generator",
+                "name": "double_gyre",
+                "params": {"Nx": 8, "Ny": 4, "Nt": 12},
+            },
+            "results_root": str(tmp_path / "results"),
+            "figures_root": str(tmp_path / "figures"),
+        },
+        "runs": [{"id": "pod", "method": "pod"}],
+    }
+
+
+def _mapping_keys_read(func: object, names: set[str]) -> set[str]:
+    """String keys read from the named mappings in ``func`` via get / [] / in."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in names
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in names
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            keys.add(node.slice.value)
+        elif isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(op, ast.In | ast.NotIn) and isinstance(comparator, ast.Name) and comparator.id in names:
+                    keys.add(node.left.value)
+    return keys
+
+
+def test_accepted_key_constants_match_readers() -> None:
+    """The accepted-key constants must match what the loaders actually read."""
+    from openmodalpy.commands import (
+        CASE_FIELD_KEYS,
+        CASE_KEYS,
+        DATA_KEYS,
+        RUN_KEYS,
+        TOP_LEVEL_KEYS,
+        _apply_case_overrides,
+        _load_case_spec_from_payload,
+        _load_run_collection,
+        _validate_config_kind,
+    )
+
+    assert CASE_KEYS == CASE_FIELD_KEYS | {"name", "description", "case_type", "data"}
+    assert _mapping_keys_read(_load_case_spec_from_payload, {"case_payload"}) == set(CASE_KEYS)
+    assert _mapping_keys_read(_load_case_spec_from_payload, {"data_payload"}) == set(DATA_KEYS)
+    assert _mapping_keys_read(_apply_case_overrides, {"overrides"}) == set(CASE_FIELD_KEYS)
+    assert _mapping_keys_read(_load_run_collection, {"run_payload"}) == set(RUN_KEYS)
+    top_keys = (
+        _mapping_keys_read(_load_case_spec_from_payload, {"payload"})
+        | _mapping_keys_read(_load_run_collection, {"payload"})
+        | _mapping_keys_read(_validate_config_kind, {"payload"})
+    )
+    assert top_keys == set(TOP_LEVEL_KEYS)
+
+
+def test_unknown_top_level_key_raises(tmp_path: Path) -> None:
+    config_path = tmp_path / "typo_top.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    payload["nfft_"] = 64
+    _write_jsonc(config_path, payload)
+    with pytest.raises(ValueError, match=r"nfft_") as excinfo:
+        run_from_config(config_path, dry_run=True)
+    message = str(excinfo.value)
+    assert config_path.name in message
+    assert "Accepted keys" in message
+    assert "kind" in message
+
+
+def test_unknown_case_key_raises(tmp_path: Path) -> None:
+    from openmodalpy.commands import load_case_spec
+
+    config_path = tmp_path / "typo_case.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    case = payload["case"]
+    assert isinstance(case, dict)
+    case["n_modes_sav"] = 8
+    _write_jsonc(config_path, payload)
+    with pytest.raises(ValueError, match=r"n_modes_sav") as excinfo:
+        load_case_spec(config_path)
+    message = str(excinfo.value)
+    assert config_path.name in message
+    assert "Accepted keys" in message
+    assert "n_modes_save" in message
+
+
+def test_unknown_run_key_raises(tmp_path: Path) -> None:
+    config_path = tmp_path / "typo_run.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    payload["runs"] = [{"id": "pod", "method": "pod", "nfft_": 64}]
+    _write_jsonc(config_path, payload)
+    with pytest.raises(ValueError, match=r"nfft_") as excinfo:
+        run_from_config(config_path, dry_run=True)
+    message = str(excinfo.value)
+    assert config_path.name in message
+    assert "Accepted keys" in message
+    assert "method" in message
+
+
+def test_spatial_weights_key_in_config_raises(tmp_path: Path) -> None:
+    """A spatial_weights array in a config must raise, not run under uniform weights."""
+    config_path = tmp_path / "spatial_weights.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    case = payload["case"]
+    assert isinstance(case, dict)
+    case["spatial_weights"] = [1.0, 1.0, 1.0]
+    _write_jsonc(config_path, payload)
+    with pytest.raises(ValueError, match=r"spatial_weights.*cannot prescribe a metric.*library API"):
+        run_from_config(config_path, dry_run=True)
+
+
+def test_kind_must_agree_with_contents(tmp_path: Path) -> None:
+    """Top-level kind is read and must match whether the file has a configs list."""
+    lying_analysis = tmp_path / "lie_analysis.jsonc"
+    _write_jsonc(
+        lying_analysis,
+        {
+            "kind": "analysis-suite",
+            "name": "Lie",
+            "description": "Lie",
+            "configs": [str(tmp_path / "missing.jsonc")],
+        },
+    )
+    with pytest.raises(ValueError, match=r"analysis-suite"):
+        run_from_config(lying_analysis, dry_run=True)
+
+    lying_suite = tmp_path / "lie_suite.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    payload["kind"] = "config-suite"
+    _write_jsonc(lying_suite, payload)
+    with pytest.raises(ValueError, match=r"config-suite"):
+        run_from_config(lying_suite, dry_run=True)
+
+    bad_kind = tmp_path / "bad_kind.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    payload["kind"] = "nope"
+    _write_jsonc(bad_kind, payload)
+    with pytest.raises(ValueError, match=r"analysis-suite.*config-suite"):
+        run_from_config(bad_kind, dry_run=True)
+
+    honest = tmp_path / "honest.jsonc"
+    payload = _minimal_analysis_payload(tmp_path)
+    payload["kind"] = "analysis-suite"
+    _write_jsonc(honest, payload)
+    run_from_config(honest, dry_run=True)
+
+    child = tmp_path / "child.jsonc"
+    _write_jsonc(child, _minimal_analysis_payload(tmp_path) | {"kind": "analysis-suite"})
+    suite = tmp_path / "suite.jsonc"
+    _write_jsonc(
+        suite,
+        {
+            "kind": "config-suite",
+            "name": "Nested",
+            "description": "Nested",
+            "configs": [str(child)],
+        },
+    )
+    run_from_config(suite, dry_run=True)
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((Path(__file__).resolve().parents[1] / "examples").glob("*.jsonc")),
+    ids=lambda p: p.stem,
+)
+def test_shipped_example_config_loads(path: Path) -> None:
+    from openmodalpy.commands import _load_run_collection
+
+    collection = _load_run_collection(path)
+    assert collection.name

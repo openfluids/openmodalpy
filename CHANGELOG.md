@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Breaking
+- Config loading now rejects a key that nothing reads. Unknown keys at the
+  top level, in the `case` block, in `case.data`, and in each run entry raise
+  `ValueError` naming the file, the offending key, and the keys accepted at
+  that level. A `spatial_weights` array in a config raises and says a config
+  file cannot prescribe a metric, pointing you at the library API or at
+  `spatial_weight_type` for a built-in one. Misspellings
+  such as `n_modes_sav` no longer fall through to the default. Top-level
+  `kind` is read and must be `"analysis-suite"` or `"config-suite"` and agree
+  with whether the file has a `configs` list.
 - Loading now stops when the spatial metric does not carry exactly one weight
   per column of the snapshot matrix. That metric is what enters the inner
   product, and its length was never checked against the data. The check is

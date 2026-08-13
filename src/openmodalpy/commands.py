@@ -148,10 +148,76 @@ def _coerce_energy_fraction(value: Any) -> float | None:
     return frac
 
 
+# Accepted keys, written once per level next to the readers below.
+# CASE_FIELD_KEYS is the overlap between the case payload and CLI/Python overrides.
+TOP_LEVEL_KEYS = frozenset({"kind", "name", "description", "case", "runs", "configs"})
+CASE_FIELD_KEYS = frozenset(
+    {
+        "spatial_weight_type",
+        "n_modes_save",
+        "rank",
+        "energy_fraction",
+        "nfft",
+        "overlap",
+        "embedding_dim",
+        "use_parallel",
+        "generate_plots",
+        "results_root",
+        "figures_root",
+    }
+)
+CASE_KEYS = CASE_FIELD_KEYS | frozenset({"name", "description", "case_type", "data"})
+DATA_KEYS = frozenset({"kind", "path", "name", "params", "schema"})
+RUN_KEYS = frozenset({"id", "method", "params", "enabled"})
+VALID_CONFIG_KINDS = frozenset({"analysis-suite", "config-suite"})
+
+
+def _reject_unknown_keys(
+    mapping: dict[str, Any],
+    accepted: frozenset[str],
+    *,
+    config_path: Path,
+    level: str,
+) -> None:
+    """Raise if ``mapping`` carries a key nothing at this level reads."""
+    unknown = [key for key in mapping if key not in accepted]
+    if not unknown:
+        return
+    if "spatial_weights" in unknown:
+        raise ValueError(
+            f"{config_path} key 'spatial_weights' cannot prescribe a metric from a "
+            "config file. Pass spatial_weights= to the analyzer through the library "
+            "API instead, or set spatial_weight_type to choose a built-in metric."
+        )
+    shown = ", ".join(repr(key) for key in unknown)
+    label = "keys" if len(unknown) > 1 else "key"
+    accepted_shown = ", ".join(sorted(accepted))
+    raise ValueError(f"{config_path} has unknown {level} {label} {shown}. Accepted keys: {accepted_shown}.")
+
+
+def _validate_config_kind(payload: dict[str, Any], config_path: Path) -> None:
+    """Read top-level ``kind`` and require it to agree with the file contents."""
+    if "kind" not in payload:
+        return
+    kind = payload["kind"]
+    accepted = "'analysis-suite', 'config-suite'"
+    if kind not in VALID_CONFIG_KINDS:
+        raise ValueError(f"{config_path} has invalid kind {kind!r}. Accepted values: {accepted}.")
+    has_configs = isinstance(payload.get("configs"), list)
+    if kind == "config-suite" and not has_configs:
+        raise ValueError(f"{config_path} kind is 'config-suite' but has no 'configs' list.")
+    if kind == "analysis-suite" and has_configs:
+        raise ValueError(f"{config_path} kind is 'analysis-suite' but contains a 'configs' list.")
+
+
 def _load_case_spec_from_payload(payload: dict[str, Any], config_path: Path) -> CaseSpec:
+    _reject_unknown_keys(payload, TOP_LEVEL_KEYS, config_path=config_path, level="top-level")
+    _validate_config_kind(payload, config_path)
+
     case_payload = payload.get("case")
     if not isinstance(case_payload, dict):
         raise ValueError(f"{config_path} must define a 'case' object.")
+    _reject_unknown_keys(case_payload, CASE_KEYS, config_path=config_path, level="case")
 
     name = str(case_payload.get("name", "")).strip()
     if not name:
@@ -160,6 +226,7 @@ def _load_case_spec_from_payload(payload: dict[str, Any], config_path: Path) -> 
     data_payload = case_payload.get("data")
     if not isinstance(data_payload, dict):
         raise ValueError(f"{config_path} case block is missing a 'data' object.")
+    _reject_unknown_keys(data_payload, DATA_KEYS, config_path=config_path, level="data")
 
     data_kind = str(data_payload.get("kind", "")).strip().lower()
     if data_kind == "file":
@@ -227,7 +294,12 @@ def load_case_spec(config_path: str | Path) -> CaseSpec:
 
 
 def _apply_case_overrides(case: CaseSpec, overrides: dict[str, Any]) -> CaseSpec:
-    """Return a copy of ``case`` with supported CLI/Python overrides applied."""
+    """Return a copy of ``case`` with supported CLI/Python overrides applied.
+
+    The names read here are ``CASE_FIELD_KEYS`` — the same set the case-payload
+    reader accepts for these fields. Method-specific override keys are left for
+    ``params`` and are not rejected here.
+    """
     return CaseSpec(
         name=case.name,
         description=case.description,
@@ -258,6 +330,8 @@ def _apply_case_overrides(case: CaseSpec, overrides: dict[str, Any]) -> CaseSpec
 
 def _load_run_collection(config_path: Path) -> RunCollectionSpec:
     payload = load_jsonc(config_path)
+    _reject_unknown_keys(payload, TOP_LEVEL_KEYS, config_path=config_path, level="top-level")
+    _validate_config_kind(payload, config_path)
     name = str(payload.get("name") or config_path.stem)
     description = str(payload.get("description") or name)
 
@@ -280,6 +354,7 @@ def _load_run_collection(config_path: Path) -> RunCollectionSpec:
     for index, run_payload in enumerate(runs_payload, start=1):
         if not isinstance(run_payload, dict):
             raise ValueError(f"Run entry #{index} in {config_path} must be a JSON object.")
+        _reject_unknown_keys(run_payload, RUN_KEYS, config_path=config_path, level="run")
         if run_payload.get("enabled", True) is False:
             continue
         run_id = str(run_payload.get("id") or f"run_{index}")
@@ -980,6 +1055,7 @@ def discover_examples(root: str | Path | None = None) -> list[ExampleInfo]:
 
     for config_path in paths:
         payload = load_jsonc(config_path)
+        _validate_config_kind(payload, config_path)
         kind = "suite" if isinstance(payload.get("configs"), list) else "case"
         examples.append(
             ExampleInfo(
