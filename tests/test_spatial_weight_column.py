@@ -171,6 +171,29 @@ def test_load_results_skips_the_length_check_without_a_usable_mode_array(name, c
     np.testing.assert_allclose(np.asarray(loaded.W).ravel(), wrong)
 
 
+def test_stpod_sizes_w_from_the_files_embedding_dim_not_the_constructors(tmp_path):
+    """The delay depth must come from the file, not from the analyzer doing the loading.
+
+    ST-POD modes are (d * n_space, n_modes), so the spatial size needs d. The
+    loader assigns self.embedding_dim further down the same method, which means
+    reading it at the W line gets whatever the constructor was given. Saved with
+    d = 3 and loaded by an analyzer built with the class default d = 10, the
+    stale read would size the field at 96 // 10 = 9 and reject a good file.
+    """
+    saved_d, other_d = 3, 10
+    analyzer = _build(STPODAnalyzer, {"embedding_dim": saved_d}, "prescribed", tmp_path, "embed")
+    analyzer.load_and_preprocess()
+    analyzer.perform_stpod()
+    fname = "stpod_embed.hdf5"
+    analyzer.save_results(fname)
+    assert analyzer.modes.shape[0] == saved_d * NSPACE
+
+    loaded = _build(STPODAnalyzer, {"embedding_dim": other_d}, "prescribed", tmp_path, "embed")
+    loaded.load_results(fname)
+    assert _is_column(loaded.W)
+    np.testing.assert_allclose(np.asarray(loaded.W), np.asarray(analyzer.W))
+
+
 def test_bsmd_load_results_skips_w_length_check_without_modes1(tmp_path):
     extra = {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}
     analyzer = _build(BSMDAnalyzer, extra, "prescribed", tmp_path, "nosize")
