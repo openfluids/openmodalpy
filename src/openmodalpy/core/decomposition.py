@@ -323,9 +323,11 @@ def weighted_second_order(
         PSD-POD). ``"svd"`` — weighted SVD of the data matrix (ST-POD); use
         this rather than squaring a Hankel matrix.
     n_keep
-        If set, keep only the leading ``n_keep`` modes inside the solver
-        (POD / mPOD / ST-POD / PSD-POD). Callers that need the true total
-        energy must compute it from the Frobenius identity themselves.
+        If set, keep only the leading ``n_keep`` modes (POD / mPOD /
+        ST-POD / PSD-POD). The eigh route computes the full spectrum
+        and truncates afterwards; the svd route genuinely solves for
+        ``k`` only. Callers that need the true total energy must
+        compute it from the Frobenius identity themselves.
 
     Returns
     -------

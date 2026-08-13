@@ -78,7 +78,7 @@ class PODAnalyzer(BaseAnalyzer):
                                         Shape: (n_snapshots, n_modes_save).
         temporal_mean (np.ndarray): Mean snapshot subtracted from the data before POD.
                                     Shape: (n_spatial_points,).
-        n_modes_save (int): Number of POD modes to compute, save, and use for plotting.
+        n_modes_save (int): How many leading POD modes are kept, saved, and plotted.
         data_matrix (np.ndarray): Preprocessed data matrix [time, space].
         W (np.ndarray): Spatial weighting matrix (diagonal).
         fs (float): Sampling frequency of the data (if available, mainly for context).
@@ -114,8 +114,8 @@ class PODAnalyzer(BaseAnalyzer):
                                               Defaults to None.
             spatial_weight_type (str | None, optional): Type of spatial weights to apply
                 (None → 'uniform', or 'uniform', 'polar', 'prescribed'). Defaults to None.
-            n_modes_save (int, optional): Number of dominant POD modes to compute, save,
-                                          and consider for plotting/reconstruction.
+            n_modes_save (int, optional): How many leading POD modes are kept, saved,
+                                          plotted, and used to reconstruct.
                                           Defaults to 10.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed' and the vector is checked against the grid
