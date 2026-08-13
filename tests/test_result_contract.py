@@ -31,25 +31,33 @@ from openmodalpy import (
 from openmodalpy.commands import analyze_from_config
 
 
-def _toy_field(ns: int = 16, nspace: int = 8) -> dict:
+def _toy_field(ns: int = 16, nspace: int = 8, *, nz: int = 2) -> dict:
+    """Small snapshot fixture. Default is 3-D so producers write a z dataset."""
     rng = np.random.default_rng(0)
-    nx = int(np.sqrt(nspace))
-    ny = max(1, nspace // nx)
-    nspace = nx * ny
+    nz = max(1, int(nz))
+    plane = max(1, nspace // nz)
+    nx = int(np.sqrt(plane))
+    ny = max(1, plane // nx)
+    nspace = nx * ny * nz
     t = np.linspace(0.0, 2.0 * np.pi, ns, endpoint=False)
     x = np.linspace(0.0, 1.0, nx)
     y = np.linspace(0.0, 1.0, ny)
-    q = 1.0 + np.outer(np.sin(t), np.sin(2.0 * np.pi * np.tile(x, ny)))
+    spatial = np.sin(2.0 * np.pi * np.tile(x, ny * nz))
+    q = 1.0 + np.outer(np.sin(t), spatial)
     q = q + 0.3 * rng.standard_normal(q.shape)
-    return {
+    field = {
         "q": np.ascontiguousarray(q, dtype=float),
         "x": x,
         "y": y,
         "dt": 0.1,
         "Nx": nx,
         "Ny": ny,
+        "Nz": nz,
         "Ns": ns,
     }
+    # Examples carry z=None / Nz=1; only a real axis is written.
+    field["z"] = np.linspace(0.0, 1.0, nz) if nz > 1 else None
+    return field
 
 
 def _assert_canonical_keys(path: Path, required: set[str]) -> None:
@@ -110,6 +118,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
     _assert_roundtrip(pod_res.temporal_mean, pod.temporal_mean, "POD.temporal_mean")
     _assert_roundtrip(pod_res.x, pod.data["x"], "POD.x")
     _assert_roundtrip(pod_res.y, pod.data["y"], "POD.y")
+    _assert_roundtrip(pod_res.z, pod.data["z"], "POD.z")
 
     # MPODAnalyzer (inherits POD save_results)
     mpod = MPODAnalyzer(file_path="mpod_contract", n_modes_save=2, band_edges=[0.0, 2.0, 5.0], **common)
@@ -127,6 +136,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
     _assert_roundtrip(mpod_res.temporal_mean, mpod.temporal_mean, "mPOD.temporal_mean")
     _assert_roundtrip(mpod_res.x, mpod.data["x"], "mPOD.x")
     _assert_roundtrip(mpod_res.y, mpod.data["y"], "mPOD.y")
+    _assert_roundtrip(mpod_res.z, mpod.data["z"], "mPOD.z")
 
     # DMDAnalyzer
     dmd = DMDAnalyzer(file_path="dmd_contract", n_modes_save=2, **common, rank=2)
@@ -145,6 +155,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
         _assert_roundtrip(dmd_res.omega, dmd.omega, "DMD.omega")
     _assert_roundtrip(dmd_res.x, dmd.data["x"], "DMD.x")
     _assert_roundtrip(dmd_res.y, dmd.data["y"], "DMD.y")
+    _assert_roundtrip(dmd_res.z, dmd.data["z"], "DMD.z")
 
     # SPODAnalyzer
     spod = SPODAnalyzer(file_path="spod_contract", nfft=8, overlap=0.0, **common)
@@ -178,6 +189,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
         _assert_roundtrip(spod_res.FFTBlocks, spod.qhat, "SPOD.FFTBlocks")
     _assert_roundtrip(spod_res.x, spod.data["x"], "SPOD.x")
     _assert_roundtrip(spod_res.y, spod.data["y"], "SPOD.y")
+    _assert_roundtrip(spod_res.z, spod.data["z"], "SPOD.z")
     # BSMDAnalyzer — modes1 and modes2 compared separately so a swap fails
     bsmd = BSMDAnalyzer(
         file_path="bsmd_contract",
@@ -205,6 +217,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
         _assert_roundtrip(bsmd_res.energy_map, bsmd.energy_map, "BSMD.energy_map")
     _assert_roundtrip(bsmd_res.x, bsmd.data["x"], "BSMD.x")
     _assert_roundtrip(bsmd_res.y, bsmd.data["y"], "BSMD.y")
+    _assert_roundtrip(bsmd_res.z, bsmd.data["z"], "BSMD.z")
 
     # STPODAnalyzer
     stpod = STPODAnalyzer(file_path="stpod_contract", embedding_dim=2, n_modes_save=2, **common)
@@ -223,6 +236,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
         _assert_roundtrip(stpod_res.temporal_mean, stpod.temporal_mean, "ST-POD.temporal_mean")
     _assert_roundtrip(stpod_res.x, stpod.data["x"], "ST-POD.x")
     _assert_roundtrip(stpod_res.y, stpod.data["y"], "ST-POD.y")
+    _assert_roundtrip(stpod_res.z, stpod.data["z"], "ST-POD.z")
 
     # psd_pod via PSDPODAnalyzer (in-memory arrays for value comparison)
     psd = PSDPODAnalyzer(
@@ -246,6 +260,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
     _assert_roundtrip(psd_res.time_coefficients, psd.time_coefficients, "psd_pod.time_coefficients")
     _assert_roundtrip(psd_res.freq, psd.freq, "psd_pod.freq")
     _assert_roundtrip(psd_res.st, psd.St, "psd_pod.st")
+    _assert_roundtrip(psd_res.W, psd.W, "psd_pod.W")
 
     # config path still reaches psd_pod and writes the same canonical keys
     config_path = tmp_path / "psd_pod.jsonc"
@@ -280,6 +295,64 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
     config_psd_path = Path(outcome.results_path)
     _assert_canonical_keys(config_psd_path, {"modes", "eigenvalues", "time_coefficients", "freq", "st"})
     assert read_results(config_psd_path).attrs.get("analysis_type") == "psd_pod"
+
+
+def test_two_d_field_writes_no_z_dataset(tmp_path: Path) -> None:
+    """A 2-D field (z is None, as in the examples) must not write a z dataset."""
+    field = _toy_field(nz=1)
+    assert field.get("z") is None
+    common = dict(
+        results_dir=tmp_path,
+        figures_dir=tmp_path,
+        data_loader=lambda _: field,
+        spatial_weight_type="uniform",
+    )
+
+    pod = PODAnalyzer(file_path="pod_2d", n_modes_save=2, **common)
+    pod.load_and_preprocess()
+    pod.perform_pod()
+    pod.save_results("pod_2d.hdf5")
+
+    mpod = MPODAnalyzer(file_path="mpod_2d", n_modes_save=2, band_edges=[0.0, 2.0, 5.0], **common)
+    mpod.load_and_preprocess()
+    mpod.perform_mpod()
+    mpod.save_results("mpod_2d.hdf5")
+
+    dmd = DMDAnalyzer(file_path="dmd_2d", n_modes_save=2, rank=2, **common)
+    dmd.load_and_preprocess()
+    dmd.perform_dmd()
+    dmd.save_results("dmd_2d.hdf5")
+
+    spod = SPODAnalyzer(file_path="spod_2d", nfft=8, overlap=0.0, **common)
+    spod.load_and_preprocess()
+    spod.compute_fft_blocks()
+    spod.perform_spod()
+    spod.save_results("spod_2d.hdf5")
+
+    bsmd = BSMDAnalyzer(
+        file_path="bsmd_2d",
+        nfft=8,
+        overlap=0.0,
+        use_static_triads=True,
+        static_triads=[(0, 0, 0)],
+        use_parallel=False,
+        **common,
+    )
+    bsmd.load_and_preprocess()
+    bsmd.compute_fft_blocks()
+    bsmd._perform_static_bsmd_core()
+    bsmd.save_results("bsmd_2d.hdf5")
+
+    stpod = STPODAnalyzer(file_path="stpod_2d", embedding_dim=2, n_modes_save=2, **common)
+    stpod.load_and_preprocess()
+    stpod.perform_stpod()
+    stpod.save_results("stpod_2d.hdf5")
+
+    for name in ("pod_2d.hdf5", "mpod_2d.hdf5", "dmd_2d.hdf5", "spod_2d.hdf5", "bsmd_2d.hdf5", "stpod_2d.hdf5"):
+        path = tmp_path / name
+        with h5py.File(path, "r") as handle:
+            assert "z" not in handle, f"{name}: 2-D field wrote a z dataset"
+        assert read_results(path).z is None
 
 
 def test_read_results_handles_a_zero_dimensional_dataset(tmp_path: Path) -> None:
