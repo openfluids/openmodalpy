@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, Optional
 
 import h5py
@@ -602,7 +602,7 @@ class SPODAnalyzer(BaseAnalyzer):
 
     def plot_modes(
         self,
-        freqs_to_plot: Sequence[int | float] | None = None,
+        freqs_to_plot: Iterable[int | float] | None = None,
         plot_n_modes: Optional[int] = 10,
         modes_per_fig: int = 1,
         show_cylinder: bool = False,
@@ -611,8 +611,8 @@ class SPODAnalyzer(BaseAnalyzer):
 
         Parameters
         ----------
-        freqs_to_plot : list, optional
-            List of frequencies to plot modes for
+        freqs_to_plot : list, tuple or numpy array, optional
+            Frequencies to plot modes for (bin indices or Strouhal numbers)
         plot_n_modes : int, optional
             Number of modes to plot per frequency (default 10)
         modes_per_fig : int, optional
@@ -743,21 +743,29 @@ class SPODAnalyzer(BaseAnalyzer):
                 )
 
     def plot_modes_3d_slices(
-        self, freqs_to_plot: Sequence[int | float] | None = None, plot_n_modes: Optional[int] = 2
+        self, freqs_to_plot: Iterable[int | float] | None = None, plot_n_modes: Optional[int] = 2
     ) -> None:
-        """Plot orthogonal 3D slices for selected SPOD frequencies and modes."""
+        """Plot orthogonal 3D slices for selected SPOD frequencies and modes.
+
+        ``freqs_to_plot`` is a list, tuple, or numpy array of bin indices or
+        Strouhal numbers.
+        """
         self._plot_modes_3d("slices", freqs_to_plot=freqs_to_plot, plot_n_modes=plot_n_modes)
 
     def plot_modes_3d_isometric(
-        self, freqs_to_plot: Sequence[int | float] | None = None, plot_n_modes: Optional[int] = 2
+        self, freqs_to_plot: Iterable[int | float] | None = None, plot_n_modes: Optional[int] = 2
     ) -> None:
-        """Plot 3D isosurfaces for selected SPOD frequencies and modes."""
+        """Plot 3D isosurfaces for selected SPOD frequencies and modes.
+
+        ``freqs_to_plot`` is a list, tuple, or numpy array of bin indices or
+        Strouhal numbers.
+        """
         self._plot_modes_3d("isometric", freqs_to_plot=freqs_to_plot, plot_n_modes=plot_n_modes)
 
     def _plot_modes_3d(
         self,
         kind: str,
-        freqs_to_plot: Sequence[int | float] | None = None,
+        freqs_to_plot: Iterable[int | float] | None = None,
         plot_n_modes: Optional[int] = 2,
     ) -> None:
         if self.modes.size == 0 or self.St.size == 0:
@@ -823,11 +831,14 @@ class SPODAnalyzer(BaseAnalyzer):
 
     def plot_time_coefficients(
         self,
-        modes_to_plot: Sequence[int] | None = None,
+        modes_to_plot: Iterable[int] | None = None,
         freq: float | None = None,
         n_blocks: int | None = None,
     ) -> None:
-        """Plot temporal coefficients for selected modes."""
+        """Plot temporal coefficients for selected modes.
+
+        ``modes_to_plot`` is a list, tuple, or numpy array of mode indices.
+        """
         if self.time_coefficients.size == 0:
             logger.warning("No time coefficients to plot. Run perform_spod() first.")
             return

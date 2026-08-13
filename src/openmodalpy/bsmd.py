@@ -33,7 +33,7 @@ import os
 import re
 import time
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
@@ -42,7 +42,7 @@ import matplotlib.pyplot as plt
 
 # Third-party imports
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from tqdm import tqdm
 
 from openmodalpy.core.base import (
@@ -190,7 +190,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         use_static_triads: bool = True,
-        static_triads: Sequence[tuple[int, int, int]] | None = None,
+        static_triads: Iterable[tuple[int, int, int]] | NDArray[np.integer] | None = None,
         use_parallel: bool = True,
         max_qhat_gb: float = 4.0,
         spatial_weights: ArrayLike | None = None,
@@ -218,12 +218,12 @@ class BSMDAnalyzer(BaseAnalyzer):
             use_static_triads (bool, optional): If True, use the `static_triads` list.
                                                 If False, dynamic triad selection (not yet fully implemented)
                                                 would be attempted. Defaults to True.
-            static_triads (list of tuples, optional): List of predefined frequency index triads
-                                                     (p_k, p_l, p_k+p_l) to analyze. ``None``
-                                                     (the default) resolves to a private copy of
-                                                     ``ALL_TRIADS``. Provenance is recorded so a
-                                                     small ``nfft`` filters the default list with a
-                                                     warning, while a user-supplied list still raises.
+            static_triads (list, tuple or numpy array, optional): Predefined frequency index
+                triads (p_k, p_l, p_k+p_l) to analyze. A list or tuple of 3-int tuples,
+                or a numpy array of shape (n, 3), is accepted. ``None`` (the default)
+                resolves to a private copy of ``ALL_TRIADS``. Provenance is recorded so a
+                small ``nfft`` filters the default list with a warning, while a
+                user-supplied list still raises.
             max_qhat_gb (float, optional): Maximum qhat size (GB) to keep in RAM.
                                            Larger arrays are offloaded to HDF5 and served
                                            slice-by-slice during BSMD.  Defaults to 4.0.
@@ -849,8 +849,13 @@ class BSMDAnalyzer(BaseAnalyzer):
                 self.data[attr_key] = res.attrs[attr_key]
         logger.info("BSMD results loaded.")
 
-    def plot_modes(self, triad_indices: Sequence[int] | None = None, plot_n_modes: Optional[int] = 10) -> None:
-        """Plot spatial BSMD modes for selected triads."""
+    def plot_modes(
+        self, triad_indices: Sequence[int] | NDArray[np.integer] | None = None, plot_n_modes: Optional[int] = 10
+    ) -> None:
+        """Plot spatial BSMD modes for selected triads.
+
+        ``triad_indices`` is a list, tuple, or numpy array of triad indices.
+        """
         if self.modes1.size == 0 or self.modes2.size == 0:
             logger.warning("No BSMD modes to plot. Run perform_bsmd() first.")
             return
@@ -957,21 +962,27 @@ class BSMDAnalyzer(BaseAnalyzer):
             logger.info("BSMD mode plot saved to %s", fname)
 
     def plot_modes_3d_slices(
-        self, triad_indices: Sequence[int] | None = None, plot_n_modes: Optional[int] = 10
+        self, triad_indices: Sequence[int] | NDArray[np.integer] | None = None, plot_n_modes: Optional[int] = 10
     ) -> None:
-        """Plot orthogonal 3D slices for selected BSMD triads."""
+        """Plot orthogonal 3D slices for selected BSMD triads.
+
+        ``triad_indices`` is a list, tuple, or numpy array of triad indices.
+        """
         self._plot_modes_3d("slices", triad_indices=triad_indices, plot_n_modes=plot_n_modes)
 
     def plot_modes_3d_isometric(
-        self, triad_indices: Sequence[int] | None = None, plot_n_modes: Optional[int] = 10
+        self, triad_indices: Sequence[int] | NDArray[np.integer] | None = None, plot_n_modes: Optional[int] = 10
     ) -> None:
-        """Plot 3D isosurfaces for selected BSMD triads."""
+        """Plot 3D isosurfaces for selected BSMD triads.
+
+        ``triad_indices`` is a list, tuple, or numpy array of triad indices.
+        """
         self._plot_modes_3d("isometric", triad_indices=triad_indices, plot_n_modes=plot_n_modes)
 
     def _plot_modes_3d(
         self,
         kind: str,
-        triad_indices: Sequence[int] | None = None,
+        triad_indices: Sequence[int] | NDArray[np.integer] | None = None,
         plot_n_modes: Optional[int] = 10,
     ) -> None:
         if self.modes1.size == 0 or self.modes2.size == 0:

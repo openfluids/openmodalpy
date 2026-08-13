@@ -244,6 +244,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DMD and SPOD agree on the shedding frequency without reference to the metadata.
 
 ### Changed
+- SPOD `freqs_to_plot` / `modes_to_plot` and BSMD `triad_indices` / `static_triads`
+  now accept the numpy arrays users already hold. The annotations said
+  `Sequence`, which an `ndarray` is not, so a type-checked caller could not pass
+  `np.argsort(...)` or `spod.St[:2]` even though every body already iterated or
+  sliced the array at runtime. Parameters that only iterate are `Iterable`;
+  `triad_indices` stays a sequence-or-array union because the body slices it.
+  BSMD's array forms must hold integers, so a float array of indices is still a
+  type error. Lists and tuples still type-check. Runtime behaviour is unchanged.
 - POD energy percentages now report a share of total field energy (pre-truncation),
   so regenerated figures will read lower than before for any truncated spectrum.
 - mPOD figure files now use `_mpod_` in their names (from `analysis_type`) instead of the hard-coded `_pod_` inherited from PODAnalyzer. Anything that still looks for the old `_pod_` figure names after an mPOD run must update. POD figure names are unchanged.
