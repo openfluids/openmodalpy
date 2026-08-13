@@ -372,9 +372,9 @@ def test_dmd_run_still_says_something(tmp_path, caplog):
     assert any(pattern.search(r.getMessage()) for r in info), [r.getMessage() for r in info]
 
 
-def _make_mpod(tmp_path, data: dict) -> MPODAnalyzer:
+def _make_mpod(tmp_path, data: dict, **kw) -> MPODAnalyzer:
     """MPODAnalyzer on synthetic data — same shape as the POD helper."""
-    return MPODAnalyzer(
+    opts: dict = dict(
         file_path="dummy.h5",
         results_dir=str(tmp_path),
         figures_dir=str(tmp_path),
@@ -384,6 +384,8 @@ def _make_mpod(tmp_path, data: dict) -> MPODAnalyzer:
         band_edges=[0.0, 0.5],
         use_parallel=False,
     )
+    opts.update(kw)
+    return MPODAnalyzer(**opts)
 
 
 def test_mpod_banner_does_not_say_pod(tmp_path, caplog):
@@ -418,14 +420,23 @@ def _bare_pod_label_msgs(info_msgs: list[str]) -> list[str]:
     return [m for m in info_msgs if _BARE_POD_LABEL.search(_METHOD_REF.sub("", m))]
 
 
-def test_mpod_console_labels_say_mpod_not_pod(tmp_path, caplog):
+@pytest.mark.parametrize(
+    "mpod_kw",
+    [
+        {},
+        {"band_edges": [0.0, 0.15, 0.35, 0.5], "band_scale": "normalized_nyquist"},
+    ],
+    ids=["single-band", "multi-band"],
+)
+def test_mpod_console_labels_say_mpod_not_pod(tmp_path, caplog, mpod_kw):
     """mPOD run_analysis INFO lines use mPOD, never a bare POD analysis label.
 
     Pins the six in-run sites (perform / completed / computed / saving /
-    saved / epilogue). Reverting any one of them turns this red.
+    saved / epilogue) on both the default single-band constructor and the
+    multi-band path that does not delegate to perform_pod.
     """
-    analyzer = _make_mpod(tmp_path, _synthetic_data())
-    with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
+    analyzer = _make_mpod(tmp_path, _synthetic_data(), **mpod_kw)
+    with caplog.at_level(logging.INFO, logger="openmodalpy"):
         analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
@@ -443,3 +454,49 @@ def test_mpod_console_labels_say_mpod_not_pod(tmp_path, caplog):
     )
     for frag in required_fragments:
         assert any(frag in m for m in info_msgs), (frag, info_msgs)
+
+    if mpod_kw:
+        assert analyzer.band_mode_counts.size >= 2
+        band_msgs = [m for m in info_msgs if re.search(r"band", m, re.I)]
+        assert band_msgs, info_msgs
+        # Pin the counts themselves, not just the word "band" — otherwise a line
+        # reading "per-band mode counts: unknown" would satisfy this. The digit
+        # boundaries matter: a bare "3" also matches the 3 inside "32 snapshots".
+        joined = " | ".join(band_msgs)
+        counts = [int(n) for n in analyzer.band_mode_counts]
+        missing = [c for c in counts if not re.search(rf"(?<!\d){c}(?!\d)", joined)]
+        assert not missing, (missing, band_msgs)
+
+
+def test_mpod_load_results_labels_say_mpod_not_pod(tmp_path, caplog):
+    """The two load_results notices follow analysis_type; an mPOD load says mPOD.
+
+    Pins pod.py's 'Loading %s results from %s' and '%s results loaded.' lines.
+    Hardcoding either one back to POD turns this red.
+    """
+    analyzer = _make_mpod(tmp_path, _synthetic_data())
+    analyzer.load_and_preprocess()
+    analyzer.perform_mpod()
+    analyzer.save_results("mpod_load_labels.hdf5")
+
+    with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
+        analyzer.load_results("mpod_load_labels.hdf5")
+
+    info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("Loading mPOD results from" in m for m in info_msgs), info_msgs
+    assert any("mPOD results loaded." in m for m in info_msgs), info_msgs
+    offenders = _bare_pod_label_msgs(info_msgs)
+    assert not offenders, offenders
+
+
+def test_mpod_load_results_keyerror_names_mpod(tmp_path):
+    """A non-result file loaded by mPOD must name mPOD, not POD."""
+    import h5py
+
+    bad = tmp_path / "not_mpod.hdf5"
+    with h5py.File(bad, "w") as handle:
+        handle.create_dataset("x", data=np.linspace(0.0, 1.0, 4))
+
+    analyzer = _make_mpod(tmp_path, _synthetic_data())
+    with pytest.raises(KeyError, match="not a mPOD result file"):
+        analyzer.load_results("not_mpod.hdf5")

@@ -360,7 +360,9 @@ class PODAnalyzer(BaseAnalyzer):
                 )
                 if v is None
             ]
-            raise KeyError(f"{load_path} is not a POD result file: missing {', '.join(missing)}")
+            raise KeyError(
+                f"{load_path} is not a {display_name_for(self.analysis_type)} result file: missing {', '.join(missing)}"
+            )
         self.modes = res.modes
         self.eigenvalues = res.eigenvalues
         self.time_coefficients = res.time_coefficients
@@ -775,7 +777,10 @@ class PODAnalyzer(BaseAnalyzer):
         """
         # Preconditions – ensure POD has been performed
         if self.modes.size == 0 or self.eigenvalues.size == 0:
-            logger.warning("No POD modes/eigenvalues to plot. Run perform_pod() first.")
+            logger.warning(
+                "No %s modes/eigenvalues to plot. Run perform_pod() first.",
+                display_name_for(self.analysis_type),
+            )
             return
 
         denom, label_suffix = self._energy_denominator()

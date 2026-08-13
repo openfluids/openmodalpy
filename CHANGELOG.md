@@ -416,6 +416,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- A multi-band mPOD run now announces the decomposition it performed. The
+  single-band shortcut inherited POD's start, timing and mode-count INFO
+  lines; two or more bands ran the multiscale loop in silence. The multi-band
+  path now reports the same three facts through `display_name_for`, plus the
+  per-band mode counts only mPOD has. `load_results` KeyError text follows
+  the same helper, so an mPOD run no longer says "is not a POD result file".
+  Numbers are unchanged.
 - `load_results` now rejects a results file whose spatial metric `W` does not
   match the file's own spatial size. The four readers (POD, ST-POD, SPOD,
   BSMD) used to call `_as_spatial_weight_column` without `n_space`, so a

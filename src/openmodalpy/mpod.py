@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from collections.abc import Callable, Iterable
 from typing import Any, cast
 
@@ -14,6 +16,9 @@ from numpy.typing import ArrayLike
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.config import FIGURES_DIR_POD, RESULTS_DIR_POD
 from openmodalpy.pod import PODAnalyzer
+from openmodalpy.specs import display_name_for
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_band_edges(band_edges: Iterable[float] | None, nyquist: float) -> np.ndarray:
@@ -142,6 +147,10 @@ class MPODAnalyzer(PODAnalyzer):
             self.band_mode_counts = np.array([self.eigenvalues.size], dtype=int)
             return
 
+        name = display_name_for(self.analysis_type)
+        logger.info("Performing %s analysis...", name)
+        start_time = time.time()
+
         metric = decomposition.SpatialMetric(weight_vector)
         # Kind is shared across bands; each band builds its own BandFilteredLift.
         # BandFilteredLift satisfies the Lift protocol structurally; no cast needed.
@@ -204,6 +213,10 @@ class MPODAnalyzer(PODAnalyzer):
         self.band_mode_counts = np.asarray(band_mode_counts, dtype=int)
         # keep may be < n_modes_save when bands yield fewer modes than the cap.
         self._resync_mode_count()
+
+        logger.info("%s analysis completed in %.2f seconds.", name, time.time() - start_time)
+        logger.info("Computed %d %s modes.", self.modes.shape[1], name)
+        logger.info("%s per-band mode counts: %s", name, [int(n) for n in self.band_mode_counts])
 
     def _perform_decomposition(self) -> None:
         """mPOD one-call path: do not inherit POD's perform_pod dispatch."""
