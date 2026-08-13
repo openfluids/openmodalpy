@@ -1,4 +1,4 @@
-"""n_modes_save must never outlive the mode arrays (openmodalpy-eyk)."""
+"""n_modes_save must never outlive the mode arrays."""
 
 from __future__ import annotations
 

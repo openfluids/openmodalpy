@@ -1,4 +1,4 @@
-"""Display-name map and drawn figure titles for POD / mPOD (openmodalpy-503)."""
+"""Display-name map and drawn figure titles for POD / mPOD."""
 
 from __future__ import annotations
 

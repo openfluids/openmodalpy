@@ -1,7 +1,7 @@
-"""Drawn POD energy percentages must use the pre-truncation total (openmodalpy-7mo).
+"""Drawn POD energy percentages must use the pre-truncation total.
 
-Helper-level tests from openmodalpy-5mm stay green under a per-site revert of the
-plotting denominator. These tests pin the numbers that actually leave the plotters.
+The helper-level tests stay green under a per-site revert of the plotting
+denominator. These tests pin the numbers that actually leave the plotters.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def _make_truncated_pod(tmp_path, data: dict, *, n_modes_save: int = 3) -> PODAn
 
 @pytest.fixture
 def truncated_pod(tmp_path):
-    """Supervisor-chosen fixture: denominators differ (retained/total ~ 0.5306)."""
+    """Fixture chosen so the denominators differ (retained/total ~ 0.5306)."""
     data = _synthetic_data(Ns=32, Nspace=9)
     analyzer = _make_truncated_pod(tmp_path, data, n_modes_save=3)
     retained = float(np.sum(analyzer.eigenvalues))

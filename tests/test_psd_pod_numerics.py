@@ -152,7 +152,7 @@ def test_psd_pod_isolated_zero_weight_station():
 def test_psd_pod_planted_garbage_at_zero_weight_station():
     """Masked station must report mode value 0 even if the raw data is garbage.
 
-    Mirrors the openmodalpy-c7e measurement: zero one station's weight, plant
+    Mirrors the zero-measure measurement: zero one station's weight, plant
     1e6 there, and require (i) exact-zero mode values at that station, (ii)
     spectrum matching the station-deleted reference, (iii) other stations
     matching the no-garbage run.

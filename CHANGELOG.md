@@ -7,739 +7,525 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking
-- Config loading now rejects a key that nothing reads. Unknown keys at the
-  top level, in the `case` block, in `case.data`, and in each run entry raise
-  `ValueError` naming the file, the offending key, and the keys accepted at
-  that level. A `spatial_weights` array in a config raises and says a config
-  file cannot prescribe a metric, pointing you at the library API or at
-  `spatial_weight_type` for a built-in one. Misspellings
-  such as `n_modes_sav` no longer fall through to the default. Top-level
-  `kind` is read and must be `"analysis-suite"` or `"config-suite"` and agree
-  with whether the file has a `configs` list.
-- Loading now stops when the spatial metric does not carry exactly one weight
-  per column of the snapshot matrix. That metric is what enters the inner
-  product, and its length was never checked against the data. The check is
-  general: any mismatch raises, naming both lengths and what to pass instead.
-  Cases that used to run to completion and now stop: a 3-D field whose `z`
-  array is absent while `Nz > 1`; a leftover `z` longer than one element beside
-  a 2-D snapshot matrix; and any custom loader whose coordinate arrays disagree
-  with the grid keys it reports. Only POD and ST-POD got that far — they
-  replaced the wrong-length metric with unit weights inside the solver, so
-  their answers were right by accident while the metric on the analyzer was
-  not. Cases that already failed, and now fail at load with a clearer message:
-  3-D polar, because the polar builder ignores `z` and returns `Nx*Ny` weights,
-  and any SPOD or BSMD run, which refused the wrong length outright.
-- `spatial_weight_type="auto"` is removed. Detection cannot be done honestly from
-  the loader contract (a jet `(x,r)` grid and a flat-plate `(x,y)` grid both have
-  `y >= 0`, and no coordinate-system metadata is carried), so the former default
-  resolved to `"uniform"` unconditionally. The default is now `None` ("not
-  specified"), which still resolves to `"uniform"` — numerics are unchanged.
-  Passing `"auto"` raises at construction listing `uniform, polar, prescribed`.
-  `auto_detect_weight_type` is deleted. An array with no type
-  (`spatial_weights=w`) still prescribes a metric.
-- `DataLoader.load` / `MATDataLoader.load` / `DNamiDataLoader.load` options
-  (`preview_ns`, `field`, `load_single`, `schema`) are keyword-only. A positional
-  second argument raises `TypeError` instead of binding to whichever option sat
-  second in a given subclass.
-- `SPODAnalyzer.plot_eigenvalues_v2` is renamed to `plot_eigenvalues`. The
-  `_v2` suffix is gone; SPOD never had another `plot_eigenvalues` to collide
-  with. Output figure basenames drop the `_v2` token as well.
-- `SPODAnalyzer.plot_time_coeffs` is renamed to `plot_time_coefficients`,
-  matching POD, DMD and ST-POD. The SPOD signature
-  (`modes_to_plot`, `freq`, `n_blocks`) is unchanged — only the method name.
-- `STPODAnalyzer.plot_time_coefficients` renames its `n_coeffs` parameter to
-  `n_coeffs_to_plot`, matching POD and DMD. Call sites that used the old
-  keyword must switch.
-- `blocksfft` no longer takes `use_parallel`. Both branches already called the
-  same shared `windowed_block_fft` path, so the flag selected nothing. Pass
-  the remaining keyword arguments only. Analyzer constructors still accept
-  `use_parallel` for polar weights and SPOD frequency work.
-- README documents `FFT_BACKEND` via `from openmodalpy.core import FFT_BACKEND`
-  (the public re-export), not `openmodalpy.core.config`.
+## [0.4.0] - 2026-08-13
 
-| Old | New |
+One theme: the library used to guess, substitute or quietly repair bad input and
+then report success. It now refuses. A fabricated timestep, an ignored window
+function, a discarded spatial metric, a silently defaulted DMD rank and a
+mistyped config key each produced a confident number that nobody had asked for.
+Those paths now raise, and the reasons are named.
+
+Read the upgrade section below first: 16 call sites raise until you change them,
+and 9 behaviours move published numbers with no code change at all.
+
+### Upgrading from 0.3.0
+
+Rename or edit — these raise until you change the call:
+
+| 0.3.0 | 0.4.0 |
 | --- | --- |
 | `SPODAnalyzer.plot_eigenvalues_v2(...)` | `SPODAnalyzer.plot_eigenvalues(...)` |
 | `SPODAnalyzer.plot_time_coeffs(...)` | `SPODAnalyzer.plot_time_coefficients(...)` |
-| `STPODAnalyzer.plot_time_coefficients(n_coeffs=...)` | `...plot_time_coefficients(n_coeffs_to_plot=...)` |
-| `blocksfft(..., use_parallel=...)` | `blocksfft(...)` (argument removed) |
+| `STPODAnalyzer.plot_time_coefficients(n_coeffs=...)` | `...(n_coeffs_to_plot=...)` |
+| `BSMDAnalyzer.save_results(fname=...)` | `save_results(filename=...)` |
+| `blocksfft(..., use_parallel=...)` | `blocksfft(...)` — argument removed |
+| `weighted_second_order(..., drop_nonpositive=...)` | use `n_keep` to bound the modes |
+| `BaseAnalyzer/SPODAnalyzer/blocksfft(n_threads=...)` | `set_blas_threads(...)` |
+| `spatial_weight_type="auto"` | omit it, or `"uniform"` |
+| `auto_detect_weight_type(...)` | deleted — no honest detection exists |
+| `DMDAnalyzer(...)` with no `rank` | `rank=<int>` \| `"svht"` \| `"energy"` — now required |
+| `get_optimization_info()`, `print_optimization_status()` | `get_threadpool_summary()` |
+| `python -m openmodalpy.pod` (and `.spod`, `.dmd`, `.bsmd`, `.stpod`) | `python -m openmodalpy` |
 | `from openmodalpy.core.config import FFT_BACKEND` | `from openmodalpy.core import FFT_BACKEND` |
+| `SpatialMetric(<square matrix>)` | `SpatialMetric(np.diag(W))` |
+| `loader.load(path, <positional option>)` | options are keyword-only |
+| `perform_spod()` before `compute_fft_blocks()` | call `compute_fft_blocks()` first |
 
-- `weighted_second_order` no longer takes `drop_nonpositive`. Passing it now
-  raises `TypeError`. The flag had stopped selecting anything — both routes
-  always drop modes at or below their relative cutoff — so a caller passing
-  `drop_nonpositive=False` to keep the full spectrum received the filtered one
-  with no warning. Nothing about the filtering changes; only the misleading
-  parameter goes. Use `n_keep` to control how many modes are returned.
-- Spatial weights are now used exactly, with no absolute `1e-12` floor. The
-  weights are a quadrature measure (m³ in 3-D, m² in 2-D), so an absolute floor
-  had units it cannot have: a mesh whose cells fall below `1e-12` was silently
-  inflated, and the energy spectrum was not linear in the measure — scaling a
-  metric by `1e-14` changed the eigenvalues by a factor of about 95. A cell with
-  zero measure now contributes nothing to the decomposition and its POD/ST-POD
-  mode value is exactly `0`, matching what SPOD and BSMD already did. Before,
-  such a cell entered the kernel with weight `1e-12`, so data held there — a
-  masked wall value, for instance — leaked into the spectrum; a masked cell
-  holding `1e6` shifted the eigenvalues by 199 %.
-- `SpatialMetric` now rejects square matrices and 3-D weight arrays with a
-  named `ValueError` (shape + `np.diag` fix) instead of flattening them and
-  later failing on length. It holds a diagonal metric as a vector; pass
-  `np.diag(W)` for a diagonal matrix, or the raw array to the analyzer weight
-  path. 1-D, `(n, 1)`, and non-square `(n, k)` inputs are unchanged.
-- `perform_spod()` now raises `RuntimeError` when FFT blocks (`qhat`) have not
-  been computed. It previously printed one error line and returned `None`, so
-  callers could continue as if an analysis had run. Call `compute_fft_blocks()`
-  or `run(compute_fft=True)` first.
-- Removed the unused `n_threads` parameter from `BaseAnalyzer`, `SPODAnalyzer`,
-  and `blocksfft`. It never affected FFT or BLAS work; use the BLAS thread
-  policy above for pool control.
-- Removed `get_optimization_info()` and `print_optimization_status()` from
-  `openmodalpy.core.parallel`. Both lost their callers when the per-module
-  command-line entry points were deleted, and the BLAS name they reported was
-  guessed by string-matching NumPy's own debug printout, so it went stale
-  whenever that printout changed. `get_threadpool_summary()` stays and is
-  unaffected — it asks `threadpoolctl` directly and returns the real thread
-  counts, and every analysis already logs it before computing FFT blocks.
-- Removed the undocumented per-module entry points
-  (`python -m openmodalpy.pod`, `python -m openmodalpy.spod`,
-  `python -m openmodalpy.dmd`, `python -m openmodalpy.bsmd`,
-  `python -m openmodalpy.stpod`). Use `openmodalpy` / `python -m openmodalpy`
-  instead.
-- An unrecognised `spatial_weight_type` now raises at construction instead of
-  being kept as-is. This is a behaviour break: any string other than
-  `"uniform"`, `"polar"` or `"prescribed"` (and `None`, which resolves to
-  uniform) used to fall through to the grid-spacing weight path and skip POD's
-  and ST-POD's reset to unit weights, so a typo silently changed the metric.
-  Code that relied on that fall-through to hand an analyzer its own weight
-  vector should now pass `spatial_weights=` instead.
-- SPOD result files write the spatial grid once, as `x`/`y`/`z` (matching the
-  other producers). The previous duplicate datasets `x_coords`/`y_coords`/
-  `z_coords` are no longer written. Files that still carry only the old
-  `_coords` spelling continue to load: `read_results` maps them onto the
-  canonical `x`/`y`/`z` fields and emits a `DeprecationWarning` naming the
-  legacy key. Note that files written by earlier versions carry *both*
-  spellings, so reading one now emits that warning where it previously did
-  not. The canonical `x`/`y`/`z` still win, so values are unchanged — but code
-  that turns warnings into errors will need to filter it.
+`rank=n_modes_save` reproduces the old DMD default exactly.
+
+Numbers that move without any code change:
+
+- **Welch block counts.** `nblocks` now floors and drops the remainder, matching
+  `scipy.signal.welch`, instead of ceiling with a clamped final block that reused
+  samples. The shipped `cylinder_wake` (`Ns=500`, `nfft=128`, `overlap=0.5`) goes
+  from 7 blocks to 6, so SPOD, PSD-POD and BSMD results on records that do not
+  divide evenly all shift.
+- **POD and ST-POD energy percentages** are now a share of the total field energy
+  before truncation, so they read lower for any truncated spectrum.
+- **Shipped `double_gyre` DMD rank** moved from 10 to 8. At rank 10 the retained
+  singular values reach `s9/s0 ~ 2e-12`, so round-off is amplified to ~1e-4 —
+  a hundred times looser than the fixture tolerance. `dmd`, `hodmd` and
+  `tls_hodmd` now return 8 modes. Other methods read `n_modes_save`, still 10.
+- **Zero-measure cells contribute nothing.** The absolute `1e-12` weight floor is
+  gone. A masked cell holding `1e6` used to shift the eigenvalues by 199 %.
+- **Rank-deficient input returns fewer modes**, and energy fractions shift by
+  about `1e-16` relative, because the noise tail is no longer counted as modes.
+- **Mode signs and phases are canonical**, so a mode shape can no longer flip
+  between LAPACK builds or thread counts.
+- **mPOD figures are named `_mpod_`**, not `_pod_`.
+- **The library writes nothing to stdout.** Every analyzer reports on its module
+  logger. The command-line tool installs a handler, so its output is unchanged;
+  a library caller now routes, filters or silences messages like any other
+  Python logging.
+- **Old result files still load** but emit a `DeprecationWarning` naming the
+  legacy key. Code that turns warnings into errors needs a filter.
+
+### Breaking
+
+- Config loading rejects a key that nothing reads. Unknown keys at the top level,
+  in `case`, in `case.data` and in each run entry raise `ValueError` naming the
+  file, the key and the keys accepted at that level, so `n_modes_sav` no longer
+  falls through to the default. A `spatial_weights` array in a config raises and
+  points at the library API. Top-level `kind` is now read: it must be
+  `"analysis-suite"` or `"config-suite"` and must agree with whether the file
+  carries a `configs` list.
+- Loading stops when the spatial metric does not carry exactly one weight per
+  column of the snapshot matrix. That metric enters the inner product and its
+  length was never checked against the data. Runs that used to complete and now
+  stop: a 3-D field whose `z` array is absent while `Nz > 1`; a leftover `z`
+  beside a 2-D snapshot matrix; any custom loader whose coordinates disagree with
+  the grid keys it reports. Only POD and ST-POD got that far, and they replaced
+  the wrong-length metric with unit weights inside the solver — right by accident,
+  while the metric on the analyzer was wrong. Runs that already failed now fail at
+  load with a clear message: 3-D polar (the polar builder ignores `z`), and any
+  SPOD or BSMD run.
+- `spatial_weight_type="auto"` is removed. Detection cannot be done honestly from
+  the loader contract — a jet `(x,r)` grid and a flat-plate `(x,y)` grid both have
+  `y >= 0`, and no coordinate-system metadata is carried — so the former default
+  resolved to `"uniform"` unconditionally. The default is now `None`, which still
+  resolves to `"uniform"`; numerics are unchanged. An array with no type
+  (`spatial_weights=w`) still prescribes a metric.
+- An unrecognised `spatial_weight_type` raises at construction. Any other string
+  used to fall through to the grid-spacing path and skip POD's and ST-POD's reset
+  to unit weights, so a typo silently changed the metric. Pass `spatial_weights=`
+  to hand an analyzer its own vector.
+- Spatial weights are used exactly, with no absolute `1e-12` floor. The weights
+  are a quadrature measure (m³ in 3-D, m² in 2-D), so an absolute floor carries
+  units it cannot have: a mesh whose cells fall below `1e-12` was silently
+  inflated, and scaling a metric by `1e-14` changed the eigenvalues by a factor
+  of about 95. A zero-measure cell now contributes nothing and its POD/ST-POD mode
+  value is exactly `0`, matching SPOD and BSMD.
+- An invalid spatial metric raises instead of producing a confident answer. A
+  non-finite weight, a negative weight, or a metric whose total measure is zero
+  raises `ValueError`; an isolated zero among positive weights is still accepted.
+  This closes a real hole: polar weights on a grid whose radial coordinate is zero
+  give every annulus an area of `pi*r**2 = 0`, and POD reported an energy fraction
+  off that empty metric without complaint. The condition is `r > 0`, **not**
+  `Ny > 1` — a single radial station at `r > 0` is fine. Results for strictly
+  positive weights are unchanged.
+- `SpatialMetric` rejects square matrices and 3-D weight arrays with a named
+  `ValueError` carrying the shape and the `np.diag` fix, instead of flattening
+  them and failing later on length. 1-D, `(n, 1)` and non-square `(n, k)` inputs
+  are unchanged.
 - One HDF5 result contract for every analyzer. Dataset names are lowercase
-  (`modes`, `eigenvalues`, `time_coefficients`, `freq`, `st`, `modes1`,
-  `modes2`, …); SPOD no longer writes `Weights` (it writes `W` like the
-  others). All `save_results` methods share the signature
-  `save_results(self, filename=None)` — SPOD gains `filename`, and BSMD's
-  `fname` parameter is renamed to `filename` (call sites that passed
-  `fname=` must switch). Writing goes through `openmodalpy.core.results`;
-  `read_results(path)` returns a typed `AnalysisResults` and still accepts
-  the old capitalised layout with a `DeprecationWarning`. `FFTBlocks` keeps
-  its name (FFT cache key, not a downstream result field). SPOD result
-  files are written in mode `"w"`; BSMD still appends when the destination
-  is the open FFT-cache path so that cache is preserved.
-- One rule now turns a spatial weight into a vector, instead of three helpers
-  that disagreed about which shapes they accepted (`core/base.py`,
-  `core/decomposition.py`, `mpod.py`). Two consequences beyond the deduplication.
-  A square weight matrix is read as its diagonal everywhere — the shape the class
-  docstrings have always advertised, and which previously raised
-  `IndexError: tuple index out of range` from inside a private helper. And mPOD
-  now validates its spatial weights like every other method, so a negative or
-  zero-measure weight raises instead of passing through. A complex weight
-  array raises on every entry path that builds or flattens a spatial metric
-  (`require_spatial_metric`, `SpatialMetric`, `_coerce_spatial_weights`,
-  `_as_weight_vector`), rather than being cast to its real part under a
-  `ComplexWarning`. Weight vectors of the usual shape — a length-`n_space`
-  column of positive reals — are unaffected.
-- An invalid spatial metric now raises instead of producing a confident answer.
-  A non-finite weight, a negative weight, or a metric whose total measure is
-  zero raises `ValueError`; an isolated zero among positive weights is still
-  accepted, and that cell now contributes nothing (see the exact-measure entry
-  above). Results for strictly positive weights are unchanged.
-
-  This closes a real hole: polar weights on a grid whose radial coordinate is
-  zero give every annulus an area of `pi*r**2 = 0`, and POD would report an
-  energy fraction off that empty metric without complaint. Note the condition
-  is `r > 0`, **not** `Ny > 1` — a single radial station at `r > 0` has
-  positive measure and is fine.
-
-  Scope: all five named methods plus BSMD. The rule has a single definition
-  (`core/base.py::require_spatial_metric`); POD, mPOD, ST-POD and PSD-POD reach
-  it through the shared seam, SPOD through `spod_function`, and BSMD checks once
-  per analysis. SPOD and BSMD apply weights directly rather than flooring them,
-  so an isolated zero there means that cell contributes nothing.
-- Welch block partitioning now matches `scipy.signal.welch`: `nblocks` is
-  computed with floor arithmetic and the remainder is dropped, rather than
-  ceil plus a clamped final block that re-uses samples. Records that do not
-  divide evenly therefore change block count (the shipped cylinder_wake
-  example with `Ns=500`, `nfft=128`, `overlap=0.5` goes from 7 blocks to 6),
-  so SPOD / PSD-POD / BSMD numbers on those records move. Short records that
-  cannot form one full block, and callers that request more blocks than fit,
-  now raise `ValueError` instead of returning empty or wrapped indices.
-  The same floor helper (`welch_nblocks`) is used by
-  `BaseAnalyzer.load_and_preprocess` and by `commands._apply_snapshot_limit`
-  after `max_snapshots` truncation — the snapshot-limit path previously
-  recomputed `nblocks` with ceil and could request more blocks than fit
-  (e.g. Ns=400, nfft=128, overlap=0.5 → floor 5 vs ceil 6). `novlap >= nfft`
-  (hop ≤ 0) is rejected in both FFT paths instead of repeating block 0.
-- DMD `rank` is required. `DMDAnalyzer` no longer defaults the
-  operator truncation to `n_modes_save` (a plotting parameter). Omitting `rank`
-  raises `ValueError` naming the alternatives: a positive `int`, `"svht"`, or
-  `"energy"`. On the shipped cylinder wake that silent default moved the recovered
-  shedding frequency by ~20×, so a library that picks the rank silently publishes
-  a number the user never chose. There is no principled automatic default either
-  (full numerical rank and SVHT were both rejected for fluid spectra). Migrate
-  by setting `rank` to the value you previously relied on via `n_modes_save`
-  (`rank=n_modes_save` is bit-identical to the old default). `n_modes_save` only
+  (`modes`, `eigenvalues`, `time_coefficients`, `freq`, `st`, `modes1`, `modes2`);
+  SPOD writes `W` rather than `Weights`. Every `save_results` shares the signature
+  `save_results(self, filename=None)`. `read_results(path)` returns a typed
+  `AnalysisResults` and still accepts the old capitalised layout with a
+  `DeprecationWarning`. `FFTBlocks` keeps its name — it is a cache key, not a
+  result field. SPOD result files are written in mode `"w"`; BSMD still appends
+  when the destination is the open FFT-cache path, so that cache survives.
+- SPOD result files write the spatial grid once, as `x`/`y`/`z`. The duplicate
+  `x_coords`/`y_coords`/`z_coords` datasets are gone. Files carrying only the old
+  spelling still load, mapped onto the canonical fields with a
+  `DeprecationWarning`. Files written by earlier versions carry both spellings, so
+  reading one now warns where it did not before; the canonical names win, so
+  values are unchanged.
+- `DataLoader.load` / `MATDataLoader.load` / `DNamiDataLoader.load` options
+  (`preview_ns`, `field`, `load_single`, `schema`) are keyword-only. A positional
+  second argument raises `TypeError` instead of binding to whichever option
+  happened to sit second in that subclass.
+- `blocksfft` no longer takes `use_parallel`. Both branches already called the
+  same shared `windowed_block_fft`, so the flag selected nothing. Analyzer
+  constructors still accept `use_parallel` for polar weights and SPOD frequency
+  work.
+- `weighted_second_order` no longer takes `drop_nonpositive`; passing it raises
+  `TypeError`. The flag had stopped selecting anything — both routes always drop
+  modes at or below their relative cutoff — so a caller passing
+  `drop_nonpositive=False` to keep the full spectrum silently received the
+  filtered one. The filtering itself is unchanged.
+- Welch block partitioning matches `scipy.signal.welch`. Records that do not
+  divide evenly change block count. Short records that cannot form one full block,
+  and callers requesting more blocks than fit, now raise `ValueError` instead of
+  returning empty or wrapped indices. The same floor helper (`welch_nblocks`)
+  serves `BaseAnalyzer.load_and_preprocess` and `commands._apply_snapshot_limit`
+  after `max_snapshots` truncation, which previously recomputed with ceil and
+  could request more blocks than fit. `novlap >= nfft` (hop ≤ 0) is rejected in
+  both FFT paths instead of repeating block 0.
+- DMD `rank` is required. It no longer defaults to `n_modes_save`, a plotting
+  parameter. On the shipped cylinder wake that silent default moved the recovered
+  shedding frequency by about 20×, so the library published a number the user
+  never chose. There is no principled automatic default either — full numerical
+  rank and SVHT were both rejected for fluid spectra. `n_modes_save` now only
   bounds how many modes are kept after sorting.
-- BSMD now rejects input it cannot analyse instead of returning something plausible.
-  A triad component outside the available rfft bins (`|p| > nfft//2`) raises `ValueError`
-  naming the offending index and the bin count, where it previously produced a NaN
-  eigenvalue; the last real bin, `|p| = nfft//2`, is still accepted. Dynamic triad
-  selection (`use_static_triads=False`) raises `NotImplementedError` instead of printing
-  a notice and returning empty arrays. Note the consequence for small transforms: the
-  default triad table reaches `|p| = 8`, so `nfft < 16` combined with the default triads
-  now raises rather than filling the high-index rows with NaN.
+- BSMD rejects input it cannot analyse instead of returning something plausible.
+  A triad component outside the available rfft bins (`|p| > nfft//2`) raises
+  `ValueError` naming the index and the bin count, where it previously produced a
+  NaN eigenvalue; the last real bin, `|p| = nfft//2`, is still accepted. Dynamic
+  triad selection (`use_static_triads=False`) raises `NotImplementedError` instead
+  of printing a notice and returning empty arrays. Consequence for small
+  transforms: the default triad table reaches `|p| = 8`, so `nfft < 16` with the
+  default triads now raises rather than filling high-index rows with NaN.
+- `perform_spod()` raises `RuntimeError` when FFT blocks have not been computed.
+  It previously printed one line and returned `None`, so callers continued as if
+  an analysis had run.
+- One rule turns a spatial weight into a vector, replacing three helpers that
+  disagreed about which shapes they accepted. A square weight matrix is read as
+  its diagonal everywhere — the shape the docstrings always advertised, which
+  previously raised `IndexError` from inside a private helper. mPOD now validates
+  its weights like every other method. A complex weight array raises on every
+  entry path instead of being cast to its real part under a `ComplexWarning`.
+- Removed `n_threads` from `BaseAnalyzer`, `SPODAnalyzer` and `blocksfft`. It
+  never affected FFT or BLAS work.
+- Removed `get_optimization_info()` and `print_optimization_status()`. Both lost
+  their callers, and the BLAS name they reported was guessed by string-matching
+  NumPy's debug printout, so it went stale whenever that printout changed.
+  `get_threadpool_summary()` asks `threadpoolctl` directly and stays.
+- Removed the undocumented per-module entry points.
+- README documents `FFT_BACKEND` via the public re-export
+  `from openmodalpy.core import FFT_BACKEND`.
 
 ### Added
-- A test that two prescribed spatial metrics give two different eigenvalues
-  on POD, ST-POD, mPOD, SPOD, PSD-POD and BSMD, and the same eigenvalues on
-  DMD (the regression documents that it does not use `self.W`). Complements
-  the survival test that only checks the vector is still on `analyzer.W`
-  after the run.
-- `openmodalpy analyze` accepts `--solver {eigh,svd}` and forwards it to POD.
-  The solver route was documented under `methods show pod` but reachable only
-  from a config file; the CLI flag closes that gap. Omitting the flag leaves
-  the library default in charge.
-- SPOD warns when it saves FFT blocks that carry no cache stamp. The stamp is
-  derived from the source snapshots, so a save without them in memory leaves
-  blocks the next run cannot validate and must recompute. The behaviour is
-  unchanged; the run now says why.
+
+- Process-wide BLAS thread policy: `set_blas_threads` / `get_blas_threads` /
+  `blas_threads` context manager, and `OPENMODALPY_BLAS_THREADS`. The default of
+  1 thread makes `svd`/`eigh`/`eig` reduction order deterministic for a fixed
+  environment; `0` means this package applies no limit.
+- Result files record a `prov_*` provenance block — versions, FFT backend, BLAS
+  threads, config hash, seed, git SHA, UTC timestamp — exposed as
+  `AnalysisResults.provenance`.
+- `PSDPODAnalyzer`, a library-facing class with the shared analyzer lifecycle.
+  The CLI now calls it; numbers and file layout are unchanged. One behavioural
+  difference: PSD-POD used to run on an `SPODAnalyzer` and inherit its on-disk
+  FFT cache, so it no longer writes a SPOD-named cache beside its results.
+- POD `solver` route: `perform_pod(solver="eigh"|"svd")`, config
+  `params: {solver: "svd"}`, and `openmodalpy analyze --solver {eigh,svd}`. The
+  route was documented but reachable only from a config file.
 - Opt-in randomized (Halko) SVD: `randomized_svd` and
-  `compute_reduced_svd(..., method="randomized")`. Accuracy tracks spectral
-  decay, so `"auto"` never selects it.
-- Analyzer argument `spatial_weights=` (type `"prescribed"`) and construction-time
-  validation of `spatial_weight_type` to `{"uniform", "polar", "prescribed"}`
-  (`None` omits and resolves to `"uniform"`).
-- Case config key `energy_fraction` for DMD `rank="energy"` (float in `(0, 1]`;
-  omit to keep the analyzer default `0.999`).
-- POD `solver` route: `perform_pod(solver="eigh"|"svd")` and config
-  `params: {solver: "svd"}` select the correlation-matrix (`eigh`, default)
-  or weighted-snapshot-SVD path. Documented in DOC.md under non-positive
-  eigenvalues / rank-deficient input. CLI help comes from
-  `METHOD_REGISTRY["pod"].parameter_help`.
-- PEP 561 marker `src/openmodalpy/py.typed` so type checkers treat the package
-  as typed when installed from the wheel.
-- Public exports `MethodInfo` (returned by `list_methods` and `get_method_spec`),
-  `ExampleInfo` (returned by `discover_examples`) and `RunCollectionSpec`, so
-  callers can annotate these results without importing from a private module.
-- The `analyze` help text now lists the method names from the method registry
-  instead of a hand-maintained string that could fall out of date.
-- Analytic reference fixtures under `tests/fixtures/reference/` (POD energy
-  fractions and DMD |λ|/phase for `double_gyre`, `taylor_green`,
-  `cylinder_wake`) plus `scripts/regen_reference_fixtures.py` and
-  `tests/test_reference_fixtures.py` so a clean checkout can recompute and
-  check the spectra.
-- `PSDPODAnalyzer` — library-facing PSD-POD class with the shared analyzer
-  lifecycle (`load_and_preprocess` → `compute_fft_blocks` → `perform_psd_pod`
-  → `save_results`). The CLI/config path now calls this class; numbers and
-  result-file layout are unchanged. One behavioural difference: PSD-POD used to
-  run on an `SPODAnalyzer` and so inherited its on-disk FFT-block cache. It now
-  recomputes the blocks and no longer writes a SPOD-named cache file beside its
-  results. Results are identical; a repeated run on the same large record no
-  longer reuses a cached `qhat`.
-- Process-wide BLAS thread policy (`openmodalpy.set_blas_threads` /
-  `get_blas_threads` / `blas_threads` context manager; env
-  `OPENMODALPY_BLAS_THREADS`). Default is 1 thread so `svd`/`eigh`/`eig`
-  reduction order is deterministic for a fixed environment; `0` means this
-  package applies no limit (outer env / limiters still apply).
-- Result files record a `prov_*` provenance block (versions, FFT backend, BLAS
-  threads, config hash, seed, git SHA, UTC timestamp) via `write_results`;
-  `AnalysisResults.provenance` exposes it with the prefix stripped.
-- The three built-in synthetic generators are now checked against the closed-form
-  answers they already carry. `example_data.py` has always returned the double gyre's
-  forcing frequency, the Taylor-Green decay eigenvalue and the cylinder wake's Strouhal
-  number alongside the data, but nothing read them, and two of the three generators were
-  not exercised by any test. Each is now run through the analyzer that should recover its
-  quantity, comparing against the value read from the generator's own metadata rather
-  than a constant copied into the test, so the check follows the generator if its physics
-  changes. Tolerances are computed from the discretization: machine precision for
-  Taylor-Green, where the field is rank-1 in space times a pure exponential and DMD
-  recovers the multiplier exactly; a tenth of the Rayleigh frequency for DMD, which is
-  not bin-limited; half an FFT bin for SPOD, which is. A cross-analyzer check pins that
-  DMD and SPOD agree on the shedding frequency without reference to the metadata.
+  `compute_reduced_svd(..., method="randomized")`. Accuracy tracks spectral decay,
+  so `"auto"` never selects it.
+- Analyzer argument `spatial_weights=` (type `"prescribed"`), with
+  `spatial_weight_type` validated at construction against
+  `{"uniform", "polar", "prescribed"}`.
+- Config key `energy_fraction` for DMD `rank="energy"` (float in `(0, 1]`; omit
+  for the analyzer default `0.999`).
+- Analytic reference fixtures under `tests/fixtures/reference/` — POD energy
+  fractions and DMD |λ|/phase for `double_gyre`, `taylor_green`, `cylinder_wake` —
+  plus `scripts/regen_reference_fixtures.py`, so a clean checkout can recompute
+  and check the spectra.
+- The three built-in generators are now checked against the closed-form answers
+  they already carried. `example_data.py` always returned the double gyre's
+  forcing frequency, the Taylor-Green decay eigenvalue and the cylinder wake's
+  Strouhal number alongside the data, but nothing read them, and two of the three
+  were exercised by no test. Each now runs through the analyzer that should
+  recover its quantity, compared against the generator's own metadata rather than
+  a constant copied into the test, so the check follows the generator if its
+  physics changes. Tolerances come from the discretization: machine precision for
+  Taylor-Green, a tenth of the Rayleigh frequency for DMD, half an FFT bin for
+  SPOD.
+- A test that two prescribed metrics give two different eigenvalues on POD,
+  ST-POD, mPOD, SPOD, PSD-POD and BSMD, and the same eigenvalues on DMD — which
+  documents that DMD does not use `self.W`.
+- SPOD warns when it saves FFT blocks carrying no cache stamp, because the next
+  run cannot validate them and must recompute.
+- PEP 561 marker `py.typed`, and public exports `MethodInfo` (returned by
+  `list_methods` and `get_method_spec`), `ExampleInfo` (returned by
+  `discover_examples`) and `RunCollectionSpec`, so callers can annotate results
+  without importing from a private module.
+- `analyze` help lists method names from the registry instead of a hand-maintained
+  string.
 
 ### Changed
-- SPOD `freqs_to_plot` / `modes_to_plot` and BSMD `triad_indices` / `static_triads`
-  now accept the numpy arrays users already hold. The annotations said
-  `Sequence`, which an `ndarray` is not, so a type-checked caller could not pass
-  `np.argsort(...)` or `spod.St[:2]` even though every body already iterated or
-  sliced the array at runtime. Parameters that only iterate are `Iterable`;
-  `triad_indices` stays a sequence-or-array union because the body slices it.
-  BSMD's array forms must hold integers, so a float array of indices is still a
-  type error. Lists and tuples still type-check. Runtime behaviour is unchanged.
-- POD energy percentages now report a share of total field energy (pre-truncation),
-  so regenerated figures will read lower than before for any truncated spectrum.
-- mPOD figure files now use `_mpod_` in their names (from `analysis_type`) instead of the hard-coded `_pod_` inherited from PODAnalyzer. Anything that still looks for the old `_pod_` figure names after an mPOD run must update. POD figure names are unchanged.
-- `openmodalpy analyze` rejects an unknown method when it parses the command
-  line, instead of accepting it and failing later. The accepted set is derived
-  from the method registry, so it cannot drift from the methods that exist, and
-  the error names them: `Unknown method 'psdpod'. Available: ['bsmd', 'dmd',
-  'hodmd', 'mpod', 'pod', 'psd_pod', 'spod', 'stpod', 'tls_hodmd']`. Every
-  spelling that worked before still works — `pod`, `POD`, `psd-pod`, `psd_pod`,
-  `tls-hodmd` — since the name is normalized before it is checked.
-- The packaged `cylinder_wake.jsonc` states `"seed": 42` explicitly. It always
-  used that seed, as the generator default, but the value was implicit in the
-  shipped config while the repository copy stated it. The reference fixture now
-  reads the seed from the config like it already read `Nx`, `Ny` and `Nt`,
-  rather than from a separate hardcoded literal, so the fixture's generation
-  contract is fully derived. No generated data changes.
-- PSD-POD reuses cached FFT blocks again instead of recomputing them on every
-  run. The Welch-family analyzers (SPOD, BSMD, PSD-POD) now share one cache
-  implementation, and any of them can adopt another's cached blocks when the
-  stamped FFT parameters match, since all three produce identical blocks for
-  the same parameters. Each still writes only its own `..._<type>.hdf5` file.
-- The FFT cache looks for reusable blocks in the analyzer's own `results_dir`.
-  BSMD previously looked for an SPOD cache in the globally configured results
-  directory regardless of where it was writing; with default settings the two
-  are the same directory, so only setups using per-analysis directories see a
-  difference.
-- FFT cache progress messages (`Loaded cached FFT blocks ...`, `Saved FFT
-  blocks to cache ...`) now go to the logger instead of standard output.
-- Every analyzer — POD, PSD-POD, SPOD, ST-POD, BSMD and DMD — now reports
-  progress, results and diagnostics on its module logger (`openmodalpy.pod`,
-  `openmodalpy.psd_pod`, `openmodalpy.spod`, `openmodalpy.stpod`,
-  `openmodalpy.bsmd`, `openmodalpy.dmd`) instead of writing to
-  standard output. Nothing in the library writes to stdout any more. The
-  command-line tool installs a handler and still shows
-  every message, so its output is unchanged; a library caller now sees nothing
-  on stdout and can route, filter, or silence the messages like any other
-  Python logging. Messages that need the user to act — no results file to plot,
-  a mode with no valid data, weights of an unexpected shape — carry `WARNING`
-  or `ERROR` level rather than an inline `Warning:` prefix.
-- Rendering a 3D mode figure now allocates about one copy of the mode volume
-  instead of three. `subset_volume_focus_3d` no longer copies the volume when
-  no cropping is configured, and `get_robust_clim` no longer copies the data to
-  filter it when every value is already finite. Measured on a 256x128x128
-  float64 volume (32 MiB): peak allocation before the plotting library is
-  called falls from 96 MiB to 32 MiB. Colour limits are unchanged, including
-  for fields containing NaN or infinities.
-- POD, ST-POD and DMD `load_results` now go through `read_results`, so
-  pre-unification files with capitalised dataset names (`Modes`, `Eigenvalues`,
-  `TimeCoefficients`) load and emit the reader's `DeprecationWarning`.
-- ST-POD percentages now mean share of total field energy (pre-truncation) and
-  will read lower than before for any truncated spectrum.
-- Default DMD rank for the shipped `double_gyre` example moved from 10 to 8.
-  On the packaged 80×40/Nt=200 grid, rank 10 keeps singular values with
-  s9/s0 ~ 2e-12, so machine round-off in the DMD operator is amplified to
-  ~1e-4 — a hundred times looser than the fixture `rtol=1e-6`. Rank 8 keeps
-  s7/s0 ~ 4e-9 (implied error ~5e-8) and is honest at that tolerance. Only the
-  DMD family is affected: `dmd`, `hodmd` and `tls-hodmd` runs on the shipped
-  config now return 8 modes instead of 10, matching the reference fixture. POD,
-  mPOD, SPOD, PSD-POD, ST-POD and BSMD are unchanged — they read `n_modes_save`,
-  which stays at 10, not `rank`.
-- Analytic reference fixtures under `tests/fixtures/reference/` now use the
-  grids from the packaged example configs (`src/openmodalpy/examples/*.jsonc`):
-  double_gyre 80×40/Nt=200, taylor_green 64×64/Nt=100, cylinder_wake
-  100×50/Nt=500 (was 24×12/40, 24×24/40, 32×16/80). Spectrum values move with
-  the grids; ranks and tolerances are unchanged. The regen script and drift
-  test both read those grids via `openmodalpy.config_io.load_jsonc` (single
-  source; the full generation contract including `seed` is pinned). A set-
-  equality test requires every generator to have a fixture.
-- One windowed-block Welch FFT: `blocksfft` and `blocksfft_optimized` both
-  call `core/welch.py::windowed_block_fft`. Same numbers (the two copies were
-  already bit-identical); the loop, `get_window`, and `(cw / nfft)` scaling
-  live in one place. Analytical checks in `tests/test_welch_analytical.py`
-  pin power-norm Parseval, amplitude recovery, and a scipy.signal.welch
-  cross-check. Public signatures and the `use_parallel` branch are unchanged.
+
+- Every analyzer reports on its module logger instead of standard output:
+  `openmodalpy.pod`, `openmodalpy.psd_pod`, `openmodalpy.spod`,
+  `openmodalpy.stpod`, `openmodalpy.bsmd`, `openmodalpy.dmd`. Messages that need
+  the user to act — no results file to plot, a mode with no valid data, weights of
+  an unexpected shape — carry `WARNING` or `ERROR` level rather than an inline
+  `Warning:` prefix.
+- Mode sign and phase are canonical: each mode is scaled so the pivot entry — the
+  lowest index whose magnitude sits within `CANONICAL_TIE_RTOL = 1e-12` of the
+  column maximum — is real and positive. Previously LAPACK's arbitrary sign or
+  phase passed straight through, so a different build or thread count could flip a
+  published mode shape while every test still passed. The band moves the ambiguity
+  threshold, it does not remove it: exactly antisymmetric modes remain a genuine
+  tie, and where eigenvalues repeat, any orthonormal basis of that subspace is
+  valid. Time coefficients receive the same factor, so reconstruction is
+  unchanged. Covers POD (both kernel branches), mPOD, ST-POD and the complex
+  PSD-POD route; SPOD and BSMD do not share that seam and are not yet canonical.
 - POD, mPOD and PSD-POD share one relative eigenvalue cutoff
-  (`λ ≤ n_kernel·ε·λ_max`) on the correlation matrix, so rank-deficient input
-  returns only honest unit-norm modes and the count is scale-invariant across
-  unit systems. The previous absolute `1e-12` energy floor is gone; the basis
-  is not padded when fewer modes are supported than requested. Eigenvalues
-  themselves are unchanged on every recorded fixture, but reported energy
-  fractions move in the last digit or two: the total they are normalised by no
-  longer includes the noise-level and negative eigenvalues that the old floor
-  let through, so `energy_captured_fraction` and the per-mode fractions shift by
-  around 1e-16 relative. Rank-deficient cases also return fewer modes, because
-  the noise tail is no longer reported as modes. Reference fixtures were updated
-  for both. No physical result changes.
-- The ten `plot_modes_3d_{slices,isometric}` methods share one driver in
-  `core/base.py`; each analyzer keeps a private helper for mode selection and
-  titles. No figure output changed.
-- One SPOD single-frequency eigenproblem and one load-latest result search.
-  The serial path in `spod_function` and `spod_single_frequency_optimized` both
-  call `core/decomposition.py::spod_single_frequency` (union of `num_modes` and
-  `return_psi`; modes via the broadcast form, not `@ np.diag`). Before the
-  merge the two copies already agreed to machine zero, and eigenvalues are
-  bit-identical after it. The serial path's modes shift by up to 7e-15 in
-  absolute sum, because dropping the diagonal matrix multiply reassociates the
-  same floating-point product; no other quantity changed. The six load-latest
-  auto-detect blocks now call
-  `core/results.py::find_latest_result`; each caller still owns its not-found
-  policy (mpod silent; the others print `[Auto-detect]` / `[ERROR]`). Net
-  `src/` line delta: −13.
-- Mode sign and phase are now canonical: each mode is scaled so the pivot
-  entry — the lowest index whose magnitude sits within a relative band
-  (`CANONICAL_TIE_RTOL = 1e-12`) of the column maximum — is real and positive.
-  Near-equal opposite peaks no longer flip under single-ulp noise between builds.
-  Previously LAPACK's arbitrary sign (real) or phase (complex) passed straight
-  through, and a different LAPACK build or thread count could flip a published
-  mode shape while every test still passed.
-
-  The band moves the ambiguity threshold; it does not remove it. Peaks that
-  differ by more than the band still decide the sign, and exactly antisymmetric
-  modes (`phi` vs `-phi`) remain a genuine tie that any comparison must break
-  somewhere. Where eigenvalues are repeated, any orthonormal basis of that
-  subspace is a valid answer; fixing each mode's phase cannot make the basis
-  itself unique. Non-finite mode entries, and a `coeffs` column count that does
-  not match `modes`, raise `ValueError`.
-
-  Time coefficients receive the same factor as the modes, so coefficients stay
-  the projection of the data onto the modes and reconstruction is unchanged on
-  every route (real: `coeffs @ modes.T`; complex: `coeffs @ modes.conj().T`).
-  Eigenvalues and mode subspaces are identical to before. Only the sign
-  convention is new.
-
-  Covers POD (both kernel branches), mPOD, ST-POD and the complex PSD-POD
-  route. SPOD and BSMD do not share that seam and are not yet canonical.
-- POD, mPOD, ST-POD and PSD-POD now share one lift / metric / second-order
-  seam in `core/decomposition.py` (`IdentityLift`, `DelayEmbeddingLift`,
-  `BandFilteredLift`, `SpatialMetric`, `weighted_second_order`). Results are
-  unchanged; each caller keeps its own truncation policy via `n_keep`.
-- Four simplifications the code made silently are now written down where a user would
-  look for them. `spatial_weight_type="uniform"` returns ones rather than cell volumes,
-  so reported POD/SPOD energy is a sum over mesh points, not a domain integral, and its
-  numerical value changes when the grid is refined. mPOD decomposes each band
-  independently and then concatenates and re-sorts the modes with no joint
-  orthonormalization, so the pooled mode matrix is not a W-orthonormal basis even though
-  each band's modes are; measured on a three-band case, cross-band inner products reach
-  0.5 while within-band ones sit at 1e-16. SPOD's `dst` is a Strouhal step,
-  `St[1] - St[0] = df·L/U`, not the frequency resolution `fs/nfft`, so the characteristic
-  length and velocity rescale the reported eigenvalues; the two coincide only at the
-  default `L = U = 1`, which is why the shipped generators never revealed it. The default
-  BSMD triad table covers frequency-bin indices up to `|p| = 8`, which at the default
-  `nfft=128` is the bottom 12.5% of the spectrum. A docstring in `core/base.py` that
-  claimed the opposite about `dst` has been corrected. None of the underlying arithmetic
-  changed; only what the project says about it.
-- The bispectral energy map no longer silently discards triads. Its grid was a fixed
-  17×17 centred on `|p| = 8`, so a triad outside that window was computed and then
-  dropped from the map without a word — with `nfft=32`, where 16 bins are available, a
-  triad at `p=12` vanished. The half-width is now derived from the triads actually
-  analysed, and the plot extent follows it. The default triad list still produces the
+  (`λ ≤ n_kernel·ε·λ_max`), so rank-deficient input returns only honest unit-norm
+  modes and the count is scale-invariant across unit systems. Eigenvalues are
+  unchanged on every recorded fixture; reported energy fractions move in the last
+  digit or two because the total no longer includes the noise-level and negative
+  eigenvalues the old absolute floor let through.
+- POD, mPOD, ST-POD and PSD-POD share one lift / metric / second-order seam
+  (`IdentityLift`, `DelayEmbeddingLift`, `BandFilteredLift`, `SpatialMetric`,
+  `weighted_second_order`). Results unchanged; each caller keeps its own
+  truncation policy via `n_keep`.
+- One windowed-block Welch FFT: `blocksfft` and `blocksfft_optimized` both call
+  `core/welch.py::windowed_block_fft`. The two copies were already bit-identical.
+  Analytical checks pin power-norm Parseval, amplitude recovery and a
+  `scipy.signal.welch` cross-check.
+- One SPOD single-frequency eigenproblem and one load-latest result search. The
+  serial path's modes shift by up to 7e-15 in absolute sum, because dropping a
+  diagonal matrix multiply reassociates the same floating-point product;
+  eigenvalues are bit-identical.
+- The ten `plot_modes_3d_{slices,isometric}` methods share one driver. No figure
+  output changed.
+- Rendering a 3-D mode figure allocates about one copy of the volume instead of
+  three. Measured on a 256×128×128 float64 volume (32 MiB): peak allocation before
+  the plotting library is called falls from 96 MiB to 32 MiB. Colour limits are
+  unchanged, including for fields containing NaN or infinities.
+- The Welch-family analyzers (SPOD, BSMD, PSD-POD) share one FFT cache and can
+  adopt one another's blocks when the stamped parameters match, since all three
+  produce identical blocks. Each still writes only its own `..._<type>.hdf5`. The
+  cache is looked for in the analyzer's own `results_dir`; BSMD previously looked
+  in the globally configured directory regardless of where it was writing.
+- SPOD `freqs_to_plot` / `modes_to_plot` and BSMD `triad_indices` /
+  `static_triads` accept the numpy arrays users already hold. The annotations said
+  `Sequence`, which an `ndarray` is not, so a type-checked caller could not pass
+  `np.argsort(...)` even though every body already iterated the array at runtime.
+  Runtime behaviour is unchanged.
+- POD, ST-POD and DMD `load_results` go through `read_results`, so
+  pre-unification files with capitalised dataset names load with the reader's
+  `DeprecationWarning`.
+- `openmodalpy analyze` rejects an unknown method while parsing the command line
+  rather than failing later. The accepted set comes from the method registry, so
+  it cannot drift, and the error names the available methods. Every spelling that
+  worked before still works.
+- Reference fixtures use the grids from the packaged example configs (double_gyre
+  80×40/Nt=200, taylor_green 64×64/Nt=100, cylinder_wake 100×50/Nt=500, was
+  24×12/40, 24×24/40, 32×16/80). Spectrum values move with the grids; ranks and
+  tolerances are unchanged. A set-equality test requires every generator to have a
+  fixture.
+- The packaged `cylinder_wake.jsonc` states `"seed": 42` explicitly. It always
+  used that seed as the generator default; the fixture now reads it from the
+  config like it already read `Nx`, `Ny` and `Nt`. No generated data changes.
+- The bispectral energy map no longer silently discards triads. Its grid was a
+  fixed 17×17 centred on `|p| = 8`, so with `nfft=32` a triad at `p=12` was
+  computed and then dropped from the map without a word. The half-width now
+  follows the triads actually analysed. The default triad list still produces the
   same 17×17 grid with the same values.
-- The validation suite now enforces its claims. `tests/test_all.py` describes itself as
-  validating mathematical correctness against known analytical solutions, but every one
-  of its 22 checks reported through a helper that printed a tick and appended to a list;
-  the pass/fail decision lived in a `main()` reachable only by running the file as a
-  script, while CI runs pytest. Under pytest the five tests passed unconditionally, and
-  each was wrapped in a bare `except Exception`, so a crash inside POD, DMD or SPOD was
-  still reported as a pass. All 22 checks are now plain assertions with the measured
-  value in the failure message, at their original tolerances, and analyzer output is
-  routed to pytest's `tmp_path` instead of a `./results` directory in the working tree.
-  The conversion was verified by mutation, not by the suite going green: perturbing POD
-  eigenvalues by 5%, DMD eigenvalues by 2%, or shifting the SPOD spectrum by four
-  frequency bins each turns the suite red.
+- Four simplifications the code made silently are now written down where a user
+  would look for them. `spatial_weight_type="uniform"` returns ones rather than
+  cell volumes, so reported energy is a sum over mesh points, not a domain
+  integral, and its value changes when the grid is refined. mPOD decomposes each
+  band independently and concatenates without joint orthonormalization, so the
+  pooled mode matrix is not a W-orthonormal basis — measured on a three-band case,
+  cross-band inner products reach 0.5 while within-band ones sit at 1e-16. SPOD's
+  `dst` is a Strouhal step, `St[1] - St[0] = df·L/U`, not the frequency resolution
+  `fs/nfft`, so the characteristic length and velocity rescale the reported
+  eigenvalues; the two coincide only at the default `L = U = 1`, which is why the
+  shipped generators never revealed it. The default BSMD triad table covers bin
+  indices up to `|p| = 8`, which at `nfft=128` is the bottom 12.5 % of the
+  spectrum. No arithmetic changed — only what the project says about it.
+- The validation suite enforces its claims. `tests/test_all.py` described itself
+  as validating correctness against known analytical solutions, but all 22 checks
+  reported through a helper that printed a tick and appended to a list, and the
+  pass/fail decision lived in a `main()` reachable only by running the file as a
+  script — while CI runs pytest. Under pytest the five tests passed
+  unconditionally, each wrapped in a bare `except Exception`, so a crash inside
+  POD, DMD or SPOD was still reported as a pass. All 22 are now plain assertions
+  carrying the measured value, at their original tolerances. The conversion was
+  verified by mutation, not by the suite going green: perturbing POD eigenvalues
+  by 5 %, DMD eigenvalues by 2 %, or shifting the SPOD spectrum by four bins each
+  turns the suite red.
 
 ### Fixed
-- POD and ST-POD now use the spatial metric `load_and_preprocess` built,
-  including on the uniform path. POD used to overwrite `self.W` with ones
-  whenever the type was `"uniform"`, and ST-POD's `_get_weight_vector`
-  returned ones regardless of what was built, so its eigenproblem ignored
-  the metric while the saved file still named it. Both resets only wrote
-  ones over ones once the uniform builder started returning one weight per
-  point (see the scattered-point fix below). Numbers are unchanged. A
-  provenance test patches the builder to a non-ones column and asserts the
-  eigenvalues move, so a later cell-volume metric cannot be discarded in
-  silence.
-- Scattered point coordinates are now a supported input. When `x` and `y` are
-  1-D and as long as the snapshot matrix is wide — one coordinate pair per
-  column, which is what an unstructured mesh gives you — the uniform metric is
-  built with one weight per point. Before, it was always built as a grid tensor
-  product, so a point cloud of `n` points produced `n*n` weights.
-  `calculate_uniform_weights` gained an optional `n_space`; left out, it still
-  returns the tensor product, so existing callers are unchanged. SPOD and BSMD
-  accept scattered input now instead of refusing it. POD and ST-POD already
-  gave right answers on this data, but only because they threw the wrong-length
-  metric away and rebuilt it — now the metric is correct before they see it.
+
+- POD and ST-POD use the spatial metric `load_and_preprocess` built, including on
+  the uniform path. POD overwrote `self.W` with ones whenever the type was
+  `"uniform"`, and ST-POD's `_get_weight_vector` returned ones regardless, so its
+  eigenproblem ignored the metric while the saved file still named it. Numbers are
+  unchanged, because both resets only wrote ones over ones once the uniform
+  builder started returning one weight per point. A provenance test patches the
+  builder to a non-ones column and asserts the eigenvalues move, so a later
+  cell-volume metric cannot be discarded in silence.
+- Scattered point coordinates are a supported input. When `x` and `y` are 1-D and
+  as long as the snapshot matrix is wide — one coordinate pair per column, which
+  is what an unstructured mesh gives you — the uniform metric is built with one
+  weight per point. Before, it was always a grid tensor product, so a cloud of `n`
+  points produced `n*n` weights. `calculate_uniform_weights` gained an optional
+  `n_space`; left out, it still returns the tensor product, so existing callers
+  are unchanged. SPOD and BSMD accept scattered input now instead of refusing it.
   Grid runs are unchanged, down to the bit.
-- A large BSMD analyzer stays usable after `save_results`. When the FFT blocks
-  are too large for memory, BSMD reads them from a cache file. To write results
-  onto that same file, `save_results` must first close the handle it reads
-  through. It closed the handle but still recorded the blocks as available on
-  disk, so any later use — a second `perform_bsmd` with different triads, or a
-  read of the number of frequency bins — reached a file that was no longer open.
-  The handle is now reopened once the write finishes, including when the write
-  fails, and the analyzer never records the blocks as available unless a file is
-  really open behind them. If the blocks are gone from the file, the analyzer
-  reports no data instead. `close()` and the saved numbers are unchanged. This
-  never affected `run_analysis`, which closes the file immediately after saving.
-- A multi-band mPOD run now announces the decomposition it performed. The
-  single-band shortcut inherited POD's start, timing and mode-count INFO
-  lines; two or more bands ran the multiscale loop in silence. The multi-band
-  path now reports the same three facts through `display_name_for`, plus the
-  per-band mode counts only mPOD has. `load_results` KeyError text follows
-  the same helper, so an mPOD run no longer says "is not a POD result file".
-  Numbers are unchanged.
-- `load_results` now rejects a results file whose spatial metric `W` does not
-  match the file's own spatial size. The four readers (POD, ST-POD, SPOD,
-  BSMD) used to call `_as_spatial_weight_column` without `n_space`, so a
-  3-entry `W` beside a 32-point field loaded as `(3, 1)` and the analysis
-  ran on a metric that does not belong to the data. Each site now passes the
-  size already on the file (POD `modes.shape[0]`, ST-POD
-  `modes.shape[0] // embedding_dim` from `attrs`, SPOD `modes.shape[1]`,
-  BSMD `modes1.shape[1]`). A file with no usable size source still loads as
-  before. The error names both lengths. Weight values on matching files are
-  unchanged.
-- PSD-POD now writes the spatial metric `W` into the results file. The
-  eigenproblem already used `self.W`, but `save_results` omitted it, so two
-  runs of the same data under different metrics produced different modes and
-  files whose provenance looked identical. The dataset is the column
-  `(n_space, 1)` the rest of the package stores, and is omitted when `W` is
-  empty (an analyzer that never loaded data). Weight values and the
-  eigenproblem are unchanged.
-- The spatial metric `self.W` is always a column `(n_space, 1)` after load,
-  after a run, and after a save/load round trip. POD's default (uniform) path
-  used to overwrite that column with a flat vector, so a default POD result
-  file stored `W` as `(n_space,)`. Loading any result file — including a
-  legacy file whose `W` dataset is flat — now reshapes on the way in.
-  Weight values are unchanged.
-- A spatial metric that is not an inner product is now rejected as soon as the
-  data is loaded, instead of later inside the solver. The polar and uniform
-  paths previously skipped this check, so a grid whose radial coordinate is 0 —
-  where every annulus area is `pi*r**2 = 0` — built a zero metric at load and
-  only failed once an analysis ran. Negative, non-finite and complex weights
-  loaded from a result file are caught at the same point. The error text is
-  unchanged; only where it surfaces.
-- `test_prescribed_weights_change_the_eigenvalues` now uses an equal-mean
-  weight pair (ones vs a renormalised off-centre bump) so a solver that
-  consulted only `mean(W)` no longer passes. The previous ones-vs-ramp pair
-  was isospectral on that fixture. The DMD branch now compares modes, which
-  would move if the regression started using W; eigenvalues there are
-  isospectral even under a true metric. The neighbouring survival test
-  writes into pytest's `tmp_path` instead of `./results` and `./figures`.
-- Prescribed spatial weights now have the same column shape as the uniform
-  and polar builders (`(n_space, 1)`). The prescribed path used to store a
-  flat `(n_space,)` vector, so BSMD's `W * prod` against an
-  `(Nspace, Nblocks)` field raised `ValueError` and never ran. The other six
-  analyzers already accepted either shape. A prescribed `W` written into a
-  results file is therefore now a column rather than a flat vector; the
-  reader already accepts both (`ndim == 1` or `shape[1] == 1`). BSMD could
-  never have written such a file because it raised. Weight values are
-  unchanged.
-- The MAT loader no longer double-counts an absent coordinate. A `.mat` that
-  carried `y` and no `x` used to set `Nx` to the whole snapshot width, so
-  `Nx*Ny*Nz` counted `y` twice and the uniform/polar weight vector was that
-  long. An absent axis now contributes extent 1, matching the `y` and `z`
-  fallbacks. Analyzers also reject a custom loader whose reported grid product
-  disagrees with `q.shape[1]`, naming both numbers and the grid. Datasets with
-  no grid metadata are left alone. A leftover all-ones grid key (a lone
-  `Nz: 1`, or `Nx=Ny=Nz=1`) is not a claim either and is not raised against a
-  wider matrix; a lone `Nx` that names a real extent is still checked. No
-  numerical change on data that was already consistent.
-- `n_modes_saved` in POD, mPOD and ST-POD result files now reports how many
-  modes the file holds. Before, it reported how many modes you asked for. The
-  two disagree after `load_results`, so a re-saved file could claim more modes
-  than it held, or fewer.
-- `load_results` now lowers `n_modes_save` to the width of the file it read. It
-  never raises it, and it never drops modes the file holds.
-- When the solver returns fewer modes than the caller's cap, `n_modes_save` is
-  lowered to match on POD, ST-POD, and multi-band mPOD. ST-POD and multi-band
-  mPOD used to leave the counter stale, so HDF5 attrs and plot loops believed a
-  wider array than existed. ST-POD's plot guards also bound by the array width,
-  not only by the counter.
-- DMD and PSD-POD now lower `n_modes_save` to the number of modes they hold
-  after a solve, including a degenerate DMD that holds none. DMD `load_results`
-  lowers the cap to the eigenvalue count of the file it read, which is defined
-  even for a rank-0 file that holds a 1-D empty modes array.
-- The SVD route no longer returns a meaningless extra mode when a caller centers
-  data whose mean dwarfs the fluctuation. `weighted_second_order(...,
-  method="svd", n_keep=None)` used to trust a relative singular-value floor to
-  drop the direction that centering nulls. That floor stops recognising it once
-  the removed mean is about a thousand times the fluctuation, because subtracting
-  it destroys too many digits. The route now measures whether the input is
-  row-centered, and tightens the bound to `min(m - 1, n)` only when the
-  measurement says so. Detection holds to a mean about 1e9 times the fluctuation;
-  past that the data itself is too damaged for the mode count to mean anything.
-  Callers that pass an explicit `n_keep` are unaffected, which includes POD and
-  ST-POD, so no analyzer output changes.
-- ST-POD returns one more mode in the temporal-lift regime. The SVD route and
-  ST-POD's caller both capped the mode count at `min(m - 1, n)`, the bound that
-  mean-centering would justify — but the matrix they factor is the delay-embedded
-  lift of a centered series, which is not itself row-centered and has full row
-  rank. The cap is now the honest matrix bound `min(m, n)`. POD is unaffected:
-  it still passes its own `min(m - 1, n)` bound, which is what accounts for the
-  direction its centering removes.
-- An mPOD run says `mPOD` on the console. Six lines printed during a run, and
-  two more when results are loaded, said a bare `POD`, because the analyzer
-  mPOD builds on hardcoded the word. The save line was the clearest symptom: it
-  printed a path already containing `mpod` inside a sentence saying `POD`. The
-  label now follows the analysis type, the same way the figure titles do. A
-  plain POD run is unchanged, and messages naming the `perform_pod()` method
-  keep that name, since it is the method both classes really use.
-- The SVD route keeps every mode the data supports, so it now agrees with the
-  eigenvalue route. Subtracting the mean costs one snapshot's worth of
-  information, so the limit on how many modes the data can support is
-  `min(n_samples - 1, n_space)`. The SVD route instead used
-  `min(n_samples, n_space) - 1`, which is the same number only when there are
-  at least as many grid points as snapshots. With fewer grid points than
-  snapshots it discarded one genuine mode: 40 snapshots on 25 points returned
-  24 modes where the eigenvalue route returned 25, and a run asking for more
-  reported the contradictory `n_modes_save (25) > available modes (24)`. At a
-  single spatial point the old limit collapsed to zero, so the SVD route
-  returned no modes at all for any number of snapshots. The same wrong limit
-  was applied a second time by ST-POD before it called the solver, so both
-  places are corrected. Results are unchanged wherever there are at least as
-  many grid points as snapshots.
-- POD reports the true energy total, and keeps every mode the data supports.
-  Two separate errors, both on the `solver="svd"` route: the reported total was
-  the sum of the returned eigenvalues, which omitted the last one, so every
-  energy percentage read slightly high (measured 2.5e-3 relative on a 40x25
-  case). The total now comes from the exact identity `norm(X_w, 'fro')**2 / m`,
-  which does not depend on how many modes the solver is asked for. Separately,
-  POD now asks the solver only for the modes it keeps instead of nearly the full
-  rank. The bound for that request is `min(n_samples - 1, n_space)`: subtracting
-  the mean costs one snapshot's worth of information, not one of whichever
-  dimension is smaller. Fields with fewer grid points than snapshots keep the
-  mode that the old bound discarded.
-- An mPOD run now labels its figures `mPOD`. Every title drawn inside the
-  image said `POD`, because the ten title strings were hardcoded in the POD
-  analyzer that mPOD builds on. The filename already said `mpod`, so a
-  multiscale-POD figure could reach print carrying a plain-POD label. Titles,
-  the start banner and the run summary now all read their name from one
-  shared display-name map, which keeps the conventional casing for `mPOD`,
-  `PSD-POD` and `ST-POD`. Labels only — no numerical result changes.
-- PSD-POD (the complex solver route) now reports a mode value of exactly `0`
-  at a zero-measure cell, matching the real POD/ST-POD routes. Modes were
-  built from the unweighted Fourier ensemble, so data held at a masked cell —
-  which the metric says must contribute nothing — appeared as that cell's mode
-  value and could become the sign/phase pivot, corrupting the whole mode
-  column. Eigenvalues were always correct; mode values at positive-weight
-  cells are unchanged (measured drift about `1e-15`).
-- The repo copy of `examples/cylinder.jsonc` restores the per-run `rank: 4`
-  on its `hodmd` and `tls_hodmd` runs, matching the packaged config. A
-  checkout and an installed wheel now resolve the same rank for every run;
-  the example-config tests now compare the full per-run rank mapping, so
-  this class of drift fails the suite instead of passing silently.
-- `compute_reduced_svd` no longer routes near-full-rank requests to ARPACK.
-  The gate is now `use_iterative_svd(min_dim, rank)`: iterative only when
-  `rank < 0.05 * min_dim` and `min_dim >= 256`. Callers that ask for
-  `k = n_min - 1` (POD SVD route, ST-POD) stay on dense SVD, which is the
-  faster path once rank is a large fraction of the smaller dimension.
-- `canonicalize_modes` accepts an integer-dtype `modes` array instead of failing
-  with numpy's `UFuncOutputCastingError`. The scale factor it applies is not an
-  integer, so integer input is now promoted to `float64` before scaling; `float`
-  and `complex` inputs keep their own dtype, and `float32` is not promoted. The
-  returned arrays were already copies, so a caller's array is untouched either
-  way. No solver route was affected — all of them pass float or complex — so
-  this only matters when calling the function directly.
-- SPOD no longer reports a roundoff-negative eigenvalue with its sign flipped.
-  The cross-spectral matrix is positive semi-definite, so an eigenvalue that
-  comes back slightly negative is roundoff; taking its absolute value presented
-  it as real energy. Such values are now clamped to exactly zero. Only the
-  roundoff tail of the spectrum is affected, and the number of returned modes
-  is unchanged.
-- A malformed FFT cache file now recomputes the blocks instead of raising. The
-  read guard previously caught only unreadable files, so a file that opened
-  cleanly but held a wrong-rank `FFTBlocks` dataset or an uncastable stamp
-  attribute aborted the run. This matters more now that an analyzer may open a
-  file written by another analysis.
-- `read_results` now loads 0-d (scalar) HDF5 datasets into `extra` instead of
-  raising on a scalar dataspace; normal datasets in the same file are unchanged.
-- SPOD and BSMD modes no longer flip sign or phase between runs.
-- The CLI's internal unhandled-command fallback now returns exit code 2 instead of
-  relying on an unreachable line after ``parser.error``.
-- Config booleans for `rank` and `energy_fraction` now raise at parse time instead
-  of being silently treated as missing (`null`).
-- DMD `rank="svht"` now thresholds with the unknown-noise coefficient
-  `omega(beta) = lambda(beta)/sqrt(mu_beta)` (`mu_beta` = Marchenko–Pastur
+- `load_results` rejects a results file whose metric `W` does not match the file's
+  own spatial size. The four readers called `_as_spatial_weight_column` without
+  `n_space`, so a 3-entry `W` beside a 32-point field loaded as `(3, 1)` and the
+  analysis ran on a metric that does not belong to the data.
+- `self.W` is always a column `(n_space, 1)` — after load, after a run, and after
+  a save/load round trip. POD's uniform path used to overwrite that column with a
+  flat vector.
+- PSD-POD writes the metric `W` into its results file. The eigenproblem already
+  used `self.W`, but `save_results` omitted it, so two runs under different
+  metrics produced different modes and files whose provenance looked identical.
+- Prescribed weights have the same column shape as the uniform and polar builders.
+  The prescribed path stored a flat vector, so BSMD's `W * prod` against an
+  `(Nspace, Nblocks)` field raised `ValueError` and never ran.
+- A metric that is not an inner product is rejected as soon as data is loaded,
+  instead of later inside the solver.
+- The MAT loader no longer double-counts an absent coordinate. A `.mat` carrying
+  `y` and no `x` set `Nx` to the whole snapshot width, so `Nx*Ny*Nz` counted `y`
+  twice. An absent axis now contributes extent 1. Analyzers also reject a custom
+  loader whose reported grid product disagrees with `q.shape[1]`, naming both
+  numbers. Datasets with no grid metadata are left alone.
+- DMD no longer amplifies noise into modes when the snapshot pair is
+  ill-conditioned. Both the reduced operator and the mode recovery divide by the
+  singular values of the first snapshot matrix, and the number kept was whatever
+  you asked for rather than whatever the data supports. A rank-deficient sequence
+  alone is harmless — the small singular values cancel — but as soon as the second
+  snapshot matrix carries content the first cannot represent, which is what a
+  transient or a truncated record produces, the division has nothing to cancel
+  against. On a rank-3 sequence perturbed at the final snapshot this returned
+  eigenvalues of magnitude 6.7e9 and modes of 1.9e9, all finite, so nothing
+  raised. Singular values are now kept only above a threshold relative to the
+  largest, following the `numpy.linalg.pinv` convention, which makes the cut
+  invariant to the overall scale of the data.
+- DMD reports the rank it actually used as `effective_rank`, and warns when that
+  is below the modes requested — a `RuntimeWarning` about the data, since asking
+  for more modes than the data supports is normal.
+- DMD `rank="svht"` thresholds with the unknown-noise coefficient
+  `omega(beta) = lambda(beta)/sqrt(mu_beta)` (`mu_beta` the Marchenko–Pastur
   median). The previous form used the known-noise `lambda(beta)` against
-  `median(s)`, so the threshold sat ~24% low at `beta = 1` and pure i.i.d.
+  `median(s)`, so the threshold sat about 24 % low at `beta = 1` and pure i.i.d.
   noise kept spurious modes at realistic matrix sizes.
-- The SVD route of `weighted_second_order` now drops singular values at or
-  below `n_kernel · ε · σ_max` (same relative scale as the eigh floor, applied
-  in the singular-value domain). On exactly rank-3 data both routes return 3
-  modes; a planted mode at singular-value ratio `1e-10` is still recovered.
-  The previous SVD path kept the full numerical null-space tail (eigenvalues
-  ~1e-29 against a top eigenvalue of hundreds). ST-POD is the existing SVD
-  caller and may return fewer trailing noise modes on rank-deficient input.
+- The SVD route drops singular values at or below `n_kernel · ε · σ_max`, the same
+  relative scale as the eigh floor. On exactly rank-3 data both routes return 3
+  modes; a planted mode at singular-value ratio `1e-10` is still recovered. The
+  previous path kept the full numerical null-space tail — eigenvalues ~1e-29
+  against a top eigenvalue of hundreds.
+- The SVD route keeps every mode the data supports, so it agrees with the
+  eigenvalue route. Subtracting the mean costs one snapshot's worth of
+  information, so the limit is `min(n_samples - 1, n_space)`. The route used
+  `min(n_samples, n_space) - 1`, the same number only when there are at least as
+  many grid points as snapshots. With fewer grid points than snapshots it
+  discarded a genuine mode — 40 snapshots on 25 points returned 24 modes against
+  the eigenvalue route's 25 — and at a single spatial point it collapsed to zero
+  modes for any number of snapshots. ST-POD applied the same wrong limit before
+  calling the solver; both are corrected.
+- POD reports the true energy total. The reported total was the sum of the
+  returned eigenvalues, which omitted the last one, so every percentage read
+  slightly high — measured 2.5e-3 relative on a 40×25 case. It now comes from the
+  exact identity `norm(X_w, 'fro')**2 / m`, independent of how many modes the
+  solver is asked for.
+- The SVD route no longer returns a meaningless extra mode when a caller centers
+  data whose mean dwarfs the fluctuation. The relative singular-value floor stops
+  recognising the nulled direction once the removed mean is about a thousand times
+  the fluctuation, because subtracting it destroys too many digits. The route now
+  measures whether the input is row-centered and tightens the bound only when the
+  measurement says so; detection holds to a mean about 1e9 times the fluctuation.
+  Callers passing an explicit `n_keep` — which includes POD and ST-POD — are
+  unaffected.
+- ST-POD returns one more mode in the temporal-lift regime. It capped at
+  `min(m - 1, n)`, the bound mean-centering would justify, but the matrix it
+  factors is the delay-embedded lift of a centered series, which is not itself
+  row-centered and has full row rank. The cap is now `min(m, n)`.
+- `n_modes_saved` reports how many modes the file holds, not how many were asked
+  for; `load_results` lowers `n_modes_save` to the width of the file it read,
+  never raises it, and never drops modes the file holds. POD, ST-POD, multi-band
+  mPOD, DMD and PSD-POD all lower the counter when the solver returns fewer modes
+  than the cap, including a degenerate DMD that holds none.
 - mPOD's one-call path (`MPODAnalyzer.run_analysis`) used to run plain POD and
-  write those results into a file still named `..._mpod.hdf5`. The orchestrator
-  now dispatches through an overridable `_perform_decomposition` hook
-  (`perform_pod` for POD, `perform_mpod` for mPOD), and a test requires every
-  `PODAnalyzer` subclass to override it, so the next subclass cannot inherit the
-  parent's decomposition unnoticed. The CLI was unaffected: `commands.py`
-  already called `perform_mpod` by name. DMD also gains a minimal `run_analysis`
-  (load, compute, save; no plots).
-- BSMD with no FFT blocks loaded now says so — "no frequency bins are loaded" —
-  instead of quoting a bound of `|p| <= -1`, and `perform_bsmd` raises
-  `ValueError` on an empty `qhat` rather than printing a note and continuing
-  into the analysis.
-- A full disk (or other write failure) while BSMD saves or offloads its FFT
-  block cache is no longer reported as a cache-load failure; the write error
-  propagates instead of triggering a recompute that cannot save either. When a
-  cache read genuinely does fail, the message now names the file it could not
-  read.
-- PSD-POD result metadata now records `uses_mean_subtraction=True`, matching
-  `blocksfft` (which always removes a mean — global by default, per-block when
-  `blockwise_mean` is set). The previous write stored `False`.
-- SPOD `load_and_preprocess` docstring no longer claims parent mean subtraction
-  or a `self.data_matrix` attribute that is never assigned.
-- DOC.md: `bsmd.py` filename, POD branch condition `Ns < Nspace` (no false
-  `<<` margin), dropped a stale hardcoded test count, and notes that DMD neither
-  centers nor applies the spatial metric.
+  write those results into a file named `..._mpod.hdf5`. The orchestrator now
+  dispatches through an overridable `_perform_decomposition` hook, and a test
+  requires every `PODAnalyzer` subclass to override it, so the next subclass
+  cannot inherit the parent's decomposition unnoticed. The CLI was unaffected.
+  DMD also gains a minimal `run_analysis`.
+- A multi-band mPOD run announces the decomposition it performed. The single-band
+  shortcut inherited POD's start, timing and mode-count lines; two or more bands
+  ran the multiscale loop in silence.
+- An mPOD run says `mPOD` on the console and on its figures. Six lines during a
+  run and two more on load said a bare `POD`; the save line printed a path
+  containing `mpod` inside a sentence saying `POD`. All ten drawn titles said
+  `POD` too, so a multiscale-POD figure could reach print carrying a plain-POD
+  label. Titles, banner and summary now read one shared display-name map, which
+  keeps the conventional casing for `mPOD`, `PSD-POD` and `ST-POD`.
+- POD's energy-captured report no longer always prints 100 %: the fraction is the
+  truncated eigenvalue sum over the pre-truncation total, stored as
+  `energy_captured_fraction`.
+- PSD-POD reports a mode value of exactly `0` at a zero-measure cell, matching the
+  real routes. Modes were built from the unweighted Fourier ensemble, so data at a
+  masked cell — which the metric says must contribute nothing — appeared as that
+  cell's mode value and could become the sign pivot, corrupting the whole column.
+  Eigenvalues were always correct; positive-weight cells drift about `1e-15`.
+- SPOD no longer reports a roundoff-negative eigenvalue with its sign flipped. The
+  cross-spectral matrix is positive semi-definite, so a slightly negative
+  eigenvalue is roundoff; taking its absolute value presented it as real energy.
+  Such values are clamped to exactly zero.
+- SPOD and BSMD modes no longer flip sign or phase between runs.
+- A corrupt, truncated or malformed FFT-block cache no longer aborts the analysis.
+  Interrupted runs, full disks and killed jobs leave half-written HDF5 caches that
+  still exist on disk; opening one for append used to raise and stop SPOD or BSMD
+  even though the blocks are re-derivable from the raw data. Write mode is now
+  chosen by whether the file is readable as HDF5, not by whether it exists. The
+  read guard also covers a file that opens cleanly but holds a wrong-rank
+  `FFTBlocks` dataset or an uncastable stamp. Reading a saved *results* file keeps
+  the opposite policy and still raises, since results are not re-derivable.
+- A write failure while BSMD saves or offloads its cache is no longer reported as
+  a cache-load failure; the write error propagates instead of triggering a
+  recompute that cannot save either. A genuine read failure now names the file.
+- A large BSMD analyzer stays usable after `save_results`. When the FFT blocks are
+  too large for memory, BSMD reads them from a cache file, and to write results
+  onto that same file `save_results` must close the handle it reads through. It
+  closed the handle but still recorded the blocks as available, so any later use —
+  a second `perform_bsmd` with different triads, or a read of the bin count —
+  reached a file that was no longer open. The handle is reopened once the write
+  finishes, including when the write fails.
+- BSMD with no FFT blocks loaded says "no frequency bins are loaded" instead of
+  quoting a bound of `|p| <= -1`, and `perform_bsmd` raises `ValueError` on an
+  empty `qhat` rather than printing a note and continuing into the analysis.
 - BSMD default static triads no longer fail a small-`nfft` configuration.
   `static_triads` defaults to `None` and resolves to a private copy of
-  `ALL_TRIADS`; when that default list is used, triads outside `|p| <= nfft//2`
-  (and the loaded-bin bound) are dropped with a warning that names them. A
-  user-supplied list still raises `ValueError`, and every out-of-range
-  component is named in one message.
+  `ALL_TRIADS`; when that default is used, triads outside the bin bounds are
+  dropped with a warning naming them. A user-supplied list still raises.
 - BSMD static-triad validation bounds by both `nfft//2` and the loaded `qhat`
   length, and no longer swallows out-of-range bin reads into a silent NaN
-  eigenvalue. The two bounds coincide for a freshly computed transform; when
-  they diverge, the triad is now rejected with a `ValueError` naming the real
-  bound instead of returning `NaN` with no diagnostic.
-- POD energy-captured report no longer always prints 100%: the fraction is
-  truncated eigenvalue sum over the pre-truncation total, stored as
-  `energy_captured_fraction` on the analyzer and in result metadata.
-- ARPACK-path SVD (`compute_reduced_svd` with `min_dim >= 256`) is bit-reproducible
-  via a deterministic local start vector. Of the synthetic generators, only the
-  cylinder wake accepts a `seed` and records it into result metadata as
-  `data_seed`; the JetLES-like dummy generator accepts a `seed` for its noise RNG
-  but does not surface it; `double_gyre` and `taylor_green` are deterministic and
-  take no seed. Tests reseed NumPy from `OMPY_TEST_RNG_JITTER` so collection
-  order cannot leak unseeded draws.
-- DMD no longer amplifies noise into modes when the snapshot pair is ill-conditioned.
-  The reduced operator and the mode recovery both divide by the singular values of the
-  first snapshot matrix, and the number kept was whatever you asked for rather than
-  whatever the data supports. A rank-deficient sequence alone is harmless — the small
-  singular values cancel — but as soon as the second snapshot matrix carries content the
-  first one cannot represent, which is what a transient, an arriving structure or a
-  truncated record produces, the division has nothing to cancel against. On a rank-3
-  sequence with a perturbation applied to the final snapshot this returned eigenvalues of
-  magnitude 6.7e9 and modes of magnitude 1.9e9, all finite, so nothing raised. Singular
-  values are now kept only above a threshold relative to the largest one, following the
-  `numpy.linalg.pinv` convention, which makes the cut invariant to the overall scale of
-  the data; both `pinv` calls pass that same conditioning explicitly instead of relying
-  on a default. Well-conditioned data is unaffected.
-- DMD reports the rank it actually used as `effective_rank`, and warns when that is below
-  the number of modes requested. Asking for more modes than the data supports is normal,
-  so this is a `RuntimeWarning` about the data rather than an error.
-- An all-zero or otherwise degenerate field returns empty results with that warning
-  instead of failing inside the eigensolver with `LinAlgError: Array must not contain
-  infs or NaNs`.
-- A corrupt or truncated FFT-block cache no longer aborts the analysis. Interrupted
-  runs, full disks, and killed jobs can leave a half-written HDF5 cache that still
-  exists on disk; opening it for append used to raise and stop SPOD or BSMD even though
-  the blocks are re-derivable from the raw data. Write mode is now chosen by whether the
-  file is actually readable as HDF5, not by whether it exists, so an unreadable cache is
-  overwritten after a recompute. The same recovery applies when BSMD tries to reuse a
-  SPOD cache that turns out to be truncated: it prints a reason and recomputes rather
-  than raising. Reading a saved results file keeps the opposite policy and still raises,
-  since results are not re-derivable from the raw data the way FFT blocks are.
-- The sampling rate `fs` fails with a diagnosis instead of an accident. `fs` starts at
-  `0.0` until a dataset is loaded, and on paths that never load one — reopening saved
-  results, for instance — that zero used to reach the frequency code, where a periodogram
-  rejected it with a message naming nothing and an `rfftfreq` axis raised
-  `ZeroDivisionError`. Both now raise a single `ValueError` naming the data source and
-  saying what to supply, matching the message the timestep already used. Frequency axes
-  are unchanged whenever the sampling rate is valid.
+  eigenvalue.
+- The sampling rate `fs` fails with a diagnosis instead of an accident. `fs`
+  starts at `0.0` until a dataset is loaded, and on paths that never load one —
+  reopening saved results, for instance — that zero reached the frequency code,
+  where a periodogram rejected it with a message naming nothing and an `rfftfreq`
+  axis raised `ZeroDivisionError`. Both now raise a single `ValueError` naming the
+  data source and saying what to supply.
+- An all-zero or otherwise degenerate field returns empty results with a warning
+  instead of failing inside the eigensolver with `LinAlgError: Array must not
+  contain infs or NaNs`.
+- `compute_reduced_svd` no longer routes near-full-rank requests to ARPACK. The
+  gate is `use_iterative_svd(min_dim, rank)`: iterative only when
+  `rank < 0.05 * min_dim` and `min_dim >= 256`. Callers asking for `k = n_min - 1`
+  stay on dense SVD, the faster path once rank is a large fraction of the smaller
+  dimension.
+- ARPACK-path SVD is bit-reproducible via a deterministic local start vector. Of
+  the synthetic generators, only the cylinder wake accepts a `seed` and records it
+  as `data_seed`; `double_gyre` and `taylor_green` are deterministic and take
+  none. Tests reseed NumPy from `OMPY_TEST_RNG_JITTER` so collection order cannot
+  leak unseeded draws.
+- `canonicalize_modes` accepts an integer-dtype `modes` array instead of failing
+  with numpy's `UFuncOutputCastingError`. The scale factor is not an integer, so
+  integer input is promoted to `float64`; `float` and `complex` keep their dtype
+  and `float32` is not promoted.
+- `read_results` loads 0-d (scalar) HDF5 datasets into `extra` instead of raising
+  on a scalar dataspace.
+- `test_prescribed_weights_change_the_eigenvalues` uses an equal-mean weight pair
+  (ones against a renormalised off-centre bump), so a solver consulting only
+  `mean(W)` no longer passes; the previous ones-against-ramp pair was isospectral
+  on that fixture.
+- The repo copy of `examples/cylinder.jsonc` restores the per-run `rank: 4` on its
+  `hodmd` and `tls_hodmd` runs, matching the packaged config, and the tests now
+  compare the full per-run rank mapping so this class of drift fails the suite.
+- Config booleans for `rank` and `energy_fraction` raise at parse time instead of
+  being silently treated as missing.
+- PSD-POD metadata records `uses_mean_subtraction=True`, matching `blocksfft`,
+  which always removes a mean. The previous write stored `False`.
+- The CLI's unhandled-command fallback returns exit code 2 instead of relying on
+  an unreachable line after `parser.error`.
+- SPOD `load_and_preprocess` docstring no longer claims parent mean subtraction or
+  a `self.data_matrix` attribute that is never assigned.
+- DOC.md: the `bsmd.py` filename, the POD branch condition `Ns < Nspace` (no false
+  `<<` margin), a stale hardcoded test count, and a note that DMD neither centers
+  nor applies the spatial metric.
+
 
 ## [0.3.0] - 2026-07-27
 
