@@ -144,9 +144,6 @@ class STPODAnalyzer(BaseAnalyzer):
 
     def _get_weight_vector(self, num_space_points: int) -> np.ndarray:
         """Extract weight vector from self.W, handling various shapes."""
-        if self.spatial_weight_type == "uniform":
-            return np.ones(num_space_points, dtype=np.float64)
-
         if self.W.ndim == 2:
             if self.W.shape[0] == self.W.shape[1]:
                 return np.diag(self.W)

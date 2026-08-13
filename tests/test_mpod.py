@@ -515,8 +515,10 @@ def test_mpod_accepts_a_non_square_weight_matrix_row_major():
     path) so a column-major flip of the flatten order fails this test.
 
     Multi-band edges are required: a single full band collapses to
-    perform_pod, which rewrites W under spatial_weight_type="uniform" and
-    never reaches the seam this bead pins.
+    perform_pod, which rejects this (3, 2) W as an unexpected shape rather
+    than flattening it, so that route never reaches the seam pinned here.
+    (perform_pod used to overwrite W under spatial_weight_type="uniform";
+    it no longer does, so the reason changed but the requirement did not.)
     """
     rng = np.random.default_rng(0)
     q = rng.standard_normal((40, 6))

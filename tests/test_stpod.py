@@ -923,3 +923,84 @@ def test_stpod_kept_count_equals_lifted_matrix_rank():
         got = int(np.asarray(analyzer.eigenvalues).size)
         assert got == want, f"Ns={Ns} Nx={Nx} d={d} lifted={lifted.shape}: kept {got}, rank {want}"
         assert analyzer.modes.shape[1] == got
+
+
+def _uniform_field(ns: int = 24, nx: int = 6, ny: int = 4, seed: int = 0) -> dict:
+    rng = np.random.default_rng(seed)
+    return {
+        "q": rng.standard_normal((ns, nx * ny)),
+        "x": np.linspace(0.5, 2.0, nx),
+        "y": np.linspace(0.5, 1.5, ny),
+        "dt": 0.1,
+        "Nx": nx,
+        "Ny": ny,
+        "Ns": ns,
+    }
+
+
+def _ramp_uniform_weights(x, y, z=None, n_space=None):
+    if n_space is None:
+        n_space = int(np.asarray(x).shape[0] * np.asarray(y).shape[0])
+    return np.linspace(0.2, 3.0, int(n_space)).reshape(-1, 1)
+
+
+def test_stpod_uniform_metric_moves_eigenvalues_and_matches_saved_file(monkeypatch, tmp_path):
+    """The uniform path must use the metric load_and_preprocess built.
+
+    _get_weight_vector used to return ones whenever the type was uniform, so
+    the eigenproblem ignored the built metric while self.W — and the saved
+    file — still named it. Patch the builder to a ramp: the eigenvalues must
+    move, and a prescribed rerun on the W stored in the results file must
+    reproduce that spectrum.
+    """
+    field = _uniform_field()
+    n_space = field["Nx"] * field["Ny"]
+    ramp = _ramp_uniform_weights(field["x"], field["y"], n_space=n_space)
+    common = dict(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        embedding_dim=3,
+        n_modes_save=4,
+        use_parallel=False,
+    )
+    plain = STPODAnalyzer(
+        spatial_weight_type="uniform",
+        results_dir=str(tmp_path / "plain"),
+        figures_dir=str(tmp_path / "plain"),
+        **common,
+    )
+    plain.load_and_preprocess()
+    plain.perform_stpod()
+
+    monkeypatch.setattr(
+        "openmodalpy.core.base.calculate_uniform_weights",
+        _ramp_uniform_weights,
+    )
+    ramped = STPODAnalyzer(
+        spatial_weight_type="uniform",
+        results_dir=str(tmp_path / "ramp"),
+        figures_dir=str(tmp_path / "ramp"),
+        **common,
+    )
+    ramped.load_and_preprocess()
+    ramped.perform_stpod()
+    ramped.save_results("stpod_ramp.hdf5")
+
+    assert not np.allclose(plain.eigenvalues, ramped.eigenvalues), (
+        "ST-POD eigenvalues did not move when calculate_uniform_weights "
+        "returned a ramp; the uniform path discarded the metric"
+    )
+
+    with h5py.File(tmp_path / "ramp" / "stpod_ramp.hdf5", "r") as handle:
+        saved_w = np.asarray(handle["W"])
+    np.testing.assert_allclose(saved_w.ravel(), ramp.ravel())
+
+    from_file = STPODAnalyzer(
+        spatial_weights=saved_w,
+        results_dir=str(tmp_path / "from_file"),
+        figures_dir=str(tmp_path / "from_file"),
+        **common,
+    )
+    from_file.load_and_preprocess()
+    from_file.perform_stpod()
+    np.testing.assert_allclose(from_file.eigenvalues, ramped.eigenvalues)

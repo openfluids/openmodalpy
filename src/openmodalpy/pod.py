@@ -201,10 +201,7 @@ class PODAnalyzer(BaseAnalyzer):
         self.temporal_mean = cast(np.ndarray, np.mean(data_matrix, axis=0, dtype=np.float64))
         data_mean_removed = data_matrix - self.temporal_mean
 
-        # 2. Spatial metric (inner-product weights)
-        if self.spatial_weight_type == "uniform":
-            self.W = np.ones((num_space_points, 1), dtype=np.float64)
-
+        # 2. Spatial metric (inner-product weights) — the metric load built.
         # Ensure W is a 1D array for efficient broadcasting
         if self.W.ndim == 2:
             if self.W.shape[0] == self.W.shape[1]:

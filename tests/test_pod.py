@@ -115,8 +115,7 @@ def test_spatial_kernel_time_coefficients_use_weighted_inner_product():
         n_modes_save=2,
     )
     analyzer.load_and_preprocess()
-    # perform_pod resets W to ones only when the type is "uniform" (pod.py);
-    # a prescribed vector stays in analyzer.W and is used by the eigenproblem.
+    # A prescribed vector stays in analyzer.W and is used by the eigenproblem.
     np.testing.assert_allclose(np.asarray(analyzer.W).ravel(), weights)
     analyzer.perform_pod()
     np.testing.assert_allclose(np.asarray(analyzer.W).ravel(), weights)
@@ -713,3 +712,64 @@ def test_prescribed_negative_weight_raises_in_load_and_preprocess():
     )
     with pytest.raises(ValueError, match=r"negative"):
         analyzer.load_and_preprocess()
+
+
+def _uniform_field(ns: int = 24, nx: int = 6, ny: int = 4, seed: int = 0) -> dict:
+    rng = np.random.default_rng(seed)
+    return {
+        "q": rng.standard_normal((ns, nx * ny)),
+        "x": np.linspace(0.5, 2.0, nx),
+        "y": np.linspace(0.5, 1.5, ny),
+        "dt": 0.1,
+        "Nx": nx,
+        "Ny": ny,
+        "Ns": ns,
+    }
+
+
+def _ramp_uniform_weights(x, y, z=None, n_space=None):
+    if n_space is None:
+        n_space = int(np.asarray(x).shape[0] * np.asarray(y).shape[0])
+    return np.linspace(0.2, 3.0, int(n_space)).reshape(-1, 1)
+
+
+def test_pod_uniform_metric_moves_eigenvalues(monkeypatch, tmp_path):
+    """The uniform path must use the metric load_and_preprocess built.
+
+    calculate_uniform_weights returns ones by contract, so a shape-only check
+    stays green while perform_pod overwrites W with ones. Patch the builder to
+    a ramp and demand the eigenvalues move — that is the provenance, not the
+    shape.
+    """
+    field = _uniform_field()
+    common = dict(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        spatial_weight_type="uniform",
+        n_modes_save=4,
+        use_parallel=False,
+    )
+    plain = PODAnalyzer(
+        results_dir=str(tmp_path / "plain"),
+        figures_dir=str(tmp_path / "plain"),
+        **common,
+    )
+    plain.load_and_preprocess()
+    plain.perform_pod()
+
+    monkeypatch.setattr(
+        "openmodalpy.core.base.calculate_uniform_weights",
+        _ramp_uniform_weights,
+    )
+    ramped = PODAnalyzer(
+        results_dir=str(tmp_path / "ramp"),
+        figures_dir=str(tmp_path / "ramp"),
+        **common,
+    )
+    ramped.load_and_preprocess()
+    ramped.perform_pod()
+
+    assert not np.allclose(plain.eigenvalues, ramped.eigenvalues), (
+        "POD eigenvalues did not move when calculate_uniform_weights returned "
+        "a ramp; the uniform path discarded the metric"
+    )

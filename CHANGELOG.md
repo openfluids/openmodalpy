@@ -429,6 +429,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- POD and ST-POD now use the spatial metric `load_and_preprocess` built,
+  including on the uniform path. POD used to overwrite `self.W` with ones
+  whenever the type was `"uniform"`, and ST-POD's `_get_weight_vector`
+  returned ones regardless of what was built, so its eigenproblem ignored
+  the metric while the saved file still named it. Both resets only wrote
+  ones over ones once the uniform builder started returning one weight per
+  point (see the scattered-point fix below). Numbers are unchanged. A
+  provenance test patches the builder to a non-ones column and asserts the
+  eigenvalues move, so a later cell-volume metric cannot be discarded in
+  silence.
 - Scattered point coordinates are now a supported input. When `x` and `y` are
   1-D and as long as the snapshot matrix is wide — one coordinate pair per
   column, which is what an unstructured mesh gives you — the uniform metric is
