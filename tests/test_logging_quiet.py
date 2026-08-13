@@ -368,7 +368,7 @@ def test_dmd_run_still_says_something(tmp_path, caplog):
     info = [r for r in caplog.records if r.levelno == logging.INFO]
     assert info, "save_results emitted no INFO records at all"
     # Pin the results path (a real reported quantity). Deleting that log line turns this red.
-    pattern = re.compile(r"DMD results saved to .+/.*_dmd\.hdf5")
+    pattern = re.compile(r"DMD results saved to .+[\\/].*_dmd\.hdf5")
     assert any(pattern.search(r.getMessage()) for r in info), [r.getMessage() for r in info]
 
 

@@ -649,3 +649,85 @@ def test_pod_figure_names_are_unchanged(tmp_path):
     assert expected.is_file(), f"missing {expected.name}; dir={list(tmp_path.iterdir())}"
     mpod_named = sorted(tmp_path.glob(f"{analyzer.data_root}_mpod_*.png"))
     assert mpod_named == [], f"POD run wrote mPOD-named figures: {[p.name for p in mpod_named]}"
+
+
+def test_mpod_tied_band_order_is_platform_independent(monkeypatch):
+    """Near-tied band energies keep the same column order on every machine.
+
+    Feed the same two-band pool twice: once with the 4-ulp-class perturbation
+    making band 0 infinitesimally larger, once the other way. Both must return
+    the band-ascending order. A raw argsort cannot see the tie, so this reds
+    on the pre-fix sort and greens after.
+    """
+    import openmodalpy.mpod as mpod_mod
+
+    dt = 0.05
+    ns = 200
+    t = np.arange(ns) * dt
+    phi_low = _normalized(np.array([1.0, 0.0, 0.0, 1.0]))
+    phi_high = _normalized(np.array([0.0, 1.0, 1.0, 0.0]))
+    q = (
+        np.sin(2 * np.pi * 1.0 * t)[:, None] * phi_low[None, :]
+        + 0.7 * np.sin(2 * np.pi * 4.0 * t)[:, None] * phi_high[None, :]
+    )
+    data = _make_uniform_data(q, dt=dt)
+
+    base = 0.5
+    # Inside the 1e-12 relative tie band, well above a few ulps so equality
+    # cannot hide a swap, and well below any physically distinct energy.
+    delta = 5e-14
+
+    def run(sign: float) -> MPODAnalyzer:
+        calls = {"n": 0}
+
+        def fake_wso(data_band, metric, method="eigh", n_keep=10):
+            i = calls["n"]
+            calls["n"] += 1
+            n_space = data_band.shape[1]
+            n_time = data_band.shape[0]
+            modes = np.zeros((n_space, 1))
+            modes[i, 0] = 1.0
+            eigenvalues = np.array([base + sign * (1.0 if i == 0 else -1.0) * delta])
+            coeffs = np.zeros((n_time, 1))
+            coeffs[i, 0] = 1.0
+            return modes, eigenvalues, coeffs
+
+        monkeypatch.setattr(mpod_mod.decomposition, "weighted_second_order", fake_wso)
+        analyzer = MPODAnalyzer(
+            file_path="tied_band_order",
+            data_loader=lambda _: data,
+            spatial_weight_type="uniform",
+            n_modes_save=2,
+            band_edges=[0.0, 2.0, 5.0],
+        )
+        analyzer.load_and_preprocess()
+        analyzer.perform_mpod()
+        assert calls["n"] == 2, f"expected one solver call per band, got {calls['n']}"
+        return analyzer
+
+    a_plus = run(+1.0)
+    a_minus = run(-1.0)
+
+    expected_bands = np.array([0, 1])
+    np.testing.assert_array_equal(a_plus.mode_band_indices, expected_bands)
+    np.testing.assert_array_equal(a_minus.mode_band_indices, expected_bands)
+    np.testing.assert_array_equal(a_plus.modes, a_minus.modes)
+    np.testing.assert_array_equal(a_plus.time_coefficients, a_minus.time_coefficients)
+
+
+def test_dmd_log_pattern_accepts_a_windows_path():
+    """The DMD save-path pin must match a Windows results path, not only POSIX."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parent / "test_logging_quiet.py").read_text(encoding="utf-8")
+    match = re.search(
+        r"re\.compile\(r([\"'])((?:(?!\1).)*_dmd(?:(?!\1).)*)\1\)",
+        text,
+    )
+    assert match, "test_logging_quiet.py has no re.compile(r'...') pinning a *_dmd path"
+    pattern_text = match.group(2)
+    windows_msg = r"DMD results saved to C:\Users\runner\work\out\case_dmd.hdf5"
+    assert re.search(pattern_text, windows_msg), (
+        f"DMD log pattern does not accept a Windows path; compiled {pattern_text!r} against {windows_msg!r}"
+    )

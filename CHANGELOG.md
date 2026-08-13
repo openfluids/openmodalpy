@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- mPOD mode order no longer depends on which of two nearly-equal band
+  eigenvalues wins a rounding comparison. Tied modes are ordered by band
+  index, then by their position inside the band, so the same data produces
+  the same column order on every machine.
+
 ## [0.4.0] - 2026-08-13
 
 One theme: the library used to guess, substitute or quietly repair bad input and

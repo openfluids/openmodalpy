@@ -14,6 +14,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 import openmodalpy.core.decomposition as decomposition
+from openmodalpy.core.base import CANONICAL_TIE_RTOL
 from openmodalpy.core.config import FIGURES_DIR_POD, RESULTS_DIR_POD
 from openmodalpy.pod import PODAnalyzer
 from openmodalpy.specs import display_name_for
@@ -36,6 +37,40 @@ def _resolve_band_edges(band_edges: Iterable[float] | None, nyquist: float) -> n
     if resolved[-1] > nyquist + 1e-12:
         raise ValueError(f"band_edges upper bound {resolved[-1]} exceeds Nyquist frequency {nyquist}.")
     return resolved
+
+
+def _pooled_mode_order(eigenvalues: np.ndarray, band_ids: np.ndarray) -> np.ndarray:
+    """Order pooled mPOD modes by energy, breaking ties by band then position.
+
+    Eigenvalues that agree to within ``CANONICAL_TIE_RTOL`` relative are one
+    group. A few ulps of platform noise is a real difference to ``argsort``,
+    so a stable sort alone cannot keep the column order reproducible.
+    Inside a tied group: band index ascending, then position within that band.
+    """
+    n = int(eigenvalues.size)
+    if n == 0:
+        return np.array([], dtype=int)
+
+    # Stable: with several exactly-equal peaks the group boundaries below must
+    # not depend on the platform's sort either.
+    energy_order = np.argsort(-np.asarray(eigenvalues, dtype=float), kind="stable")
+    ordered = np.empty(n, dtype=int)
+    filled = 0
+    i = 0
+    while i < n:
+        peak = float(eigenvalues[int(energy_order[i])])
+        floor = peak - CANONICAL_TIE_RTOL * abs(peak)
+        j = i + 1
+        while j < n and float(eigenvalues[int(energy_order[j])]) >= floor:
+            j += 1
+        group = energy_order[i:j]
+        # Bands are concatenated whole, so the original index is the within-band position.
+        tie_key = np.lexsort((group, band_ids[group]))
+        size = j - i
+        ordered[filled : filled + size] = group[tie_key]
+        filled += size
+        i = j
+    return ordered
 
 
 class MPODAnalyzer(PODAnalyzer):
@@ -203,7 +238,7 @@ class MPODAnalyzer(PODAnalyzer):
         coeffs = np.concatenate(band_coefficients, axis=1)
         band_ids = np.concatenate(mode_band_indices)
 
-        order = np.argsort(eigenvalues)[::-1]
+        order = _pooled_mode_order(eigenvalues, band_ids)
         keep = min(self.n_modes_save, eigenvalues.size)
 
         self.eigenvalues = np.real(eigenvalues[order][:keep])
