@@ -197,6 +197,31 @@ def test_uniform_weights_3d_length():
     assert w.shape == (len(x) * len(y) * len(z), 1)
 
 
+def test_uniform_weights_scattered_points_are_length_n():
+    """1-D x, y of length n with n_space=n is a point cloud, not a tensor product."""
+    n = 12
+    x = np.linspace(0.0, 1.0, n)
+    y = np.linspace(0.0, 2.0, n)
+    w = calculate_uniform_weights(x, y, n_space=n)
+    assert w.shape == (n, 1)
+    # n_space omitted keeps today's tensor product, so positional callers are safe.
+    w_grid = calculate_uniform_weights(x, y)
+    assert w_grid.shape == (n * n, 1)
+
+
+def test_uniform_weights_n_equals_1_follows_n_space():
+    """n == 1 is the only collision: scattered wins only when the width says so."""
+    x = np.array([0.0])
+    y = np.array([1.0])
+    z = np.array([0.0, 1.0, 2.0])
+    w_scattered = calculate_uniform_weights(x, y, z, n_space=1)
+    assert w_scattered.shape == (1, 1)
+    w_tensor = calculate_uniform_weights(x, y, z, n_space=3)
+    assert w_tensor.shape == (1 * 1 * len(z), 1)
+    w_default = calculate_uniform_weights(x, y, z)
+    assert w_default.shape == (1 * 1 * len(z), 1)
+
+
 _SENTINEL_GRID = {
     "q": np.arange(24.0).reshape(4, 6),
     "x": np.array([0.0, 1.0, 2.0]),

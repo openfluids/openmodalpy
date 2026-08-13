@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Breaking
+- Loading now stops when the spatial metric does not carry exactly one weight
+  per column of the snapshot matrix. That metric is what enters the inner
+  product, and its length was never checked against the data. The check is
+  general: any mismatch raises, naming both lengths and what to pass instead.
+  Cases that used to run to completion and now stop: a 3-D field whose `z`
+  array is absent while `Nz > 1`; a leftover `z` longer than one element beside
+  a 2-D snapshot matrix; and any custom loader whose coordinate arrays disagree
+  with the grid keys it reports. Only POD and ST-POD got that far — they
+  replaced the wrong-length metric with unit weights inside the solver, so
+  their answers were right by accident while the metric on the analyzer was
+  not. Cases that already failed, and now fail at load with a clearer message:
+  3-D polar, because the polar builder ignores `z` and returns `Nx*Ny` weights,
+  and any SPOD or BSMD run, which refused the wrong length outright.
 - `spatial_weight_type="auto"` is removed. Detection cannot be done honestly from
   the loader contract (a jet `(x,r)` grid and a flat-plate `(x,y)` grid both have
   `y >= 0`, and no coordinate-system metadata is carried), so the former default
@@ -416,6 +429,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency bins each turns the suite red.
 
 ### Fixed
+- Scattered point coordinates are now a supported input. When `x` and `y` are
+  1-D and as long as the snapshot matrix is wide — one coordinate pair per
+  column, which is what an unstructured mesh gives you — the uniform metric is
+  built with one weight per point. Before, it was always built as a grid tensor
+  product, so a point cloud of `n` points produced `n*n` weights.
+  `calculate_uniform_weights` gained an optional `n_space`; left out, it still
+  returns the tensor product, so existing callers are unchanged. SPOD and BSMD
+  accept scattered input now instead of refusing it. POD and ST-POD already
+  gave right answers on this data, but only because they threw the wrong-length
+  metric away and rebuilt it — now the metric is correct before they see it.
+  Grid runs are unchanged, down to the bit.
 - A large BSMD analyzer stays usable after `save_results`. When the FFT blocks
   are too large for memory, BSMD reads them from a cache file. To write results
   onto that same file, `save_results` must first close the handle it reads

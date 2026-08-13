@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from openmodalpy import PODAnalyzer
+from openmodalpy import BSMDAnalyzer, PODAnalyzer, SPODAnalyzer, STPODAnalyzer
 from openmodalpy.core.base import _reported_grid
 
 
@@ -148,3 +148,188 @@ def test_lone_nx_mismatching_claim_is_rejected(tmp_path):
     msg = str(info.value)
     assert "7" in msg
     assert "12" in msg
+
+
+def _scattered_field(n_space: int = 12, ns: int = 16) -> dict:
+    t = np.linspace(0.0, 2.0 * np.pi, ns, endpoint=False)
+    x = np.linspace(0.0, 1.0, n_space)
+    y = np.linspace(0.0, 2.0, n_space)
+    q = 1.0 + np.outer(np.sin(t), np.sin(2.0 * np.pi * x))
+    return {"q": q, "x": x, "y": y, "dt": 1.0, "Ns": ns}
+
+
+def test_pod_uniform_scattered_metric_is_length_n(tmp_path):
+    """Two length-n coordinate vectors over an n-wide matrix must yield W.size == n."""
+    n = 12
+
+    def loader(_: str) -> dict:
+        return {
+            "q": np.ones((8, n), dtype=np.float32),
+            "x": np.linspace(0.0, 1.0, n),
+            "y": np.linspace(0.0, 2.0, n),
+            "Ns": 8,
+            "dt": 0.1,
+        }
+
+    analyzer = _analyzer(loader, tmp_path)
+    analyzer.load_and_preprocess()
+    assert int(np.asarray(analyzer.W).size) == n
+
+
+def test_scattered_pod_stpod_eigenvalues_unchanged(tmp_path):
+    """Scattered POD / ST-POD stay on the ones-metric spectrum they already had."""
+    data = _scattered_field()
+    n = int(data["q"].shape[1])
+    ones = np.ones(n)
+
+    def run(cls, method, extra, weights, tag):
+        field = {k: (np.array(v, copy=True) if isinstance(v, np.ndarray) else v) for k, v in data.items()}
+        kwargs = {
+            "file_path": "dummy",
+            "data_loader": lambda _: field,
+            "use_parallel": False,
+            "results_dir": str(tmp_path / tag / "results"),
+            "figures_dir": str(tmp_path / tag / "figures"),
+            **extra,
+        }
+        if weights is not None:
+            kwargs["spatial_weights"] = weights
+        analyzer = cls(**kwargs)
+        analyzer.load_and_preprocess()
+        # Capture the metric the LOAD built. POD and ST-POD both replace a
+        # uniform metric with ones inside the solver, so the final W is ones
+        # either way -- comparing only the spectra would stay green even with
+        # the scattered branch deleted, and would pin nothing.
+        w_after_load = np.asarray(analyzer.W).copy()
+        getattr(analyzer, method)()
+        return analyzer, w_after_load
+
+    pod_u, pod_u_w = run(PODAnalyzer, "perform_pod", {"n_modes_save": 2}, None, "pod-u")
+    pod_w, _ = run(PODAnalyzer, "perform_pod", {"n_modes_save": 2}, ones, "pod-w")
+    assert pod_u_w.size == n, f"load built a metric of {pod_u_w.size} for {n} scattered points"
+    np.testing.assert_allclose(pod_u.eigenvalues, pod_w.eigenvalues)
+
+    st_extra = {"n_modes_save": 2, "embedding_dim": 2}
+    st_u, st_u_w = run(STPODAnalyzer, "perform_stpod", st_extra, None, "st-u")
+    st_w, _ = run(STPODAnalyzer, "perform_stpod", st_extra, ones, "st-w")
+    assert st_u_w.size == n, f"load built a metric of {st_u_w.size} for {n} scattered points"
+    np.testing.assert_allclose(st_u.eigenvalues, st_w.eigenvalues)
+
+
+def test_spod_bsmd_accept_scattered_points(tmp_path):
+    """SPOD and BSMD used to reject a length-n coordinate pair; they must run."""
+    data = _scattered_field()
+    n = int(data["q"].shape[1])
+
+    spod = SPODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: {
+            k: (np.array(v, copy=True) if isinstance(v, np.ndarray) else v) for k, v in data.items()
+        },
+        nfft=8,
+        overlap=0.5,
+        use_parallel=False,
+        results_dir=str(tmp_path / "spod" / "results"),
+        figures_dir=str(tmp_path / "spod" / "figures"),
+    )
+    spod.load_and_preprocess()
+    assert int(np.asarray(spod.W).size) == n
+    spod.compute_fft_blocks()
+    spod.perform_spod()
+    assert spod.eigenvalues.size > 0
+
+    bsmd = BSMDAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: {
+            k: (np.array(v, copy=True) if isinstance(v, np.ndarray) else v) for k, v in data.items()
+        },
+        nfft=8,
+        overlap=0.5,
+        static_triads=[(0, 0, 0)],
+        use_parallel=False,
+        results_dir=str(tmp_path / "bsmd" / "results"),
+        figures_dir=str(tmp_path / "bsmd" / "figures"),
+    )
+    bsmd.load_and_preprocess()
+    assert int(np.asarray(bsmd.W).size) == n
+    bsmd.compute_fft_blocks()
+    bsmd.perform_bsmd()
+    assert bsmd.eigenvalues.size > 0
+
+
+def test_z_missing_while_nz_gt_1_raises(tmp_path):
+    """Grid matches q, but z is absent while Nz > 1: the metric is short."""
+
+    def loader(_: str) -> dict:
+        return {
+            "q": np.ones((6, 24), dtype=np.float32),
+            "x": np.linspace(0.0, 1.0, 4),
+            "y": np.linspace(0.0, 1.0, 3),
+            "Nx": 4,
+            "Ny": 3,
+            "Nz": 2,
+            "Ns": 6,
+            "dt": 0.1,
+        }
+
+    analyzer = _analyzer(loader, tmp_path)
+    with pytest.raises(ValueError, match=r"q\.shape\[1\]") as info:
+        analyzer.load_and_preprocess()
+    msg = str(info.value)
+    assert "length 12" in msg, msg
+    assert "q.shape[1]=24" in msg, msg
+
+
+def test_three_d_polar_raises(tmp_path):
+    """Polar ignores z, so a 3-D polar field must not silently get an Nx*Ny metric."""
+
+    def loader(_: str) -> dict:
+        return {
+            "q": np.ones((6, 24), dtype=np.float32),
+            "x": np.linspace(0.0, 1.0, 4),
+            "y": np.linspace(0.2, 1.0, 3),
+            "z": np.linspace(0.0, 1.0, 2),
+            "Nx": 4,
+            "Ny": 3,
+            "Nz": 2,
+            "Ns": 6,
+            "dt": 0.1,
+        }
+
+    analyzer = PODAnalyzer(
+        file_path="custom",
+        n_modes_save=2,
+        data_loader=loader,
+        spatial_weight_type="polar",
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    with pytest.raises(ValueError, match=r"q\.shape\[1\]") as info:
+        analyzer.load_and_preprocess()
+    msg = str(info.value)
+    assert "length 12" in msg, msg
+    assert "q.shape[1]=24" in msg, msg
+
+
+def test_square_cartesian_grid_is_not_read_as_scattered(tmp_path):
+    """The shape closest to tripping the scattered branch must stay a tensor product.
+
+    A square plane has len(x) == len(y) == n while q is n*n wide. Reading it as a
+    point cloud would hand the run an n-long metric for n*n columns and silently
+    change what a grid case computes. n == n*n only when n == 1, so the branch
+    cannot misfire -- this pins that through the analyzer, not just the helper.
+    """
+    n = 5
+
+    def loader(_: str) -> dict:
+        return {
+            "q": np.ones((8, n * n), dtype=np.float32),
+            "x": np.linspace(0.0, 1.0, n),
+            "y": np.linspace(0.0, 2.0, n),
+            "Ns": 8,
+            "dt": 0.1,
+        }
+
+    analyzer = _analyzer(loader, tmp_path)
+    analyzer.load_and_preprocess()
+    assert int(np.asarray(analyzer.W).size) == n * n

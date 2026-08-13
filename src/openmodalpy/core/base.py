@@ -1146,12 +1146,27 @@ def calculate_polar_weights(x: np.ndarray, y: np.ndarray, use_parallel: bool = T
     return W
 
 
-def calculate_uniform_weights(x: np.ndarray, y: np.ndarray, z: ArrayLike | None = None) -> np.ndarray:
-    """Return uniform weights for a Cartesian grid.
+def calculate_uniform_weights(
+    x: np.ndarray, y: np.ndarray, z: ArrayLike | None = None, n_space: int | None = None
+) -> np.ndarray:
+    """Return uniform weights for a Cartesian grid or a scattered point set.
 
-    Returns an all-ones column of length Nx*Ny*Nz. Grid spacing / cell volumes
-    are not applied; callers that need a domain integral must supply their own W.
+    Returns an all-ones column of length ``n_space`` when the coordinates are
+    scattered (1-D ``x`` and ``y``, ``len(x) == len(y) == n_space``), and the
+    tensor product ``Nx*Ny*Nz`` otherwise. The two readings collide only when
+    ``n == 1``; scattered is preferred then only if ``n_space`` says so.
+    With ``n_space=None`` the result is always the tensor product (historical
+    behaviour). Grid spacing / cell volumes are not applied; callers that need
+    a domain integral must supply their own W.
     """
+    if (
+        n_space is not None
+        and x.ndim == 1
+        and y.ndim == 1
+        and int(x.shape[0]) == int(n_space)
+        and int(y.shape[0]) == int(n_space)
+    ):
+        return np.ones((int(n_space), 1))
     # Support both 1-D and 2-D coordinate arrays
     if x.ndim > 1:
         Nx, Ny = x.shape
@@ -1495,9 +1510,9 @@ class BaseAnalyzer:
         q_array = np.asarray(self.data["q"])
         # A q that is not (time, space) has no width to compare. Leave it to the
         # error it already raised downstream rather than adding an IndexError here.
-        if grid is not None and q_array.ndim == 2:
+        n_space = int(q_array.shape[1]) if q_array.ndim == 2 else None
+        if grid is not None and n_space is not None:
             nx, ny, nz = grid
-            n_space = int(q_array.shape[1])
             grid_nspace = nx * ny * nz
             if grid_nspace != n_space:
                 raise ValueError(
@@ -1509,7 +1524,8 @@ class BaseAnalyzer:
         if self.spatial_weight_type == "prescribed":
             # n_space from the snapshot matrix (time × space); helpers check
             # length/shape and that the metric is an inner product.
-            n_space = int(np.asarray(self.data["q"]).shape[1])
+            if n_space is None:
+                n_space = int(np.asarray(self.data["q"]).shape[1])
             # Invariant from __init__: prescribed type always carries a vector.
             self.W = _as_spatial_weight_column(cast(ArrayLike, self._prescribed_spatial_weights), n_space)
             logger.info("Using prescribed spatial weights.")
@@ -1520,9 +1536,19 @@ class BaseAnalyzer:
             logger.info("Using polar (cylindrical) spatial weights.")
         else:
             self.W = _as_spatial_weight_column(
-                calculate_uniform_weights(self.data["x"], self.data["y"], self.data.get("z"))
+                calculate_uniform_weights(self.data["x"], self.data["y"], self.data.get("z"), n_space=n_space)
             )
             logger.info("Using uniform spatial weights (rectangular grid).")
+
+        if n_space is not None and int(np.asarray(self.W).size) != n_space:
+            raise ValueError(
+                f"spatial metric length {int(np.asarray(self.W).size)} does not match "
+                f"q.shape[1]={n_space}. The metric that enters the inner product "
+                f"must have one weight per snapshot column. For scattered points "
+                f"pass 1-D x and y of length {n_space}; for a Cartesian grid pass "
+                f"the axis coordinates (and z when Nz > 1). Polar weights are 2-D "
+                f"only (x, r) — they ignore z."
+            )
 
         # Welch floor partitioning (scipy.signal.welch): drop the remainder so
         # every block is an independent ensemble member. Ceil + end-clamp re-uses
