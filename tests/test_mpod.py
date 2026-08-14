@@ -94,6 +94,42 @@ def _independent_band_weighted_pod(
     return np.real(modes), np.real(eigenvalues)
 
 
+def _oracle_pooled_order(eigenvalues: np.ndarray, band_ids: np.ndarray) -> np.ndarray:
+    """Pooled-mode order: energy descending, ties by band then position.
+
+    Eigenvalues that agree to within 1e-12 relative are treated as tied
+    (matches the library's stated convention; literal so this oracle stays
+    independent of the implementation under test). Inside a tied group the
+    order is band index ascending, then position within that band.
+    """
+    values = np.asarray(eigenvalues, dtype=float).reshape(-1)
+    bands = np.asarray(band_ids).reshape(-1)
+    n = int(values.size)
+    if n == 0:
+        return np.zeros(0, dtype=int)
+
+    # 1e-12 matches the library's stated relative-tie convention.
+    tie_rtol = 1e-12
+
+    by_energy = np.argsort(-values, kind="stable")
+    group_rank = np.empty(n, dtype=int)
+    cursor = 0
+    rank = 0
+    while cursor < n:
+        peak = float(values[int(by_energy[cursor])])
+        floor = peak - tie_rtol * abs(peak)
+        stop = cursor + 1
+        while stop < n and float(values[int(by_energy[stop])]) >= floor:
+            stop += 1
+        group_rank[by_energy[cursor:stop]] = rank
+        rank += 1
+        cursor = stop
+
+    # lexsort uses the last key as primary: group (energy), then band, then index.
+    positions = np.arange(n)
+    return np.lexsort((positions, bands, group_rank))
+
+
 def test_band_oracle_answer_is_linear_in_the_measure():
     """The oracle's own cutoff must carry no absolute scale.
 
@@ -176,7 +212,7 @@ def _independent_multiband_mpod(
     eigenvalues = np.concatenate(band_eigs)
     modes = np.concatenate(band_modes, axis=1)
     ids = np.concatenate(band_ids)
-    order = np.argsort(eigenvalues)[::-1]
+    order = _oracle_pooled_order(eigenvalues, ids)
     keep = min(n_modes_save, eigenvalues.size)
     return (
         np.real(eigenvalues[order][:keep]),
@@ -713,6 +749,67 @@ def test_mpod_tied_band_order_is_platform_independent(monkeypatch):
     np.testing.assert_array_equal(a_minus.mode_band_indices, expected_bands)
     np.testing.assert_array_equal(a_plus.modes, a_minus.modes)
     np.testing.assert_array_equal(a_plus.time_coefficients, a_minus.time_coefficients)
+
+
+def test_oracle_pooled_order_is_platform_independent(monkeypatch):
+    """Near-tied pooled energies keep the same oracle column order.
+
+    Feed the same two-band pool twice: once with a perturbation inside the
+    1e-12 relative tie band making band 0 infinitesimally larger, once the
+    other way. Both must return the band-ascending order. A raw argsort
+    cannot see the tie, so this reds on HEAD's oracle and greens after.
+    """
+    base = 0.5
+    # Inside the 1e-12 relative tie band, well above a few ulps so equality
+    # cannot hide a swap, and well below any physically distinct energy.
+    delta = 5e-14
+
+    def helper_order(sign: float) -> np.ndarray:
+        eigenvalues = np.array([base + sign * delta, base - sign * delta], dtype=float)
+        band_ids = np.array([0, 1], dtype=int)
+        return _oracle_pooled_order(eigenvalues, band_ids)
+
+    expected = np.array([0, 1])
+    np.testing.assert_array_equal(helper_order(+1.0), expected)
+    np.testing.assert_array_equal(helper_order(-1.0), expected)
+
+    dt = 0.05
+    ns = 200
+    t = np.arange(ns) * dt
+    phi_low = _normalized(np.array([1.0, 0.0, 0.0, 1.0]))
+    phi_high = _normalized(np.array([0.0, 1.0, 1.0, 0.0]))
+    q = (
+        np.sin(2 * np.pi * 1.0 * t)[:, None] * phi_low[None, :]
+        + 0.7 * np.sin(2 * np.pi * 4.0 * t)[:, None] * phi_high[None, :]
+    )
+
+    def run(sign: float):
+        calls = {"n": 0}
+
+        def fake_band_pod(data_centered, weight_vector, n_modes_save):
+            i = calls["n"]
+            calls["n"] += 1
+            n_space = data_centered.shape[1]
+            modes = np.zeros((n_space, 1))
+            modes[i, 0] = 1.0
+            eigenvalues = np.array([base + sign * (1.0 if i == 0 else -1.0) * delta])
+            return modes, eigenvalues
+
+        monkeypatch.setattr(
+            "tests.test_mpod._independent_band_weighted_pod",
+            fake_band_pod,
+        )
+        result = _independent_multiband_mpod(q, dt, [0.0, 2.0, 5.0], 2)
+        assert calls["n"] == 2, f"expected one oracle POD call per band, got {calls['n']}"
+        return result
+
+    _plus_eigs, plus_modes, plus_bands, _plus_counts = run(+1.0)
+    _minus_eigs, minus_modes, minus_bands, _minus_counts = run(-1.0)
+
+    expected_bands = np.array([0, 1])
+    np.testing.assert_array_equal(plus_bands, expected_bands)
+    np.testing.assert_array_equal(minus_bands, expected_bands)
+    np.testing.assert_array_equal(plus_modes, minus_modes)
 
 
 def test_dmd_log_pattern_accepts_a_windows_path():
