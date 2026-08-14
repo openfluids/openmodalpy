@@ -257,6 +257,15 @@ def _make_analyzer(q, n_modes_save=None, rank=None):
     return analyzer
 
 
+def _eig_set_err(got, want):
+    """Max distance after matching spectra as sorted sets (order-independent)."""
+    got = np.asarray(got)
+    want = np.asarray(want)
+    if got.size != want.size:
+        return np.inf
+    return float(np.max(np.abs(np.sort_complex(got) - np.sort_complex(want))))
+
+
 # ---------------------------------------------------------------------------
 # Delay embedding
 # ---------------------------------------------------------------------------
@@ -409,6 +418,128 @@ def test_dmd_with_delays():
     assert analyzer.omega.size == 2
     # All eigenvalues should be finite
     assert np.all(np.isfinite(analyzer.eigenvalues))
+
+
+def test_hodmd_eigenvalue_oracle():
+    """HODMD / TLS-HODMD recover eigvals(A) as sorted sets, both methods."""
+    A = np.array([[0.9, 0.1], [-0.1, 0.8]])
+    q = _make_linear_snapshots(A, np.array([1.0, 0.5]), 50)
+    true = np.linalg.eigvals(A)
+    # For a diagonalizable A, |dlambda| <= cond(V) * ||dA||. Pipeline round-off
+    # grows like the working dimension n_spatial * delays, so
+    #   tol = C * cond(V) * eps * n_spatial * delays
+    # with C a small integer. On this fixture (ls/tls, delays 2/3/5) the worst
+    # observed set_err is 7.1e-16, and the tightest bound is the delays=2 one,
+    # so C=4 leaves ~8.6x margin. Jittering the snapshots at ulp scale -- a
+    # stand-in for a different BLAS summation order on another platform --
+    # pushed the worst case only to 9.1e-16, still 15% of that bound.
+    _, V = np.linalg.eig(A)
+    n_spatial = A.shape[0]
+    eps = np.finfo(float).eps
+    C = 4
+    # Both methods at delays=2, delays=3, delays=5 (nothing truncated).
+    for method in ("ls", "tls"):
+        for delays in (2, 3, 5):
+            analyzer = _make_analyzer(q, n_modes_save=2, rank=2)
+            analyzer.perform_dmd(method=method, delays=delays)
+            tol = C * np.linalg.cond(V) * eps * n_spatial * delays
+            np.testing.assert_allclose(
+                np.sort_complex(analyzer.eigenvalues),
+                np.sort_complex(true),
+                rtol=0.0,
+                atol=tol,
+            )
+
+
+def test_hodmd_rank_staircase():
+    """Scalar observation of two oscillators: Hankel rank is min(d, 4)."""
+    r1, w1 = 0.97, 0.3
+    r2, w2 = 0.90, 1.1
+    t = np.arange(80)
+    y = (r1**t) * np.cos(w1 * t + 0.2) + 0.7 * (r2**t) * np.cos(w2 * t - 0.5)
+    q = y.reshape(-1, 1)
+    true4 = np.array(
+        [
+            r1 * np.exp(1j * w1),
+            r1 * np.exp(-1j * w1),
+            r2 * np.exp(1j * w2),
+            r2 * np.exp(-1j * w2),
+        ]
+    )
+    ranks = []
+    # rank=4 requested at every depth so the cap is the Hankel's, not the argument.
+    for d in (1, 2, 3, 4, 6):
+        analyzer = _make_analyzer(q, n_modes_save=4, rank=4)
+        analyzer.perform_dmd(delays=d)
+        assert analyzer.effective_rank == min(d, 4)
+        ranks.append(analyzer.effective_rank)
+        rec = np.asarray(analyzer.eigenvalues)
+        err = _eig_set_err(rec, true4)
+        if d < 4:
+            # Four modes are unreachable: the Hankel has only d rows.
+            # `err == inf` on its own would only restate the rank assertion
+            # above, since the helper returns inf whenever the counts differ.
+            # It would still pass for an implementation that computed the true
+            # 4-set and then truncated the output. So also check the poles that
+            # DO come back are genuinely wrong, by their distance to the
+            # nearest true pole: measured 0.22-0.32 here, where a truncating
+            # implementation would give ~0.
+            assert err == np.inf
+            worst = max(float(np.min(np.abs(p - true4))) for p in rec)
+            assert worst > 0.05
+        else:
+            # True 4-mode spectrum is recovered once d >= 4 (flatten at d=6).
+            # 1e-10 is a recovered/not-recovered discriminator, not an accuracy
+            # bound: the measured error is ~2e-15, and the accuracy claim lives
+            # in test_hodmd_eigenvalue_oracle.
+            assert err < 1e-10
+    assert ranks == [1, 2, 3, 4, 4]
+
+
+def test_hodmd_tls_vs_ls_median():
+    """On noisy data, median TLS eigenvalue error is below median LS error."""
+    A = np.array([[0.9, 0.1], [-0.1, 0.8]])
+    true = np.linalg.eigvals(A)
+    # 60 snapshots, matching the measured median-over-seeds fixture.
+    q_clean = _make_linear_snapshots(A, np.array([1.0, 0.5]), 59)
+    noise_std = 3e-2 * np.max(np.abs(q_clean))
+    err_ls = []
+    err_tls = []
+    for seed in range(25):
+        rng = np.random.default_rng(seed)
+        q_noisy = q_clean + rng.normal(0.0, noise_std, q_clean.shape)
+        analyzer_ls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
+        analyzer_ls.perform_dmd(method="ls", delays=1)
+        analyzer_tls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
+        analyzer_tls.perform_dmd(method="tls", delays=1)
+        err_ls.append(_eig_set_err(analyzer_ls.eigenvalues, true))
+        err_tls.append(_eig_set_err(analyzer_tls.eigenvalues, true))
+    assert np.median(err_tls) < np.median(err_ls)
+
+
+def test_tls_hodmd_differs_from_ls_at_depth():
+    """TLS-HODMD is its own computation, not LS under a different name.
+
+    Nothing else here can see this. On clean, fully observed data LS and TLS
+    agree to ~1e-16, so the oracle stays green even if the TLS branch silently
+    became LS whenever ``delays > 1``; the staircase runs the default LS path;
+    and the median comparison runs ``delays=1``. Noise at depth is what
+    separates the two formulas.
+    """
+    A = np.array([[0.9, 0.1], [-0.1, 0.8]])
+    q_clean = _make_linear_snapshots(A, np.array([1.0, 0.5]), 59)
+    noise_std = 3e-2 * np.max(np.abs(q_clean))
+    for seed in range(5):
+        rng = np.random.default_rng(seed)
+        q_noisy = q_clean + rng.normal(0.0, noise_std, q_clean.shape)
+        analyzer_ls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
+        analyzer_ls.perform_dmd(method="ls", delays=3)
+        analyzer_tls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
+        analyzer_tls.perform_dmd(method="tls", delays=3)
+        # Smallest separation measured over 25 seeds at delays=3 is 4.3e-3, so
+        # 1e-3 leaves margin while still being far above any round-off.
+        gap = _eig_set_err(analyzer_tls.eigenvalues, analyzer_ls.eigenvalues)
+        assert gap > 1e-3
 
 
 # ---------------------------------------------------------------------------

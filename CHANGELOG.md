@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- HODMD and TLS-HODMD are now checked against systems whose eigenvalues are
+  known ahead of time, so "how do you know this is right" has a test behind it
+  rather than a claim. One of the cases observes a two-oscillator system
+  through a single point, where the delay embedding is what makes the spectrum
+  recoverable at all and plain DMD cannot reach it.
+- The total-least-squares variant is checked to be the more accurate of the two
+  on noisy data, compared as a median over many noise draws rather than a
+  single lucky one. Note this holds without delay embedding; stacking delays
+  correlates the noise and erodes the advantage.
+- TLS-HODMD is also pinned as a genuinely different computation from the plain
+  least-squares path when delays are stacked, so the two cannot quietly become
+  the same code without a test noticing.
+
 ### Fixed
 
 - DMD mode order no longer depends on the LAPACK build. Conjugate pairs and
