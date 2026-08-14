@@ -50,11 +50,13 @@ def _assert_spod_modes_canonical(modes: np.ndarray) -> None:
 
 
 def test_spod_modes_deterministic_and_canonical():
-    """SPOD modes are phase-fixed, route-stable, and spectrum-invariant.
+    """Characterisation test of canonicalisation and phase invariance.
 
-    A global unit phase on ``qhat`` leaves the CSD matrix unchanged but multiplies
-    the raw spatial modes by that phase. After canonicalization both inputs give
-    the same phi (no ``np.abs``). Removing the call makes this fail.
+    This is not evidence about the eigenvalue magnitudes. SPOD modes are
+    phase-fixed, route-stable, and spectrum-invariant. A global unit phase on
+    ``qhat`` leaves the CSD matrix unchanged but multiplies the raw spatial
+    modes by that phase. After canonicalization both inputs give the same phi
+    (no ``np.abs``). Removing the call makes this fail.
     """
     rng = np.random.default_rng(42)
     n_space, nblocks = 10, 6

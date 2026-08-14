@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TLS-HODMD is also pinned as a genuinely different computation from the plain
   least-squares path when delays are stacked, so the two cannot quietly become
   the same code without a test noticing.
+- SPOD eigenvalue magnitudes — the modal energies you read off a spectrum — are
+  now checked against a field built to have a known answer, so the size of an
+  energy is evidence rather than a claim. Two modes share a frequency with
+  different prescribed energies, a second frequency carries a third, and the
+  check runs under three window shapes and both window normalisations.
+- The documented behaviour that SPOD energies scale with velocity over length,
+  because the spectral step is a Strouhal step, is now a checked property
+  instead of a warning in the documentation.
 
 ### Fixed
 
