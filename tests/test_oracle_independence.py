@@ -1,9 +1,9 @@
-"""Guard: oracle tests must not import the library sign/phase rule.
+"""Guard: oracle tests must not import the library sign/phase or order rules.
 
-The oracle side deliberately duplicates the canonical sign rule so a change to
-the library turns those tests red. Importing the library helper makes both sides
-agree by construction and the comparison stops checking anything. This meta-test
-fails loudly at the moment of re-coupling.
+The oracle side deliberately duplicates the canonical sign rule and the DMD
+spectrum-order rule so a change to the library turns those tests red. Importing
+the library helper makes both sides agree by construction and the comparison
+stops checking anything. This meta-test fails loudly at the moment of re-coupling.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ _FORBIDDEN = frozenset(
         "canonicalize_modes",
         "canonical_pivot_index",
         "CANONICAL_TIE_RTOL",
+        "canonical_eigenvalue_order",
     }
 )
 

@@ -987,3 +987,227 @@ def test_svht_planted_rank3_signal_kept():
     analyzer = _make_analyzer(q, n_modes_save=10, rank="svht")
     analyzer.perform_dmd()
     assert analyzer.effective_rank == 3
+
+
+# ---------------------------------------------------------------------------
+# Canonical spectrum order (library-owned; must not depend on LAPACK emission)
+# ---------------------------------------------------------------------------
+
+_REAL_EIG = np.linalg.eig
+
+# Hand-built linear map: one real pole at 0.95 and a quarter-turn pair ±0.8j.
+# Canonical order is |λ| descending, then (Re, Im) ascending in a |λ| tie:
+# 0.95, −0.8j, +0.8j. Written out as a literal so the assertion is not a
+# helper round-trip.
+_QUARTER_TURN_EXPECTED = np.array([0.95 + 0.0j, 0.0 - 0.8j, 0.0 + 0.8j])
+
+# Two distinct conjugate pairs (not the quarter-turn map). Larger |λ| pair is
+# weakly excited so |b| order is opposite |λ| order — a second independent
+# sort of the companions is then visible.
+_TWO_PAIR_EXPECTED = np.array(
+    [
+        0.98 * np.cos(0.4) - 1j * 0.98 * np.sin(0.4),
+        0.98 * np.cos(0.4) + 1j * 0.98 * np.sin(0.4),
+        0.85 * np.cos(1.1) - 1j * 0.85 * np.sin(1.1),
+        0.85 * np.cos(1.1) + 1j * 0.85 * np.sin(1.1),
+    ]
+)
+
+
+def _make_quarter_turn_snapshots(n_steps=40):
+    A = np.array(
+        [
+            [0.95, 0.0, 0.0],
+            [0.0, 0.0, -0.8],
+            [0.0, 0.8, 0.0],
+        ],
+        dtype=float,
+    )
+    return _make_linear_snapshots(A, np.array([1.0, 1.0, 0.0]), n_steps)
+
+
+def _make_two_pair_snapshots(n_steps=40):
+    """Trajectory of two rotation-scaling blocks with |b| opposite |λ|."""
+
+    def _rot_scale(theta, radius):
+        c, s = np.cos(theta), np.sin(theta)
+        return radius * np.array([[c, -s], [s, c]])
+
+    A = np.block(
+        [
+            [_rot_scale(0.4, 0.98), np.zeros((2, 2))],
+            [np.zeros((2, 2)), _rot_scale(1.1, 0.85)],
+        ]
+    )
+    # Small seed on the larger-|λ| pair so |b| ranks the 0.85 pair first.
+    return _make_linear_snapshots(A, np.array([0.05, 0.0, 1.0, 0.0]), n_steps)
+
+
+def _assert_time_dynamics_match_eigenvalues(eigenvalues, time_coefficients, *, rtol=1e-8, atol=1e-10):
+    """time_coefficients[t, k] / time_coefficients[0, k] ≈ eigenvalues[k] ** t."""
+    eigs = np.asarray(eigenvalues)
+    tc = np.asarray(time_coefficients)
+    assert tc.ndim == 2 and tc.shape[1] == eigs.size
+    t = np.arange(tc.shape[0])
+    for k in range(eigs.size):
+        scale = tc[0, k]
+        assert abs(scale) > 0.0
+        np.testing.assert_allclose(tc[:, k] / scale, eigs[k] ** t, rtol=rtol, atol=atol)
+
+
+def _eig_as_is(a):
+    return _REAL_EIG(a)
+
+
+def _eig_reversed(a):
+    vals, vecs = _REAL_EIG(a)
+    return vals[::-1].copy(), vecs[:, ::-1].copy()
+
+
+def _run_dmd_with_eig(q, eig_fn, monkeypatch, n_modes_save=None, rank=None):
+    import openmodalpy.dmd as dmd_mod
+
+    analyzer = _make_analyzer(q, n_modes_save=n_modes_save, rank=rank)
+    monkeypatch.setattr(dmd_mod.np.linalg, "eig", eig_fn)
+    analyzer.perform_dmd()
+    return analyzer
+
+
+def test_dmd_canonical_order_invariant_under_conjugate_emission_order(monkeypatch):
+    """Both conjugate emission orders must return the same column order.
+
+    ``np.linalg.eig`` on a non-Hermitian operator does not define pair order.
+    HEAD sorts by ``|λ|`` alone, so reversing the emission swaps the pair and
+    this test is RED. After the library owns the (Re, Im) tie-break, both
+    runs agree, and eigenvalues / omega / modes / time_coefficients /
+    amplitudes stay aligned with each other.
+    """
+    q = _make_quarter_turn_snapshots()
+    forward = _run_dmd_with_eig(q, _eig_as_is, monkeypatch, n_modes_save=3, rank=3)
+    reversed_run = _run_dmd_with_eig(q, _eig_reversed, monkeypatch, n_modes_save=3, rank=3)
+
+    np.testing.assert_allclose(forward.eigenvalues, reversed_run.eigenvalues, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(forward.omega, reversed_run.omega, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(forward.modes, reversed_run.modes, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(forward.time_coefficients, reversed_run.time_coefficients, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(forward.amplitudes, reversed_run.amplitudes, rtol=0.0, atol=1e-12)
+
+    # The five arrays are one permutation, not five independent sorts.
+    np.testing.assert_allclose(
+        forward.omega,
+        np.log(forward.eigenvalues.astype(complex)),
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert forward.modes.shape[1] == forward.eigenvalues.size
+    assert forward.time_coefficients.shape[1] == forward.eigenvalues.size
+    assert forward.amplitudes.shape == forward.eigenvalues.shape
+    # Bind companions to the eigenvalue index by the dynamics, not just by
+    # emission-invariance and column counts. A second independent sort of
+    # time_coefficients (or modes / amplitudes) would break this.
+    _assert_time_dynamics_match_eigenvalues(forward.eigenvalues, forward.time_coefficients)
+    _assert_time_dynamics_match_eigenvalues(reversed_run.eigenvalues, reversed_run.time_coefficients)
+    np.testing.assert_allclose(forward.amplitudes, np.abs(forward.time_coefficients[0]), rtol=0.0, atol=1e-12)
+    recon = forward.time_coefficients @ forward.modes.T
+    np.testing.assert_allclose(recon, q, rtol=1e-10, atol=1e-10)
+
+
+def test_dmd_tie_straddling_n_modes_save_keeps_same_set(monkeypatch):
+    """A conjugate pair sitting on the n_modes_save cut keeps the same members."""
+    q = _make_quarter_turn_snapshots()
+    forward = _run_dmd_with_eig(q, _eig_as_is, monkeypatch, n_modes_save=2, rank=3)
+    reversed_run = _run_dmd_with_eig(q, _eig_reversed, monkeypatch, n_modes_save=2, rank=3)
+
+    assert forward.eigenvalues.size == 2
+    assert reversed_run.eigenvalues.size == 2
+    np.testing.assert_allclose(forward.eigenvalues, reversed_run.eigenvalues, rtol=0.0, atol=1e-12)
+    # (Re, Im) ascending keeps −0.8j, not +0.8j.
+    expected_kept = _QUARTER_TURN_EXPECTED[:2]
+    np.testing.assert_allclose(forward.eigenvalues, expected_kept, rtol=0.0, atol=1e-12)
+
+
+def test_dmd_canonical_band_inside_reorders_outside_keeps_magnitude(monkeypatch):
+    """Library band is 1e-12: just inside is one group, just outside is not."""
+    import openmodalpy.dmd as dmd_mod
+
+    # Two-state full-rank trajectory so atilde is 2×2.
+    q = _make_linear_snapshots(np.diag([0.9, 0.5]), np.array([1.0, 1.0]), 20)
+    inside = np.array([1.0 + 0.0j, -(1.0 - 0.5e-12) + 0.0j])
+    outside = np.array([1.0 + 0.0j, -(1.0 - 2.0e-12) + 0.0j])
+
+    def _force(spectrum):
+        spec = np.asarray(spectrum, dtype=np.complex128)
+
+        def _eig(a):
+            vals, vecs = _REAL_EIG(a)
+            assert vals.size == spec.size
+            return spec.copy(), vecs
+
+        return _eig
+
+    analyzer = _make_analyzer(q, n_modes_save=2, rank=2)
+    monkeypatch.setattr(dmd_mod.np.linalg, "eig", _force(inside))
+    analyzer.perform_dmd()
+    # Same |λ| group: (Re, Im) puts the negative real first.
+    assert analyzer.eigenvalues[0].real < analyzer.eigenvalues[1].real
+
+    analyzer = _make_analyzer(q, n_modes_save=2, rank=2)
+    monkeypatch.setattr(dmd_mod.np.linalg, "eig", _force(outside))
+    analyzer.perform_dmd()
+    # Distinct magnitudes: larger |λ| (positive real) stays first.
+    assert analyzer.eigenvalues[0].real > 0.0
+    assert analyzer.eigenvalues[0].real > analyzer.eigenvalues[1].real
+
+
+def test_dmd_eigenvalues_match_handwritten_literal_order():
+    """Analyzer output equals a hand-written expected vector, not a helper echo."""
+    analyzer = _make_analyzer(_make_quarter_turn_snapshots(), n_modes_save=3, rank=3)
+    analyzer.perform_dmd()
+    np.testing.assert_allclose(analyzer.eigenvalues, _QUARTER_TURN_EXPECTED, rtol=0.0, atol=1e-12)
+
+
+def test_dmd_two_pair_spectrum_binds_companions_by_time_dynamics():
+    """A non-quarter-turn spectrum: companions follow λ**t, not |b| or energy.
+
+    Two distinct conjugate pairs, weakly exciting the larger-|λ| pair so |b|
+    order is opposite canonical order. Sorting time_coefficients / modes /
+    amplitudes by |b| (or by column energy, when that key differs) must break
+    the dynamics relation.
+    """
+    q = _make_two_pair_snapshots()
+    analyzer = _make_analyzer(q, n_modes_save=4, rank=4)
+    analyzer.perform_dmd()
+
+    np.testing.assert_allclose(analyzer.eigenvalues, _TWO_PAIR_EXPECTED, rtol=0.0, atol=1e-12)
+    _assert_time_dynamics_match_eigenvalues(analyzer.eigenvalues, analyzer.time_coefficients)
+    np.testing.assert_allclose(analyzer.amplitudes, np.abs(analyzer.time_coefficients[0]), rtol=0.0, atol=1e-12)
+    recon = analyzer.time_coefficients @ analyzer.modes.T
+    np.testing.assert_allclose(recon, q, rtol=1e-10, atol=1e-10)
+
+    energy = np.sum(np.abs(analyzer.modes) ** 2, axis=0)
+    saw_second_sort = False
+    t = np.arange(analyzer.time_coefficients.shape[0])
+    for name, key in (("|b|", analyzer.amplitudes), ("column energy", energy)):
+        perm = np.argsort(-np.asarray(key))
+        if np.array_equal(perm, np.arange(perm.size)):
+            continue
+        saw_second_sort = True
+        tc_perm = analyzer.time_coefficients[:, perm]
+        holds = True
+        for k in range(analyzer.eigenvalues.size):
+            ratio = tc_perm[:, k] / tc_perm[0, k]
+            if not np.allclose(ratio, analyzer.eigenvalues[k] ** t, rtol=1e-8, atol=1e-10):
+                holds = False
+                break
+        assert not holds, f"sorting time_coefficients by {name} still satisfied λ**t"
+        recon_perm = analyzer.time_coefficients @ analyzer.modes[:, perm].T
+        assert not np.allclose(recon_perm, q, rtol=1e-6, atol=1e-6), (
+            f"sorting modes by {name} still reconstructed the snapshots"
+        )
+        assert not np.allclose(
+            analyzer.amplitudes[perm],
+            np.abs(analyzer.time_coefficients[0]),
+            rtol=1e-8,
+            atol=1e-8,
+        ), f"sorting amplitudes by {name} still matched |time_coefficients[0]|"
+    assert saw_second_sort, "need a spectrum where |b| or column energy differs from canonical order"

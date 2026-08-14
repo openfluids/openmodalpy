@@ -1,7 +1,9 @@
 """Shared helpers for analytic reference fixtures (regen + comparison tests).
 
-Canonicalization of the DMD spectrum and POD energy normalisation live here
-so the committed JSON and the comparison test cannot drift apart.
+POD energy normalisation lives here so the committed JSON and the comparison
+test cannot drift apart. DMD spectrum order is owned by the library; the
+test-side ``canonicalize_dmd_eigenvalues`` is an independent oracle, not a
+normaliser of analyzer output.
 """
 
 from __future__ import annotations
@@ -111,7 +113,14 @@ def canonicalize_reference(modes, coeffs=None):
 
 
 def canonicalize_dmd_eigenvalues(eigvals: np.ndarray, rtol: float) -> np.ndarray:
-    """Stable DMD spectrum order for reference fixtures.
+    """Independent oracle for DMD spectrum order.
+
+    Deliberately restates the library rule rather than importing that helper.
+    Two copies is the point: this oracle's job is to turn RED when the library
+    rule changes. It uses its own literal constants (the caller-supplied
+    ``rtol`` and the ``(Re, Im)`` key) and must not import the library helper
+    or the library tie-band constant. Re-coupling is guarded by
+    ``test_oracle_tests_do_not_import_the_library_sign_rule``.
 
     Magnitudes stay descending (same primary key as the analyzer). After that
     sort, a group is every run of eigenvalues whose ``|λ|`` agrees with the
@@ -124,8 +133,7 @@ def canonicalize_dmd_eigenvalues(eigvals: np.ndarray, rtol: float) -> np.ndarray
     Within each group the order is lexicographic ``(Re, Im)`` ascending. That
     key is continuous across the negative real axis, so eigenvalues a ULP
     apart do not jump to opposite ends of the group the way ``np.angle``
-    does at ``±π``. LAPACK conjugate-pair emission order is removed from the
-    recorded spectrum without changing analyzer code.
+    does at ``±π``.
     """
     eigvals = np.asarray(eigvals, dtype=np.complex128).reshape(-1)
     if eigvals.size == 0:
@@ -222,7 +230,9 @@ def compute_reference_spectra(
                 category=RuntimeWarning,
             )
             dmd.perform_dmd()
-        eig = canonicalize_dmd_eigenvalues(np.asarray(dmd.eigenvalues), rtol=rtol)
+        # rtol remains on the function for the regen/comparison API (fixture
+        # band). Do not apply it here: the analyzer now emits canonical order.
+        eig = np.asarray(dmd.eigenvalues)
         dmd_abs = np.abs(eig).astype(np.float64)
         dmd_phase = np.angle(eig).astype(np.float64)
 

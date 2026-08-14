@@ -190,13 +190,55 @@ def compute_reduced_svd(
         return np.linalg.svd(X, full_matrices=False)
 
 
-# Relative band around the peak magnitude used when choosing the pivot index for
-# mode sign/phase. Sits above typical cross-build eigenvector noise (~1e-14 to
-# 1e-15 relative) and far below any physically meaningful difference between two
-# peaks. Moves the sign discontinuity out of the last-bit regime; perfect
-# uniqueness for exactly degenerate peaks is impossible (phi and -phi are both
-# valid), so the band relocates the ambiguity rather than removing it.
+# Relative band used when (1) choosing the pivot index for mode sign/phase and
+# (2) grouping |λ| ties for canonical DMD spectrum order. Sits above typical
+# cross-build eigenvector noise (~1e-14 to 1e-15 relative) and far below any
+# physically meaningful difference between two peaks. Moves the sign
+# discontinuity out of the last-bit regime; perfect uniqueness for exactly
+# degenerate peaks is impossible (phi and -phi are both valid), so the band
+# relocates the ambiguity rather than removing it.
 CANONICAL_TIE_RTOL = 1e-12
+
+
+def canonical_eigenvalue_order(eigvals: ArrayLike) -> np.ndarray:
+    """Permutation that puts ``eigvals`` in canonical DMD spectrum order.
+
+    Primary key: ``|λ|`` descending. A group is every run of that order whose
+    magnitude agrees with the group's first (largest) member within
+    ``CANONICAL_TIE_RTOL``, never merely with its neighbour. Within a group
+    the order is lexicographic ``(Re, Im)`` ascending, which is continuous
+    across the negative real axis where ``np.angle`` jumps at ``±π``.
+
+    The returned index array ``idx`` satisfies ``eigvals[idx]`` is the
+    canonical order. Empty input yields an empty integer array. DMD applies
+    this permutation to the full spectrum and only then truncates.
+    """
+    eigvals = np.asarray(eigvals).reshape(-1)
+    n = int(eigvals.size)
+    if n == 0:
+        return np.array([], dtype=int)
+
+    mag = np.abs(eigvals).astype(float, copy=False)
+    # Stable so exact-tie group membership does not depend on the platform sort.
+    order = np.argsort(-mag, kind="stable")
+    out = np.empty(n, dtype=int)
+    i = 0
+    while i < n:
+        j = i + 1
+        peak = float(mag[int(order[i])])
+        while j < n:
+            other = float(mag[int(order[j])])
+            scale = max(abs(peak), abs(other))
+            if scale == 0.0 or abs(peak - other) <= CANONICAL_TIE_RTOL * scale:
+                j += 1
+            else:
+                break
+        group = order[i:j]
+        group_eigs = eigvals[group]
+        tie_key = np.lexsort((np.imag(group_eigs), np.real(group_eigs)))
+        out[i:j] = group[tie_key]
+        i = j
+    return out
 
 
 def canonical_pivot_index(col: ArrayLike) -> int:

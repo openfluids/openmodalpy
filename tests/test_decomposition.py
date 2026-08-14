@@ -7,6 +7,7 @@ import pytest
 
 from openmodalpy.core.base import (
     CANONICAL_TIE_RTOL,
+    canonical_eigenvalue_order,
     canonical_pivot_index,
     canonicalize_modes,
 )
@@ -258,6 +259,73 @@ def test_canonicalize_modes_integer_promotes_float32_preserved():
     out32, _ = canonicalize_modes(modes32)
     assert out32.dtype == np.float32
     _assert_modes_canonical(out32)
+
+
+def _lex_run_lengths(ordered: np.ndarray) -> list[int]:
+    """Maximal runs already sorted by (Re, Im) ascending — the within-group key."""
+    if ordered.size == 0:
+        return []
+    re = np.real(ordered)
+    im = np.imag(ordered)
+    lengths: list[int] = []
+    start = 0
+    for i in range(1, ordered.size):
+        if (re[i], im[i]) < (re[i - 1], im[i - 1]):
+            lengths.append(i - start)
+            start = i
+    lengths.append(int(ordered.size) - start)
+    return lengths
+
+
+def test_canonical_eigenvalue_order_no_magnitude_chain_merge():
+    """Near-neighbour |λ| chain must not form one group (anchored, not single-linkage).
+
+    Five magnitudes each 0.6 × ``CANONICAL_TIE_RTOL`` below the previous:
+    consecutive pairs agree within the library band, but the ends differ by
+    2.4 × the band. Anchored grouping (agree with the group's FIRST member)
+    yields groups of 2, 2, 1. Neighbour-merge (agree with the previous member)
+    yields one group of 5. Poles are positive-real so the within-group
+    ``(Re, Im)`` key is magnitude-ascending — the worst case for a merged
+    group, which would fully reverse |λ| order. No oracle: this calls the
+    library helper at the library band.
+    """
+    rtol = CANONICAL_TIE_RTOL
+    step = 0.6 * rtol
+    mags = np.array([1.0 - k * step for k in range(5)])
+    eig = mags.astype(complex)
+
+    # Precondition: one (Re, Im) sort of the whole |λ|-desc chain reverses
+    # magnitude order (what neighbour-merge + the within-group key would do).
+    sorted_by_mag = eig[np.argsort(-np.abs(eig))]
+    merged = sorted_by_mag[np.lexsort((np.imag(sorted_by_mag), np.real(sorted_by_mag)))]
+    old_mags = np.abs(merged)
+    assert old_mags[-1] - old_mags[0] > rtol * max(old_mags[0], old_mags[-1]), (
+        "precondition failed: (Re, Im)-sorting the full chain did not reverse |λ|"
+    )
+    assert _lex_run_lengths(merged) == [5]
+
+    idx = canonical_eigenvalue_order(eig)
+    # Groups (0,1), (2,3), (4); within each, smaller Re first.
+    np.testing.assert_array_equal(idx, np.array([1, 0, 3, 2, 4]))
+    ordered = eig[idx]
+    assert _lex_run_lengths(ordered) == [2, 2, 1], (
+        f"anchored grouping must be [2, 2, 1], got {_lex_run_lengths(ordered)}"
+    )
+
+    # Magnitudes stay descending within the band (the merged chain violates this).
+    m = np.abs(ordered)
+    for i in range(len(m)):
+        for j in range(i + 1, len(m)):
+            assert m[j] - m[i] <= rtol * max(m[i], m[j]), (
+                f"index {j} (|λ|={m[j]:.16f}) larger than earlier index {i} "
+                f"(|λ|={m[i]:.16f}) by more than the library band"
+            )
+
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        perm = rng.permutation(len(eig))
+        got = eig[perm][canonical_eigenvalue_order(eig[perm])]
+        np.testing.assert_allclose(got, ordered, rtol=0.0, atol=1e-15)
 
 
 def test_weighted_second_order_modes_are_canonical():

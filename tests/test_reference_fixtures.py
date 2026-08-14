@@ -55,12 +55,12 @@ def _phase_close(got: np.ndarray, expected: np.ndarray, rtol: float, atol: float
         )
 
 
-def test_canonical_order_invariant_under_conjugate_tie_permutation():
-    """Hand-built tied |λ| pair: recorded order must not depend on emission order.
+def test_canonical_order_invariant_under_tied_pair_permutation():
+    """Hand-built tied |λ| pair: the independent oracle must not depend on emission order.
 
-    Bare ``argsort(|λ|)[::-1]`` (what the analyzer uses) preserves LAPACK's
-    conjugate order, so the two emissions below differ by a phase swap. The
-    reference-layer canonicalize step must make them agree.
+    Bare ``argsort(|λ|)[::-1]`` preserves LAPACK's conjugate order, so the two
+    emissions below differ by a phase swap. The test-side oracle (not an import
+    of the library helper) must make them agree.
     """
     rtol = 1e-6
     # Same physics, opposite conjugate emission order (goal demo).
@@ -86,6 +86,25 @@ def test_canonical_order_invariant_under_conjugate_tie_permutation():
     # imaginary part first — which is also what the old phase-ascending rule
     # gave. That coincidence is why the committed fixtures did not move.
     assert ca[1].imag <= ca[2].imag
+
+
+def test_canonical_order_band_pinned_at_one_e_minus_12():
+    """Oracle band is the literal 1e-12: just inside reorders, just outside does not."""
+    rtol = 1e-12
+    inside = np.array([1.0 + 0.0j, -(1.0 - 0.5e-12) + 0.0j])
+    outside = np.array([1.0 + 0.0j, -(1.0 - 2.0e-12) + 0.0j])
+
+    got_in = canonicalize_dmd_eigenvalues(inside, rtol=rtol)
+    assert got_in[0].real < got_in[1].real
+
+    got_out = canonicalize_dmd_eigenvalues(outside, rtol=rtol)
+    assert got_out[0].real > 0.0
+    assert got_out[0].real > got_out[1].real
+
+    # Hand-written expected vector against the oracle itself (scrambled input).
+    raw = np.array([0.0 + 0.8j, 0.95 + 0.0j, 0.0 - 0.8j])
+    expected = np.array([0.95 + 0.0j, 0.0 - 0.8j, 0.0 + 0.8j])
+    np.testing.assert_array_equal(canonicalize_dmd_eigenvalues(raw, rtol=rtol), expected)
 
 
 def test_canonical_order_no_magnitude_chain_merge():

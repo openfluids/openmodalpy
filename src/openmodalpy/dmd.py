@@ -33,6 +33,7 @@ from numpy.typing import ArrayLike, DTypeLike  # noqa: E402
 from openmodalpy.core.base import (  # noqa: E402
     BaseAnalyzer,
     add_inset_colorbar,
+    canonical_eigenvalue_order,
     compute_reduced_svd,
     format_mode_title,
     get_fig_aspect_ratio,
@@ -348,7 +349,8 @@ class DMDAnalyzer(BaseAnalyzer):
         - Uses ``q[:-1]`` and ``q[1:]`` directly as the paired data.
         - Does not subtract the temporal mean.
         - Does not use the spatial metric ``self.W`` in the regression.
-        - Sorts modes by descending ``|lambda|``.
+        - Sorts the full spectrum by descending ``|lambda|``, breaking
+          ``|lambda|`` ties by ``(Re, Im)`` ascending, then truncates.
         - Truncation rank is controlled by ``self.rank`` (required: a positive
           int, ``"svht"``, or ``"energy"``). ``n_modes_save`` only bounds how
           many modes are kept after sorting and never sets the operator rank.
@@ -455,7 +457,7 @@ class DMDAnalyzer(BaseAnalyzer):
         t = np.arange(n_snapshots)
         time_dynamics = (b[:, None] * eigvals[:, None] ** t).T
 
-        idx = np.argsort(np.abs(eigvals))[::-1]
+        idx = canonical_eigenvalue_order(eigvals)
         n_keep = min(self.n_modes_save, r)
         self.eigenvalues = eigvals[idx][:n_keep]
         self.omega = omega[idx][:n_keep]

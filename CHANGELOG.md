@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DMD mode order no longer depends on the LAPACK build. Conjugate pairs and
+  other ``|λ|`` ties are ordered by ``(Re, Im)`` after magnitude, so the same
+  data produces the same column order on every machine.
 - mPOD mode order no longer depends on which of two nearly-equal band
   eigenvalues wins a rounding comparison. Tied modes are ordered by band
   index, then by their position inside the band, so the same data produces
