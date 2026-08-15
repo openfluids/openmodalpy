@@ -60,6 +60,8 @@ baptiste/
 
 # Local working notes and run logs — never part of the published repo
 plan.md
+plan_improvements.md
+docs/design/second-engine.md
 *.log
 
 # macOS
