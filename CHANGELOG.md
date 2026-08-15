@@ -30,6 +30,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the spectral step is a Strouhal step, is now a checked property
   instead of a warning in the documentation.
 
+### Changed
+
+- A square array of spatial weights that is **not** diagonal now raises instead
+  of being quietly reduced to its diagonal. The rule has not changed — a square
+  weight array has always meant its diagonal — but until now the package
+  enforced that by discarding your off-diagonal entries without saying so. If
+  you were relying on that, pass ``np.diag(W)`` and nothing else changes; if you
+  meant a genuinely coupled inner product, the package cannot represent one and
+  now tells you rather than silently answering a different question. This
+  applies at every door: the ``spatial_weights`` argument, loading a results
+  file, and the lower-level decomposition entry points. Note that a uniform
+  metric written as ``np.ones((n, n))`` is caught by this and should be
+  ``np.ones(n)``.
+- The same check covers a 3-D stack of weight planes, where each plane must be
+  diagonal on its own.
+- Whether a matrix counts as diagonal is now measured relative to the entries
+  being coupled, rather than against the largest weight anywhere in the array.
+  A metric on a strongly graded mesh no longer hides real coupling between its
+  small cells behind one large cell elsewhere, and rescaling a metric cannot
+  change the verdict.
+- Weights are judged at the precision they are stored in, so a single-precision
+  metric is no longer rejected for round-off that is invisible at its own
+  precision.
+- A weight matrix containing ``NaN`` or infinity off the diagonal now raises.
+  Previously these passed through and the diagonal was used regardless.
+
 ### Fixed
 
 - DMD mode order no longer depends on the LAPACK build. Conjugate pairs and

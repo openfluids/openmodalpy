@@ -1328,17 +1328,94 @@ def _coerce_spatial_weights(w: ArrayLike, expected_len: int) -> np.ndarray:
 
     Routes: 1-D; ``(n, 1)``; square matrix (its diagonal); non-square
     ``(n, k)`` row-major flatten; 3-D per-component stacked diagonals.
+
+    A square (or 3-D stack of square planes) is always reduced to its
+    diagonal: nothing off-diagonal is kept. The matrix is accepted (then
+    reduced) only when it is numerically diagonal under the scale-invariant
+    ratio
+
+        r = max_{i != j} |W_ij| / sqrt(|W_ii| * |W_jj|)
+
+    Reject when ``r > C * n * eps``, where ``n`` is the matrix side, ``eps``
+    is machine epsilon of the array's own floating dtype (float64 for
+    integer or object input), and ``C = 2``. At n = 4 that is a 3.8x margin
+    over measured float32-after-arithmetic round-off (r ≈ 2.10 eps) and
+    still rejects a float64 change of basis at 1e-14 (r ≈ 157 eps). A
+    non-finite (NaN or inf) off-diagonal is rejected. A zero on the
+    diagonal makes its row and column strict (any non-zero coupling gives
+    r = inf). This package cannot represent off-diagonal coupling at all;
+    pass ``np.diag(W)`` only if the diagonal is what was meant.
     """
     w = np.asarray(w)
+    # C=2 → 3.8x margin over measured float32-after-arithmetic (r ≈ 2.10 eps).
+    _diagonality_c = 2
+
+    def _metric_eps(arr: np.ndarray) -> float:
+        try:
+            return float(np.finfo(arr.dtype).eps)
+        except (TypeError, ValueError):
+            return float(np.finfo(np.float64).eps)
+
+    def _coupling_ratio(plane: np.ndarray) -> float:
+        n = int(plane.shape[0])
+        if n <= 1:
+            return 0.0
+        off_mask = ~np.eye(n, dtype=bool)
+        off = plane[off_mask]
+        abs_off = np.asarray(np.abs(off), dtype=np.float64)
+        diag = np.asarray(np.abs(np.diag(plane)), dtype=np.float64)
+        rows, cols = np.nonzero(off_mask)
+        scale = np.sqrt(diag[rows] * diag[cols])
+        ratio = np.zeros_like(abs_off)
+        nz = scale > 0
+        ratio[nz] = abs_off[nz] / scale[nz]
+        ratio[~nz] = np.where(abs_off[~nz] > 0, np.inf, 0.0)
+        return float(np.max(ratio))
+
+    def _largest_rejected_offdiag(planes: list[np.ndarray]) -> float | None:
+        # r > C * n * eps(dtype) per plane; non-finite off-diag => inf.
+        worst: float | None = None
+        for plane in planes:
+            n = int(plane.shape[0])
+            r = _coupling_ratio(plane)
+            limit = _diagonality_c * n * _metric_eps(plane)
+            if not np.isfinite(r) or r > limit:
+                max_off = float(np.max(np.abs(plane - np.diag(np.diag(plane)))))
+                worst = max_off if worst is None else max(worst, max_off)
+        return worst
+
+    def _reject_nondiagonal_square(max_off: float, shape: tuple[int, ...]) -> None:
+        if len(shape) == 3:
+            head = (
+                "A 3-D stack of planes is read as stacked diagonals and cannot "
+                f"represent off-diagonal coupling in an array of shape {shape}"
+            )
+        else:
+            head = (
+                "A square spatial metric is read as its diagonal and cannot "
+                f"represent off-diagonal coupling in an array of shape {shape}"
+            )
+        raise ValueError(
+            f"{head} (largest off-diagonal magnitude {max_off}). "
+            "This package cannot represent off-diagonal coupling at all. "
+            "If the diagonal is what was meant, pass np.diag(W)."
+        )
+
     # Shape work only — do not cast to float yet. A complex array must reach
     # require_spatial_metric with its imaginary part intact; casting first would
     # emit ComplexWarning and hand the real part to the metric checks.
     if w.ndim == 3:
         if w.shape[0] != w.shape[1]:
             raise ValueError("weight array's first two dimensions must be equal")
+        worst = _largest_rejected_offdiag([w[:, :, i] for i in range(w.shape[2])])
+        if worst is not None:
+            _reject_nondiagonal_square(worst, w.shape)
         w = np.stack([np.diag(w[:, :, i]) for i in range(w.shape[2])], axis=1)
     elif w.ndim == 2:
         if w.shape[0] == w.shape[1] and w.shape[1] != 1:
+            worst = _largest_rejected_offdiag([w])
+            if worst is not None:
+                _reject_nondiagonal_square(worst, w.shape)
             w = np.diag(w)
         elif w.shape[1] > 1:
             w = w.reshape(-1)
@@ -1347,6 +1424,11 @@ def _coerce_spatial_weights(w: ArrayLike, expected_len: int) -> np.ndarray:
     weights = np.asarray(w).reshape(-1)
     if weights.size != expected_len:
         raise ValueError(f"Weight vector length {weights.size} does not match n_space={expected_len}")
+    if weights.dtype == object:
+        # Same cast the return already performs. Doing it first lets
+        # require_spatial_metric inspect a numeric object diagonal; np.isfinite
+        # cannot read object dtype.
+        weights = np.asarray(weights, dtype=float)
     require_spatial_metric(weights)
     return np.asarray(weights, dtype=float)
 

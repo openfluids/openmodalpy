@@ -145,6 +145,205 @@ def test_three_d_per_component_route_through_the_seam():
     np.testing.assert_allclose(got, [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
 
 
+def test_nondiagonal_square_raises_instead_of_truncating():
+    """A square W with real off-diagonals must not be silently reduced to its diagonal."""
+    W = np.diag([1.0, 2.0, 3.0, 4.0])
+    W[0, 1] = W[1, 0] = 0.5
+    with pytest.raises(ValueError, match=r"np\.diag") as info:
+        _coerce_spatial_weights(W, 4)
+    msg = str(info.value)
+    assert str(W.shape) in msg
+    assert "0.5" in msg
+    assert "off-diag" in msg.lower()
+
+
+def test_roundoff_offdiagonals_are_accepted_but_1e8_is_not():
+    """Diagonality is relative to the diagonal and tighter than np.allclose's default.
+
+    1e-16 is round-off against O(1) entries and must still pass. 1e-8 is what
+    np.allclose would wave through and must raise. A zero-diagonal matrix treats
+    any non-zero off-diagonal as meaningful.
+    """
+    diag = np.array([1.0, 2.0, 3.0, 4.0])
+    near = np.diag(diag)
+    near[0, 1] = near[1, 0] = 1e-16
+    np.testing.assert_allclose(_coerce_spatial_weights(near, 4), diag)
+
+    too_big = np.diag(diag)
+    too_big[0, 1] = too_big[1, 0] = 1e-8
+    with pytest.raises(ValueError, match=r"np\.diag"):
+        _coerce_spatial_weights(too_big, 4)
+
+    zero_diag = np.zeros((3, 3))
+    zero_diag[0, 1] = zero_diag[1, 0] = 1e-12
+    with pytest.raises(ValueError, match=r"np\.diag"):
+        _coerce_spatial_weights(zero_diag, 3)
+
+
+def test_nondiagonal_3d_planes_raise_instead_of_truncating():
+    """Each component plane is held to the same diagonality rule as a 2-D square."""
+    w3 = np.zeros((3, 3, 2))
+    for i in range(2):
+        w3[:, :, i] = np.diag([1.0, 2.0, 3.0])
+        w3[0, 1, i] = w3[1, 0, i] = 0.7
+    with pytest.raises(ValueError, match=r"np\.diag") as info:
+        _coerce_spatial_weights(w3, 6)
+    msg = str(info.value)
+    assert str(w3.shape) in msg
+    assert "0.7" in msg
+    assert "off-diag" in msg.lower()
+    assert "plane" in msg.lower()
+    assert "square spatial metric" not in msg.lower()
+
+
+def test_analyzer_spatial_weights_nondiagonal_square_raises(tmp_path):
+    """load_and_preprocess must raise, not truncate, when W is a non-diagonal square.
+
+    The constructor only stores the array; the raise is at load time.
+    """
+    n = 4
+    bad = np.diag([1.0, 2.0, 3.0, 4.0])
+    bad[0, 1] = bad[1, 0] = 0.5
+    field = {
+        "q": np.arange(float(12 * n)).reshape(12, n),
+        "x": np.arange(n, dtype=float),
+        "y": np.array([0.0]),
+        "dt": 1.0,
+        "Nx": n,
+        "Ny": 1,
+        "Ns": 12,
+    }
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        spatial_weights=bad,
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    with pytest.raises(ValueError, match=r"np\.diag") as info:
+        analyzer.load_and_preprocess()
+    msg = str(info.value)
+    assert "0.5" in msg
+    assert "off-diag" in msg.lower()
+
+
+def _coerce_accepts(W, n: int) -> bool:
+    try:
+        _coerce_spatial_weights(W, n)
+        return True
+    except ValueError:
+        return False
+
+
+def test_nan_or_inf_offdiagonal_raises():
+    """A NaN or inf off-diagonal is discarded coupling, not round-off. Both must raise."""
+    for bad in (np.nan, np.inf, -np.inf):
+        W = np.diag([1.0, 2.0, 3.0, 4.0])
+        W[0, 1] = W[1, 0] = bad
+        with pytest.raises(ValueError, match=r"np\.diag"):
+            _coerce_spatial_weights(W, 4)
+
+
+def test_object_dtype_diagonal_is_not_rejected_for_coupling():
+    """A diagonal object-dtype square is not off-diagonal coupling.
+
+    ``np.isfinite`` raises TypeError on object arrays. The old guard turned
+    that into ``return np.inf``, so a purely diagonal object matrix was
+    rejected as coupled with magnitude 0.0. After the guard is gone the
+    ratio is computed (numeric objects convert) and a later check may still
+    refuse the dtype — that is a different, honest reason. Assert the
+    reason, not merely that something raised. A genuinely coupled object
+    square must still raise for coupling.
+    """
+    W = np.diag([1.0, 2.0, 3.0]).astype(object)
+    try:
+        got = _coerce_spatial_weights(W, 3)
+    except Exception as exc:
+        msg = str(exc)
+        assert "off-diagonal coupling" not in msg, "diagonal object-dtype square was rejected as coupled: " + msg
+        assert "largest off-diagonal magnitude 0.0" not in msg, msg
+        assert isinstance(exc, (TypeError, ValueError)), type(exc)
+    else:
+        np.testing.assert_allclose(got.astype(float), [1.0, 2.0, 3.0])
+
+    coupled = np.diag([1.0, 2.0, 3.0]).astype(object)
+    coupled[0, 1] = coupled[1, 0] = 0.5
+    with pytest.raises(ValueError, match=r"np\.diag") as info:
+        _coerce_spatial_weights(coupled, 3)
+    msg = str(info.value)
+    assert "off-diag" in msg.lower()
+    assert "0.5" in msg
+
+
+def test_spread_diagonal_does_not_hide_local_coupling():
+    """A coupling 1e4x the weights it couples must raise even next to a 1e16 entry."""
+    W = np.diag([1e16, 1e-4, 1e-4, 1e-4])
+    W[1, 2] = W[2, 1] = 1.0
+    with pytest.raises(ValueError, match=r"np\.diag"):
+        _coerce_spatial_weights(W, 4)
+
+
+def test_positive_diagonal_rescaling_preserves_verdict():
+    """Rescaling W -> S W S by a positive diagonal must not change accept/reject."""
+    S = np.diag([1e-6, 1e3, 1.0, 1e6])
+
+    reject = np.diag([1.0, 2.0, 3.0, 4.0])
+    reject[0, 1] = reject[1, 0] = 0.5
+    assert _coerce_accepts(reject, 4) is False
+    assert _coerce_accepts(S @ reject @ S, 4) is False
+
+    accept = np.diag([1.0, 2.0, 3.0, 4.0])
+    accept[0, 1] = accept[1, 0] = 1e-16
+    assert _coerce_accepts(accept, 4) is True
+    assert _coerce_accepts(S @ accept @ S, 4) is True
+
+
+def test_float32_after_arithmetic_is_accepted():
+    """A float32 diagonal metric after arithmetic is judged with float32 eps, not float64.
+
+    E.T @ D @ E with E = I + 1e-7 in float32 has measured r ≈ 2.10 float32-eps.
+    Cycle 1 compared that fill-in to a float64 ulp and rejected it.
+    """
+    e32 = (np.eye(4) + 1e-7).astype(np.float32)
+    d32 = np.diag([1.0, 2.0, 3.0, 4.0]).astype(np.float32)
+    m32 = (e32.T @ d32 @ e32).astype(np.float32)
+    assert m32.dtype == np.float32
+    got = _coerce_spatial_weights(m32, 4)
+    np.testing.assert_allclose(got, np.diag(m32).astype(float))
+    # A coupling far above C*n*eps64 and far below C*n*eps32 must follow float32.
+    tiny = np.diag([1.0, 2.0, 3.0, 4.0]).astype(np.float32)
+    tiny[0, 1] = tiny[1, 0] = np.float32(1e-10)
+    np.testing.assert_allclose(_coerce_spatial_weights(tiny, 4), [1.0, 2.0, 3.0, 4.0])
+
+
+def test_measured_diagonality_table_lands_on_the_stated_side():
+    """Every measured case in the cycle-2 table accepts or rejects as stated."""
+    assert _coerce_accepts(np.diag([1.0, 2.0, 3.0, 4.0]), 4)  # 0.00 eps
+
+    near = np.diag([1.0, 2.0, 3.0, 4.0])
+    near[0, 1] = near[1, 0] = 1e-16
+    assert _coerce_accepts(near, 4)  # 0.32 eps
+
+    e32 = (np.eye(4) + 1e-7).astype(np.float32)
+    d32 = np.diag([1.0, 2.0, 3.0, 4.0]).astype(np.float32)
+    m32 = (e32.T @ d32 @ e32).astype(np.float32)
+    assert _coerce_accepts(m32, 4)  # 2.10 float32-eps
+
+    rng = np.random.default_rng(0)
+    q, _ = np.linalg.qr(np.eye(4) + 1e-14 * rng.standard_normal((4, 4)))
+    cob = q.T @ np.diag([1.0, 2.0, 3.0, 4.0]) @ q
+    assert not _coerce_accepts(cob, 4)  # 157 float64-eps, real coupling
+
+    too_big = np.diag([1.0, 2.0, 3.0, 4.0])
+    too_big[0, 1] = too_big[1, 0] = 1e-8
+    assert not _coerce_accepts(too_big, 4)  # 3.2e7 eps
+
+    spread = np.diag([1e16, 1e-4, 1e-4, 1e-4])
+    spread[1, 2] = spread[2, 1] = 1.0
+    assert not _coerce_accepts(spread, 4)  # 4.5e19 eps
+
+
 def test_uniform_weights_1d_vs_2d():
     x = np.linspace(0.0, 1.0, 4)
     y = np.linspace(0.0, 2.0, 3)
