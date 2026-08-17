@@ -324,6 +324,44 @@ therefore **scale with U/L**. With the default L = U = 1 (and with the shipped
 generators), this coincides with a pure frequency-step weight; any other
 characteristic scales silently rescale the energy axis.
 
+#### External cross-check
+
+SPOD eigenvalues are compared to vendored numbers from **PySPOD 2.0.0**
+(Python 3.12, NumPy 2.5.2, SciPy 1.18.0) on the manufactured field from
+`tests/test_spod_oracle.py` (nfft 16, 8 blocks, zero overlap, dt 0.5, 4
+spatial points, tones at bins 3 and 5). The closed form is `(A/2)**2 / dst`:
+bin 3 → 18.0 and 4.5, bin 5 → 8.0. The numbers live in
+`tests/fixtures/reference/external_spod.json`; the comparison is
+`tests/test_external_spod.py`. PySPOD is not a dependency — the fixture is
+generated once, outside the repo, by `scripts/regen_external_spod.py`.
+
+The convention mapping is `λ_openmodalpy = λ_pyspod × nfft × dt / 2`.
+`nfft·dt` is the Strouhal-step division that PySPOD does not do; the 2 is
+PySPOD's interior-bin doubling, which openmodalpy does not do. PySPOD's
+eigenvalue is independent of dt (measured 4.503960 at dt 0.5, 1.0 and 2.0).
+
+The windows cannot be reconciled. PySPOD hard-codes the symmetric Hamming
+`0.54 − 0.46·cos(2πx/(N−1))` and offers no other window (`n_dft` must be an
+int). openmodalpy uses `scipy.signal.get_window(..., fftbins=True)`, the
+periodic Hamming. After the mapping, the residual is **1.09e-3** at bin 3
+mode 0, **9.0e-7** at bin 3 mode 1, and **1.95e-3** at bin 5 mode 0.
+Constant-phase modes take coherent leakage from the other tone; the
+phase-ramped mode is orthogonal to that leakage. This is a window-definition
+difference, not a bug. The comparison therefore runs at
+`window_type="hamming"`, `window_norm="amplitude"` — amplitude recovers the
+closed form exactly (ratio 1.000000); power sits at 0.7337695 of it, which is
+exactly `0.54² / (0.54² + 0.5·0.46²)`. `fullspectrum` changes only the
+returned bin count (16 vs 9), not the values at bins 3 and 5.
+
+Which check carries the weight: the closed-form comparison is the tight one,
+at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is held at 5e-3 by the
+window difference above, so it corroborates the convention mapping and catches
+a convention mistake — dropping the Strouhal division moves the answer by 8×,
+the wrong window normalisation by 0.734 — but an error smaller than 5e-3 is
+caught by the closed form, not by the external number. On this field the
+closed form is known, so PySPOD confirms the mapping rather than supplying
+evidence nothing else has.
+
 ### 5. ST-POD — Delay-Embedded Space-Time POD
 
 **Class:** `STPODAnalyzer` · **Lift:** delay/Hankel stacking · **Operator:** POD in delay space
@@ -763,6 +801,7 @@ Key test categories:
 | `test_weights.py` | Polar and uniform weight computation |
 | `test_reference_fixtures.py` | POD/DMD spectra vs committed analytic fixtures |
 | `test_external_reference.py` | Vendored PyDMD eigenvalues (LS/TLS, noiseless/noisy) |
+| `test_external_spod.py` | Vendored PySPOD eigenvalues (mapped Hamming, closed form) |
 
 Run all: `uv run pytest tests/ -q`
 

@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   means a total-least-squares path that quietly became least squares fails the
   check. The snapshot fields are fingerprinted in the same file, so a change in
   how the field is built reports itself rather than looking like a DMD error.
+- SPOD eigenvalues are compared against PySPOD in the same way, and the
+  documentation now states the conversion between the two packages instead of
+  leaving you to find it: our eigenvalue is PySPOD's times the number of DFT
+  points times the timestep, divided by two. The first factor is our division
+  by the Strouhal step, which PySPOD does not do; the two is PySPOD's doubling
+  of interior bins, which we do not do. One difference cannot be removed: the
+  two packages use different Hamming windows, PySPOD the symmetric definition
+  and this package the periodic one, so after the conversion the two still
+  differ by about a part in a thousand. That number is written down with the
+  comparison rather than hidden in a tolerance, and the documentation says
+  which of the two checks is the strict one.
 
 ### Changed
 

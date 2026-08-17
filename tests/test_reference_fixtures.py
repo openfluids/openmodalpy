@@ -26,8 +26,9 @@ FIX_DIR = Path(__file__).resolve().parent / "fixtures" / "reference"
 # Packaged configs ship in the wheel; they are the source of truth for grids.
 PACKAGED_EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "src" / "openmodalpy" / "examples"
 # This directory also holds vendored external-reference files that are not
-# analytic generator spectra (external_dmd.json). Those stems are not generators.
-_NON_GENERATOR_FIXTURE_STEMS = frozenset({"external_dmd"})
+# analytic generator spectra (external_dmd.json, external_spod.json). Those
+# stems are not generators.
+_NON_GENERATOR_FIXTURE_STEMS = frozenset({"external_dmd", "external_spod"})
 
 # Non-config extras that fixtures record. Grids and seed come from the
 # packaged config (cylinder_wake states seed 42 there).
