@@ -413,6 +413,23 @@ criterion you used.
   If you want a fluctuation-only DMD, center the snapshots yourself before the fit.
 - Reference: Schmid (2010), JFM 656; Tu et al. (2014), JCD 1; Hemati et al. (2017), TCFD 31; Gavish & Donoho (2014), IEEE TIT
 
+#### External cross-check
+
+LS and TLS eigenvalues are compared to vendored numbers from **PyDMD 2025.8.1**
+(Python 3.12, NumPy 2.5.2, SciPy 1.18.0) on a 12-space, 40-snapshot linear
+system built from five chosen eigenvalues. The numbers live in
+`tests/fixtures/reference/external_dmd.json`; the comparison is
+`tests/test_external_reference.py`. The fixture also stores sha256 fingerprints
+of the noiseless and noisy snapshot arrays (float64, C order) so a NumPy
+stream change cannot be read as a DMD regression. PyDMD is not a dependency —
+the fixture is generated once, outside the repo, by
+`scripts/regen_external_reference.py`.
+The TLS routes differ algebraically: openmodalpy splits the left singular
+vectors of stacked `[X1; X2]`; PyDMD projects both snapshot matrices onto its
+leading right singular vectors. Same estimator, different algebra — they agree
+to ~1e-15 on noiseless data and only to ~3e-10 under 1e-3 rms noise. That
+residual is not a bug.
+
 ### 7. HODMD — Higher-Order DMD
 
 Same class as DMD (`DMDAnalyzer`), with `delays >= 2`.
@@ -745,6 +762,7 @@ Key test categories:
 | `test_dnami_loader.py` | NPZ loading, schema handling |
 | `test_weights.py` | Polar and uniform weight computation |
 | `test_reference_fixtures.py` | POD/DMD spectra vs committed analytic fixtures |
+| `test_external_reference.py` | Vendored PyDMD eigenvalues (LS/TLS, noiseless/noisy) |
 
 Run all: `uv run pytest tests/ -q`
 
