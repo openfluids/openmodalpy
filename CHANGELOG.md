@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-18
+
 ### Added
 
 - HODMD and TLS-HODMD are now checked against systems whose eigenvalues are
@@ -716,7 +718,9 @@ First public release, distributed on PyPI as `openmodalpy`.
 - The bundled `openmodalpy.fft` subpackage. Import FFT helpers from `fftkit` instead:
   `get_fft_func`, `periodogram_rfft`, `find_peaks` and related functions.
 
-[Unreleased]: https://github.com/openfluids/openmodalpy/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/openfluids/openmodalpy/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/openfluids/openmodalpy/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/openfluids/openmodalpy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/openfluids/openmodalpy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/openfluids/openmodalpy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/openfluids/openmodalpy/releases/tag/v0.1.0
