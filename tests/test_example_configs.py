@@ -17,8 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from openmodalpy.example_data import GENERATORS
-
 ROOT = Path(__file__).resolve().parents[1]
 REPO_EXAMPLES = ROOT / "examples"
 PACKAGED_EXAMPLES = ROOT / "src" / "openmodalpy" / "examples"
@@ -143,11 +141,7 @@ def test_repo_and_packaged_examples_agree_on_rank(path: Path) -> None:
 FIX_DIR = ROOT / "tests" / "fixtures" / "reference"
 
 
-@pytest.mark.parametrize(
-    "fix_path",
-    sorted(p for p in FIX_DIR.glob("*.json") if p.stem in GENERATORS),
-    ids=lambda p: p.stem,
-)
+@pytest.mark.parametrize("fix_path", sorted(FIX_DIR.glob("*.json")), ids=lambda p: p.stem)
 def test_packaged_config_rank_and_params_match_reference_fixture(fix_path: Path) -> None:
     """Packaged config rank and generator params must match each reference fixture.
 
@@ -180,6 +174,8 @@ def test_packaged_config_rank_and_params_match_reference_fixture(fix_path: Path)
     # generator's own signature rather than hardcoding the value here: if a
     # default ever changes, the shipped example starts producing different data,
     # and this test should be what catches it.
+    from openmodalpy.example_data import GENERATORS
+
     signature = inspect.signature(GENERATORS[name]).parameters
     expected = dict(params)
     for key in fixture["generator_params"]:

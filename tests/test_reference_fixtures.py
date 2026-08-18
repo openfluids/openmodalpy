@@ -25,10 +25,6 @@ from tests.reference_helpers import (
 FIX_DIR = Path(__file__).resolve().parent / "fixtures" / "reference"
 # Packaged configs ship in the wheel; they are the source of truth for grids.
 PACKAGED_EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "src" / "openmodalpy" / "examples"
-# This directory also holds vendored external-reference files that are not
-# analytic generator spectra (external_dmd.json, external_spod.json). Those
-# stems are not generators.
-_NON_GENERATOR_FIXTURE_STEMS = frozenset({"external_dmd", "external_spod"})
 
 # Non-config extras that fixtures record. Grids and seed come from the
 # packaged config (cylinder_wake states seed 42 there).
@@ -38,7 +34,7 @@ _FIXTURE_EXTRAS: dict[str, dict] = {
 
 
 def _fixture_paths() -> list[Path]:
-    paths = sorted(p for p in FIX_DIR.glob("*.json") if p.stem not in _NON_GENERATOR_FIXTURE_STEMS)
+    paths = sorted(FIX_DIR.glob("*.json"))
     if not paths:
         raise FileNotFoundError(f"No reference fixtures in {FIX_DIR}")
     return paths
@@ -288,12 +284,7 @@ def _expected_generator_params(generator: str) -> dict:
 def test_fixture_set_equals_generator_set():
     """Every built-in generator must have a fixture; deleting one must fail."""
     fixtures = {p.stem for p in FIX_DIR.glob("*.json")}
-    extras = fixtures - set(GENERATORS) - _NON_GENERATOR_FIXTURE_STEMS
-    assert not extras, f"unexpected reference files: {sorted(extras)}"
-    generator_fixtures = fixtures - _NON_GENERATOR_FIXTURE_STEMS
-    assert generator_fixtures == set(GENERATORS), (
-        f"fixture set {sorted(generator_fixtures)} != generator set {sorted(GENERATORS)}"
-    )
+    assert fixtures == set(GENERATORS), f"fixture set {sorted(fixtures)} != generator set {sorted(GENERATORS)}"
 
 
 @pytest.mark.parametrize("path", _fixture_paths(), ids=lambda p: p.stem)
