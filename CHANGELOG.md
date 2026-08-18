@@ -29,6 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The documented behaviour that SPOD energies scale with velocity over length,
   because the spectral step is a Strouhal step, is now a checked property
   instead of a warning in the documentation.
+- DMD eigenvalues, least squares and total least squares, are now compared
+  against numbers from PyDMD instead of only against this package's own
+  reasoning. The reference values are produced once outside the repository and
+  committed as readable text beside the versions, seeds and solver options that
+  made them, so the package gains no dependency and anyone can regenerate them
+  and get the same bytes. The noisy case is the one that earns the effort: there
+  is no closed form for the estimate, so PyDMD's answer is independent evidence,
+  and the tolerance is placed inside the gap between the two estimators, which
+  means a total-least-squares path that quietly became least squares fails the
+  check. The reference fields ship with the numbers in the same file, so a
+  change in how the field is built reports itself rather than looking like a
+  DMD error.
+- SPOD eigenvalues are compared against PySPOD in the same way, and the
+  documentation now states the conversion between the two packages instead of
+  leaving you to find it: our eigenvalue is PySPOD's times the number of DFT
+  points times the timestep, divided by two. The first factor is our division
+  by the Strouhal step, which PySPOD does not do; the two is PySPOD's doubling
+  of interior bins, which we do not do. One difference cannot be removed: the
+  two packages use different Hamming windows, PySPOD the symmetric definition
+  and this package the periodic one, so after the conversion the two still
+  differ by about a part in a thousand. That number is written down with the
+  comparison rather than hidden in a tolerance, and the documentation says
+  which of the two checks is the strict one.
 
 ### Changed
 
