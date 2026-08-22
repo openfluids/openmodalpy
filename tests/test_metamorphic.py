@@ -192,13 +192,18 @@ def test_stpod_d2_matches_independent_hankel_pod():
     analyzer.load_and_preprocess()
     analyzer.perform_stpod()
 
-    # Independent reference: center → Hankel → thin SVD → lambda = sigma^2 / m
+    # Independent reference: center → Hankel → sqrt(W) weighting → thin SVD
+    # → lambda = sigma^2 / m. W is the metric the load built (cell volumes
+    # for grid-shaped 1-D coordinates), tiled over the delays; modes are
+    # divided back by sqrt(W) exactly as the solver unweights them.
     centered = q - np.mean(q, axis=0)
     hankel = _independent_hankel(centered, embedding_dim)
     m_cols = hankel.shape[1]
-    u, sigma, _vt = np.linalg.svd(hankel, full_matrices=False)
+    w_lift = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
+    u, sigma, _vt = np.linalg.svd(np.sqrt(w_lift)[:, None] * hankel, full_matrices=False)
     ref_eigs = (sigma[:n_modes] ** 2) / m_cols
     ref_modes, _ = canonicalize_reference(u[:, :n_modes])
+    ref_modes = ref_modes / np.sqrt(w_lift)[:, None]
 
     np.testing.assert_allclose(analyzer.eigenvalues, ref_eigs, rtol=_RTOL_EXACT, atol=_ATOL_EXACT)
     np.testing.assert_allclose(analyzer.modes, ref_modes, rtol=_RTOL_EXACT, atol=_ATOL_EXACT)

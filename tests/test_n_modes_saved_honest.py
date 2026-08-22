@@ -204,7 +204,17 @@ def test_dmd_load_empty_file_lowers_cap(tmp_path):
         writer.perform_dmd()
     assert writer.n_modes_save == 0
     assert writer.modes.size == 0
-    writer.save_results("empty.hdf5")
+    # save_results refuses empty modes by design (q29: no fake result files),
+    # so build the degenerate-but-completed rank-0 payload directly. This
+    # test owns the LOADER contract for such files (legacy or hand-made).
+    import h5py
+
+    with h5py.File(write_dir / "empty.hdf5", "w") as handle:
+        handle.create_dataset("modes", data=np.array([], dtype=complex))
+        handle.create_dataset("eigenvalues", data=np.array([], dtype=complex))
+        handle.create_dataset("time_coefficients", data=np.array([], dtype=complex))
+        handle.create_dataset("amplitudes", data=np.array([], dtype=float))
+        handle.create_dataset("omega", data=np.array([], dtype=float))
 
     reader = _make(DMDAnalyzer, read_dir, n_modes_save=12, name="wide_cap", kwargs={"rank": 12})
     reader.load_results(str(write_dir / "empty.hdf5"))

@@ -716,7 +716,9 @@ class TestSTPODAnalytical:
 
         # Check orthonormality
         n_modes = analyzer.modes.shape[1]
-        W_ext = np.ones(embedding_dim * Nx)  # uniform weights extended
+        # The metric the load built (cell volumes for grid-shaped 1-D
+        # coordinates), extended to one copy per embedding delay.
+        W_ext = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
         W_diag = np.diag(W_ext)
 
         gram = analyzer.modes.T @ W_diag @ analyzer.modes

@@ -54,7 +54,6 @@ from openmodalpy.core.base import (
     get_fig_aspect_ratio,
     make_result_filename,
     plot_modes_3d,
-    print_summary,
     require_spatial_metric,
     reshape_mode_to_volume,
     resolve_volume_layout,
@@ -180,9 +179,11 @@ class BSMDAnalyzer(BaseAnalyzer):
                       and preprocessing.
     """
 
+    _METHOD_NAME = "bsmd"
+
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         nfft: int = 128,
         overlap: float = 0.5,
         results_dir: str = RESULTS_DIR_BSMD,
@@ -194,12 +195,13 @@ class BSMDAnalyzer(BaseAnalyzer):
         use_parallel: bool = True,
         max_qhat_gb: float = 4.0,
         spatial_weights: ArrayLike | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize the BSMDAnalyzer.
 
-        Args:
-            file_path (str): Path to the data file (e.g., .mat, .h5).
+            file_path (str | None): Path to the data file (e.g., .mat, .h5).
+                Optional when ``data`` carries the loaded dataset instead.
             nfft (int, optional): Number of points per FFT segment for STFT.
                                   Defaults to 128.
             overlap (float, optional): Overlap ratio between FFT segments (0 to 1).
@@ -227,6 +229,8 @@ class BSMDAnalyzer(BaseAnalyzer):
             max_qhat_gb (float, optional): Maximum qhat size (GB) to keep in RAM.
                                            Larger arrays are offloaded to HDF5 and served
                                            slice-by-slice during BSMD.  Defaults to 4.0.
+            data (dict | None): Already-loaded dataset following the data contract
+                (see DOC.md). Given instead of ``file_path``.
         """
         super().__init__(
             file_path=file_path,
@@ -238,6 +242,7 @@ class BSMDAnalyzer(BaseAnalyzer):
             spatial_weight_type=spatial_weight_type,
             use_parallel=use_parallel,
             spatial_weights=spatial_weights,
+            data=data,
         )
         self.use_static_triads = use_static_triads
         # Provenance is fixed at construction: comparing the list to ALL_TRIADS
@@ -260,12 +265,13 @@ class BSMDAnalyzer(BaseAnalyzer):
         os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.figures_dir, exist_ok=True)
 
-        # Derive base name for outputs
-        base = os.path.basename(file_path)
-        self.data_root = re.sub(r"\.[^.]*$", "", base)
-
-        # Placeholders
-        self.data: dict[str, Any] = {}
+        # Derive base name for outputs. With in-memory data there is no path
+        # to derive one from, so outputs are named after the analyzer.
+        if file_path is not None:
+            base = os.path.basename(file_path)
+            self.data_root = re.sub(r"\.[^.]*$", "", base)
+        else:
+            self.data_root = self._METHOD_NAME
         self.W = np.array([])
         self.novlap = int(overlap * nfft)
         self.nblocks = 0
@@ -921,7 +927,7 @@ class BSMDAnalyzer(BaseAnalyzer):
 
         # Pre-compute mesh once (outside the loop)
         if x_coords.ndim == 1 and y_coords.ndim == 1:
-            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
         else:
             x_mesh, y_mesh = x_coords, y_coords
 
@@ -944,8 +950,8 @@ class BSMDAnalyzer(BaseAnalyzer):
             fig_h = 2 * plot_h + 2.0
 
         for idx in triad_indices:
-            mode1 = self.modes1[idx, :].real.reshape(nx, ny)
-            mode2 = self.modes2[idx, :].real.reshape(nx, ny)
+            mode1 = self.modes1[idx, :].real.reshape(ny, nx)
+            mode2 = self.modes2[idx, :].real.reshape(ny, nx)
             triad = tuple(int(v) for v in self.triads[idx])
             lam = self.eigenvalues[idx]
 
@@ -1084,26 +1090,19 @@ class BSMDAnalyzer(BaseAnalyzer):
         logger.info("Energy map saved to %s", fname)
 
     # Execute the full BSMD pipeline.
-    def run_analysis(self) -> None:
-        """
-        Execute the full BSMD analysis pipeline.
+    _perform_name = "perform_bsmd"
+    _needs_fft_blocks = True
 
-        This method orchestrates the entire BSMD process:
-        1. Loads and preprocesses data, including STFT computation (calls `load_and_preprocess`).
-           This step sets `self.qhat`, `self.W`, `self.freq`, `self.fs`, etc.
-        2. Performs BSMD computation (calls `perform_bsmd`), which internally chooses
-           between static or dynamic triad analysis (currently static is implemented).
-           This step sets `self.modes1`, `self.modes2`, `self.eigenvalues`, `self.triads`.
-        3. Saves the results to an HDF5 file (calls `save_results`).
+    def _plot_run(self, run_id: str | None = None) -> None:
+        """Default figures after run_analysis — the CLI bsmd set.
 
-        This is the primary method to call to run a complete BSMD study on a dataset.
+        BEHAVIOUR CHANGE (v0.6.0): run_analysis plots by default now; the old
+        library entry saved without any figures.
         """
-        logger.info("Starting BSMD analysis for %s", os.path.basename(self.file_path))
-        start_total_time = time.time()
-        self.load_and_preprocess()
-        self.compute_fft_blocks()
-        self.perform_bsmd()
-        self.save_results()
-        self.close()  # Release disk-backed resources if any
-        logger.info("Total BSMD runtime: %.2f s", time.time() - start_total_time)
-        print_summary("BSMD", self.results_dir, self.figures_dir)
+        self.plot_energy_map()
+        if not self._maybe_plot_volumetric_modes(plot_n_modes=2):
+            self.plot_modes(plot_n_modes=2)
+
+    def _on_run_complete(self) -> None:
+        """Release disk-backed qhat resources once results are safe on disk."""
+        self.close()

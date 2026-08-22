@@ -158,7 +158,11 @@ def _openmodalpy_eigs(q: np.ndarray, fixture_doc: dict, tmp_path: Path) -> np.nd
         results_dir=str(tmp_path),
         figures_dir=str(tmp_path),
         data_loader=lambda _: field,
-        spatial_weight_type=str(options["spatial_weight_type"]),
+        spatial_weight_type="prescribed",
+        # The vendored PySPOD run and the closed form both use identity (ones)
+        # spatial weights; prescribe ones so the comparison stays about the
+        # spectral-energy convention rather than coordinate-derived volumes.
+        spatial_weights=np.ones((n_space, 1)),
         use_parallel=bool(options["use_parallel"]),
         characteristic_length=options["characteristic_length"],
         characteristic_velocity=options["characteristic_velocity"],

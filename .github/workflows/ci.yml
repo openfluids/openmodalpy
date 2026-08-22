@@ -56,8 +56,9 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: uv run --group test --python "$PYTHON_VERSION" pytest -q
 
-  # Single coverage job (not matrix): keep CI minutes down. Floor 50% with current
-  # total ~52%; ratchet later. Ubuntu + Python 3.14 only.
+  # Single coverage job (not matrix): keep CI minutes down. The floor lives in
+  # pyproject.toml ([tool.coverage.report] fail_under) so local and CI numbers
+  # cannot drift. Ubuntu + Python 3.14 only; see the ratchet note there.
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +67,7 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Coverage floor
-        run: uv run --group test --python 3.14 pytest -q --cov=openmodalpy --cov-fail-under=50
+        run: uv run --group test --python 3.14 pytest -q --cov=openmodalpy
 
   # Fastest analytic shipped suite: taylor_green (64×64×100). ~30s wall locally.
   # Writes under results/ and figures/ (hdf5/figures gitignored); no commit risk on CI.

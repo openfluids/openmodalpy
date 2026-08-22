@@ -104,6 +104,7 @@ def test_plot_eigenspectra_stem_compat(monkeypatch, tmp_path):
     assert expected.exists()
 
 
+@pytest.mark.characterization
 def test_dmd_uses_raw_shifted_snapshots_without_weighting():
     """Exact DMD on raw shifted snapshots, independent of a post-hoc W.
 
@@ -341,6 +342,7 @@ def test_omega_returned():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.characterization
 def test_default_args_match_original():
     """Default perform_dmd() gives identical eigenvalues to the reference helper."""
     data_q = np.array(

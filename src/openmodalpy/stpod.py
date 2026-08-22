@@ -41,7 +41,6 @@ from openmodalpy.core.base import (
     _as_spatial_weight_column,
     get_fig_aspect_ratio,
     plot_modes_3d,
-    print_summary,
     reshape_mode_to_volume,
     resolve_volume_layout,
 )
@@ -79,9 +78,11 @@ class STPODAnalyzer(BaseAnalyzer):
         >>> analyzer.run_analysis()
     """
 
+    _METHOD_NAME = "stpod"
+
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         embedding_dim: int = 10,
         n_modes_save: int = 10,
         results_dir: str = RESULTS_DIR_STPOD,
@@ -90,12 +91,13 @@ class STPODAnalyzer(BaseAnalyzer):
         spatial_weight_type: str | None = None,
         use_parallel: bool = True,
         spatial_weights: np.ndarray | None = None,
+        data: dict[str, Any] | None = None,
     ):
         """Initialize the STPODAnalyzer.
 
         Args:
-            file_path: Path to the data file.
-            embedding_dim: Time delay embedding dimension (d). Must be >= 2.
+            file_path: Path to the data file. Optional when ``data`` carries
+                the loaded dataset instead.
             n_modes_save: Number of modes to compute and save.
             results_dir: Directory to save results.
             figures_dir: Directory to save figures.
@@ -105,6 +107,8 @@ class STPODAnalyzer(BaseAnalyzer):
             use_parallel: Whether to use parallel computation where available.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed'.
+            data: Already-loaded dataset following the data contract (see
+                DOC.md). Given instead of ``file_path``.
         """
         super().__init__(
             file_path=file_path,
@@ -116,6 +120,7 @@ class STPODAnalyzer(BaseAnalyzer):
             spatial_weight_type=spatial_weight_type,
             use_parallel=use_parallel,
             spatial_weights=spatial_weights,
+            data=data,
         )
 
         self.embedding_dim = embedding_dim
@@ -518,7 +523,7 @@ class STPODAnalyzer(BaseAnalyzer):
         )
 
         if x_coords.ndim == 1 and y_coords.ndim == 1:
-            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
         else:
             x_mesh, y_mesh = x_coords, y_coords
 
@@ -529,7 +534,7 @@ class STPODAnalyzer(BaseAnalyzer):
             ax = axes[row, col]
 
             mode_spatial = self.extract_spatial_mode(k, delay_idx)
-            mode_2d = mode_spatial.reshape((Nx, Ny))
+            mode_2d = mode_spatial.reshape((Ny, Nx))
 
             mode_plot: Any
             if show_cylinder:
@@ -677,7 +682,7 @@ class STPODAnalyzer(BaseAnalyzer):
         )
 
         if x_coords.ndim == 1 and y_coords.ndim == 1:
-            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
         else:
             x_mesh, y_mesh = x_coords, y_coords
 
@@ -691,7 +696,7 @@ class STPODAnalyzer(BaseAnalyzer):
             ax = axes[row, col]
 
             mode_spatial = self.extract_spatial_mode(mode_idx, delay_idx)
-            mode_2d = mode_spatial.reshape((Nx, Ny))
+            mode_2d = mode_spatial.reshape((Ny, Nx))
 
             mode_plot: Any
             if show_cylinder:
@@ -877,47 +882,20 @@ class STPODAnalyzer(BaseAnalyzer):
 
         return is_orthonormal
 
-    def run_analysis(
-        self,
-        plot_n_modes: int = 4,
-        plot_n_coeffs: int = 4,
-        check_orthogonality: bool = False,
-    ) -> None:
-        """Main entry point for ST-POD analysis.
+    _perform_name = "perform_stpod"
 
-        Args:
-            plot_n_modes: Number of modes to plot.
-            plot_n_coeffs: Number of time coefficients to plot.
-            check_orthogonality: Whether to verify mode orthonormality.
+    def _plot_run(self, run_id: str | None = None) -> None:
+        """Default figures after run_analysis — the CLI st-pod set.
+
+        The CLI passed delay_idx=0 to the volumetric hooks and plotted the two
+        leading spacetime modes for 2-D data; both preserved here.
         """
-        logger.info("Starting ST-POD analysis for %s", os.path.basename(self.file_path))
-        start_time = time.time()
-
-        # Load data
-        super().run(compute_fft=False)
-
-        # Perform ST-POD
-        self.perform_stpod()
-
-        # Save results
-        self.save_results()
-
-        # Plotting
         self.plot_eigenvalues()
-        if int(self.data.get("Nz", 1)) > 1:
-            self.plot_modes_3d_slices(plot_n_modes=plot_n_modes, delay_idx=0)
-            self.plot_modes_3d_isometric(plot_n_modes=plot_n_modes, delay_idx=0)
-        else:
-            self.plot_modes(plot_n_modes=plot_n_modes, delay_idx=0)
-            self.plot_spacetime_mode(mode_idx=0)
-            if self.n_modes_save > 1:
-                self.plot_spacetime_mode(mode_idx=1)
-        self.plot_time_coefficients(n_coeffs_to_plot=plot_n_coeffs)
+        if not self._maybe_plot_volumetric_modes(
+            plot_n_modes=min(2, self.n_modes_save),
+            slices_kwargs={"delay_idx": 0},
+            iso_kwargs={"delay_idx": 0},
+        ):
+            self.plot_modes(plot_n_modes=min(2, self.n_modes_save))
+        self.plot_time_coefficients(n_coeffs_to_plot=min(2, self.n_modes_save))
         self.plot_cumulative_energy()
-
-        if check_orthogonality:
-            self.check_mode_orthogonality()
-
-        end_time = time.time()
-        logger.info("ST-POD analysis completed in %.2f seconds.", end_time - start_time)
-        print_summary("ST-POD", self.results_dir, self.figures_dir)

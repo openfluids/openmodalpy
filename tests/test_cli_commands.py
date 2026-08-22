@@ -11,13 +11,13 @@ from openmodalpy import analyze_from_config
 from openmodalpy.cli import build_parser, main
 from openmodalpy.commands import (
     METHOD_REGISTRY,
-    _maybe_plot_volumetric_modes,
     discover_examples,
     get_method_spec,
     inspect_results,
     normalize_method_name,
     run_from_config,
 )
+from openmodalpy.core.base import BaseAnalyzer
 
 
 def _write_jsonc(path: Path, payload: dict) -> None:
@@ -71,6 +71,11 @@ def test_analyze_from_config_routes_hodmd_aliases(tmp_path: Path, monkeypatch) -
     class FakeDMDAnalyzer:
         def __init__(self, **kwargs):
             self._kwargs = kwargs
+
+        def run_analysis(self, *, plots, run_id=None, snapshot_limit=None, **kwargs):
+            self.load_and_preprocess()
+            self.perform_dmd(**kwargs)
+            self.save_results()
 
         def load_and_preprocess(self):
             return None
@@ -144,6 +149,11 @@ def test_analyze_from_config_forwards_dmd_variant_options(tmp_path: Path, monkey
     class FakeDMDAnalyzer:
         def __init__(self, **kwargs):
             captured["init"] = kwargs
+
+        def run_analysis(self, *, plots, run_id=None, snapshot_limit=None, **kwargs):
+            self.load_and_preprocess()
+            self.perform_dmd(**kwargs)
+            self.save_results()
 
         def load_and_preprocess(self):
             captured["loaded"] = True
@@ -234,6 +244,11 @@ def test_config_rank_reaches_the_dmd_analyzer(tmp_path: Path, monkeypatch) -> No
         class FakeDMDAnalyzer:
             def __init__(self, **kwargs):
                 captured["init"] = kwargs
+
+            def run_analysis(self, *, plots, run_id=None, snapshot_limit=None, **kwargs):
+                self.load_and_preprocess()
+                self.perform_dmd(**kwargs)
+                self.save_results()
 
             def load_and_preprocess(self):
                 pass
@@ -339,6 +354,11 @@ def test_config_energy_fraction_reaches_the_dmd_analyzer(tmp_path: Path, monkeyp
         class FakeDMDAnalyzer:
             def __init__(self, **kwargs):
                 captured["init"] = kwargs
+
+            def run_analysis(self, *, plots, run_id=None, snapshot_limit=None, **kwargs):
+                self.load_and_preprocess()
+                self.perform_dmd(**kwargs)
+                self.save_results()
 
             def load_and_preprocess(self):
                 pass
@@ -513,7 +533,7 @@ def test_command_core_uses_volumetric_plot_hooks_when_available() -> None:
             calls.append(("iso", kwargs))
 
     analyzer = FakeAnalyzer()
-    used = _maybe_plot_volumetric_modes(analyzer, plot_n_modes=2, slices_kwargs={"freqs_to_plot": [1]})
+    used = BaseAnalyzer._maybe_plot_volumetric_modes(analyzer, plot_n_modes=2, slices_kwargs={"freqs_to_plot": [1]})
 
     assert used is True
     assert calls == [

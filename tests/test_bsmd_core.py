@@ -54,6 +54,7 @@ def _make_analyzer(
     return analyzer
 
 
+@pytest.mark.characterization
 def test_static_bsmd_core_small(tmp_path):
     """Single zero-frequency triad: shapes plus a re-derived dominant eigenpair.
 

@@ -223,15 +223,16 @@ def test_novlap_ge_nfft_raises_not_repeat_block0(novlap):
 
 
 def test_apply_snapshot_limit_uses_floor_nblocks():
-    """commands._apply_snapshot_limit must set floor nblocks and stay runnable.
+    """BaseAnalyzer._apply_snapshot_limit must set floor nblocks and stay runnable.
 
     Slice-2 regression: ceil after max_snapshots truncation requested more
     blocks than fit (Ns=400, nfft=128, overlap=0.5 → floor 5, ceil 6 needs 448).
     Pinning nblocks alone is not enough — blocksfft must accept the result.
+    The limiter moved from commands.py onto BaseAnalyzer with the unified seam.
     """
     import types
 
-    from openmodalpy.commands import _apply_snapshot_limit
+    from openmodalpy.core.base import BaseAnalyzer
 
     nfft, novlap, limit = 128, 64, 400
     expect = (limit - novlap) // (nfft - novlap)
@@ -245,8 +246,7 @@ def test_apply_snapshot_limit_uses_floor_nblocks():
         nfft=nfft,
         nblocks=6,
     )
-    spec = types.SimpleNamespace(params={"max_snapshots": limit})
-    _apply_snapshot_limit(an, spec)
+    BaseAnalyzer._apply_snapshot_limit(an, limit)
 
     assert an.data["Ns"] == limit
     assert an.data["q"].shape[0] == limit

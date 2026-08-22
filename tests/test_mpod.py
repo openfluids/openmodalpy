@@ -172,12 +172,15 @@ def _independent_multiband_mpod(
     """Independent multi-band mPOD reference: center → rfft → band mask → irfft → POD.
 
     Bands are half-open on interior edges ([f_low, f_high) for non-last bands;
-    the last band is closed on the right: [f_low, f_high]). Uniform spatial
-    weights. Modes from all bands are concatenated and re-sorted by eigenvalue
+    the last band is closed on the right: [f_low, f_high]). Spatial weights are
+    ones, matching the analyzer's uniform semantics. Modes from all bands
+    are concatenated and re-sorted by eigenvalue
     descending, then truncated to n_modes_save — matching the stated perform_mpod
     assembly, built here without calling library band/POD helpers.
     """
     n_snapshots, n_space = q.shape
+    # Same measure the analyzer builds for this data: "uniform" resolves to
+    # all-ones spatial weights.
     weight_vector = np.ones(n_space, dtype=float)
     centered = q - np.mean(q, axis=0, dtype=np.float64)
     freq = np.fft.rfftfreq(n_snapshots, d=dt)

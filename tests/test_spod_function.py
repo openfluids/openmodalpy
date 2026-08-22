@@ -49,6 +49,7 @@ def _assert_spod_modes_canonical(modes: np.ndarray) -> None:
         assert abs(float(np.imag(v))) <= 1e-9 * max(float(np.abs(v)), 1e-30)
 
 
+@pytest.mark.characterization
 def test_spod_modes_deterministic_and_canonical():
     """Characterisation test of canonicalisation and phase invariance.
 

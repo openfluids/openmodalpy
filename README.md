@@ -143,7 +143,9 @@ Anything else can be read with a custom loader returning the same dictionary:
 def my_loader(path):
     return {"q": data, "dt": 0.01, "Nx": 100, "Ny": 50, "x": x, "y": y}
 
-pod = PODAnalyzer(file_path="ignored", data_loader=my_loader)
+d = my_loader("run_001")        # one load — or build the dict yourself
+
+pod = PODAnalyzer(data=d)       # hand loaded data straight in; no fake path
 ```
 
 ## FFT Backend

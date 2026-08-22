@@ -3,8 +3,7 @@
 One reader (:func:`read_results`) loads any result file — including the old
 capitalised layout — into :class:`AnalysisResults`. Names and shapes alone are
 not enough: each in-memory array is compared element-wise with what comes back
-from the file. The gate for openmodalpy-unify-result-contract-vig greps this
-file for every producer name.
+from the file. A regression gate greps this file for every producer name.
 """
 
 from __future__ import annotations
@@ -584,3 +583,51 @@ def test_legacy_capitalised_file_loads_through_dmd(tmp_path: Path) -> None:
     assert analyzer._dmd_method == "ls"
     assert analyzer._dmd_delays == 1
     assert analyzer._dmd_named_variant == "dmd"
+
+
+def test_write_results_refuses_empty_modes(tmp_path: Path) -> None:
+    """The write seam rejects an empty mode array before touching the file."""
+    from openmodalpy.core.results import write_results
+
+    target = tmp_path / "guard.hdf5"
+    with pytest.raises(ValueError, match="'modes' is empty"):
+        write_results(target, {"modes": np.array([]), "W": np.ones((4, 1))})
+    with pytest.raises(ValueError, match="'modes1' is empty"):
+        write_results(target, {"modes1": np.empty((0, 3)), "eigenvalues": np.array([1.0])})
+    # None mode datasets are skipped, not refused: a placeholder save without
+    # decomposition output is the base class's documented behaviour.
+    write_results(target, {"modes": None, "W": np.ones((4, 1))})
+
+
+@pytest.mark.parametrize(
+    ("cls", "ctor"),
+    [
+        pytest.param(PODAnalyzer, {"n_modes_save": 3}, id="PODAnalyzer"),
+        pytest.param(MPODAnalyzer, {"n_modes_save": 2, "band_edges": [0.0, 2.0, 5.0]}, id="MPODAnalyzer"),
+        pytest.param(DMDAnalyzer, {"n_modes_save": 2, "rank": 2}, id="DMDAnalyzer"),
+        pytest.param(SPODAnalyzer, {"nfft": 8, "overlap": 0.0}, id="SPODAnalyzer"),
+        pytest.param(BSMDAnalyzer, {"nfft": 8, "overlap": 0.0}, id="BSMDAnalyzer"),
+        pytest.param(STPODAnalyzer, {"embedding_dim": 4, "n_modes_save": 3}, id="STPODAnalyzer"),
+        pytest.param(PSDPODAnalyzer, {"nfft": 8, "overlap": 0.0, "n_modes_save": 3}, id="PSDPODAnalyzer"),
+    ],
+)
+def test_save_before_perform_writes_no_file(tmp_path: Path, cls, ctor: dict) -> None:
+    """save_results without a performed decomposition raises and writes nothing.
+    The falsifying check for the empty-results-file bug: loading and
+    preprocessing alone used to produce a complete-looking HDF5 file whose
+    mode array was (0,).
+    """
+    field = _toy_field()
+    analyzer = cls(
+        file_path="guard",
+        results_dir=str(tmp_path),
+        figures_dir=str(tmp_path),
+        data_loader=lambda _: field,
+        spatial_weight_type="uniform",
+        **ctor,
+    )
+    analyzer.load_and_preprocess()
+    target = tmp_path / "premature.hdf5"
+    with pytest.raises(ValueError, match="decomposition has not run"):
+        analyzer.save_results("premature.hdf5")
+    assert not target.exists()

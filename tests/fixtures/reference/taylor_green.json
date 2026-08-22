@@ -1,15 +1,15 @@
 {
   "generator": "taylor_green",
   "pod_energy_fractions": [
-    1.0
+    0.9999999999999998
   ],
   "dmd_abs_lambda": [
-    0.9701515036966305
+    0.9701515036966298
   ],
   "dmd_phase": [
     0.0
   ],
-  "energy_captured_fraction": 1.0,
+  "energy_captured_fraction": 0.9999999999999998,
   "generator_params": {
     "Nx": 64,
     "Ny": 64,

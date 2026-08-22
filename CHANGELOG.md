@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `spatial_weight_type="uniform"` is back to all-ones weights (v0.5.0
+  behaviour). The trapezoid cell-volume metric is now the explicit opt-in
+  type `"cell_volume"`; without usable 1-D grid coordinates it raises.
+
+- The test-suite coverage floor moved from a nominal 50% (24 points under the
+  measured value, so real regressions stayed invisible) to a 72% ratchet read
+  from `pyproject.toml` by both local runs and CI. The ratchet policy — when
+  the floor moves and who moves it — is written down in CONTRIBUTING.
+- The library entry point and the command line now execute ONE analysis
+  sequence per method (`run_analysis`), so the two paths can no longer drift
+  apart in plotting or save behaviour.
+
+### Breaking
+
+- `DMDAnalyzer.run_analysis()` and `BSMDAnalyzer.run_analysis()` now produce
+  figures by default; their docstrings previously promised no default plots.
+- `PSDPODAnalyzer.run_analysis()` now produces its standard figure set
+  (eigenvalues, cumulative energy, mode slices or 3-D views).
+- POD's default library figure set is the one the CLI always produced
+  (eigenvalues, volumetric-or-mode panels, time coefficients, cumulative
+  energy). The richer library-only defaults (reconstruction grid, pair-phase,
+  99.5% modes grid) remain available as explicit `plot_*` calls but are no
+  longer part of `run_analysis`.
+- `run_analysis(**kwargs)` forwards keyword arguments to the decomposition
+  call; the old per-plot keyword parameters (`plot_n_modes_spatial`,
+  `plot_modes_options`, `check_orthogonality`, ...) are gone. Pass plotting
+  choices through the plot methods themselves.
+
 ## [0.5.0] - 2026-08-18
 
 ### Added

@@ -8,6 +8,8 @@ import re
 import matplotlib
 
 matplotlib.use("Agg")
+import logging
+
 import numpy as np
 import pytest
 
@@ -79,7 +81,7 @@ def _make_pod(tmp_path, data: dict) -> PODAnalyzer:
 
 def _prepare(analyzer) -> None:
     analyzer.load_and_preprocess()
-    analyzer._perform_decomposition()
+    analyzer.perform_pod()
 
 
 def _assert_label_titles(titles: list[str], label: str) -> None:
@@ -184,29 +186,16 @@ def test_pod_py_3d_titles_have_no_bare_pod_mode_literal():
     assert built_from_label == 2, f"expected 2 label-built 3-D titles, found {built_from_label}"
 
 
-def test_mpod_print_summary_uses_display_name(tmp_path, caplog, monkeypatch):
-    """print_summary at end of run_analysis gets the resolved display name."""
-    seen: list[str] = []
+def test_run_analysis_completion_log_uses_display_name(tmp_path, caplog):
+    """The unified run_analysis epilogue logs the resolved display name.
 
-    def _fake_summary(analysis, results_dir, figures_dir):
-        seen.append(analysis)
-
-    monkeypatch.setattr("openmodalpy.pod.print_summary", _fake_summary)
-    # Skip heavy plotting — only need the run_analysis epilogue.
-    for name in (
-        "plot_eigenvalues",
-        "plot_modes_pair_detailed",
-        "plot_mode_pair_phase",
-        "plot_modes_grid",
-        "plot_time_coefficients",
-        "plot_cumulative_energy",
-        "plot_reconstruction_error",
-        "plot_reconstruction_comparison",
-        "save_results",
-    ):
-        monkeypatch.setattr(PODAnalyzer, name, lambda self, *a, **k: None)
-
+    The old per-class epilogues called print_summary; the unified seam keeps
+    the display-name discipline in its start/complete banners instead.
+    """
     analyzer = _make_mpod(tmp_path, _synthetic_2d())
     with caplog.at_level("INFO"):
-        analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
-    assert seen == ["mPOD"], seen
+        analyzer.run_analysis()
+    info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("Starting mPOD analysis" in m for m in info_msgs), info_msgs
+    assert not any("Starting POD analysis" in m for m in info_msgs), info_msgs
+    assert any("mPOD analysis and plotting completed successfully" in m for m in info_msgs), info_msgs

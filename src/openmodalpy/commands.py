@@ -9,26 +9,9 @@ from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-import numpy as np
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 from openmodalpy.bsmd import BSMDAnalyzer
 from openmodalpy.config_io import load_jsonc, resolve_path
-from openmodalpy.core.base import (
-    add_inset_colorbar,
-    get_fig_aspect_ratio,
-    get_robust_clim,
-    plot_isometric_slices_3d,
-    plot_orthogonal_slices_3d,
-    reshape_mode_to_volume,
-    resolve_volume_layout,
-    style_spatial_axes,
-)
 from openmodalpy.core.io import load_data
-from openmodalpy.core.welch import welch_nblocks
 from openmodalpy.dmd import DMDAnalyzer
 from openmodalpy.example_data import generate_example_dataset
 from openmodalpy.mpod import MPODAnalyzer
@@ -425,33 +408,6 @@ def _prepare_common_run(spec: AnalyzeSpec, *, dry_run: bool) -> tuple[str, Any, 
     return file_path, data_loader, results_dir, figures_dir
 
 
-def _apply_snapshot_limit(analyzer: Any, spec: AnalyzeSpec) -> None:
-    """Optionally truncate the loaded snapshot matrix for heavy example runs."""
-    limit_value = spec.params.get("max_snapshots")
-    if limit_value is None:
-        return
-    if "q" not in analyzer.data:
-        return
-    limit = int(limit_value)
-    q = analyzer.data["q"]
-    if limit < 2 or limit >= q.shape[0]:
-        return
-    analyzer.data["q"] = q[:limit, :]
-    analyzer.data["Ns"] = limit
-    if hasattr(analyzer, "novlap") and hasattr(analyzer, "nfft") and analyzer.nfft > 1:
-        # Same floor formula as BaseAnalyzer.load_and_preprocess (welch_nblocks).
-        # The old ceil here overwrote a correct floor value and requested more
-        # blocks than fit after truncation (e.g. Ns=400, nfft=128, ovl=0.5).
-        Ns = int(analyzer.data["Ns"])
-        nblocks = welch_nblocks(Ns, analyzer.nfft, analyzer.novlap)
-        if nblocks < 1:
-            raise ValueError(
-                f"Cannot form Welch blocks: Ns={Ns}, nfft={analyzer.nfft} "
-                f"(novlap={analyzer.novlap}) yield nblocks={nblocks}"
-            )
-        analyzer.nblocks = nblocks
-
-
 def _make_dry_run_outcome(
     spec: AnalyzeSpec, results_dir: Path, figures_dir: Path, results_path: Path | None = None
 ) -> RunOutcome:
@@ -468,174 +424,8 @@ def _make_dry_run_outcome(
     )
 
 
-def _plot_psd_pod_eigenvalues(eigenvalues: np.ndarray, figures_dir: Path, run_id: str) -> list[Path]:
-    saved: list[Path] = []
-    if eigenvalues.size == 0:
-        return saved
-
-    fig, ax = plt.subplots()
-    ax.semilogy(np.arange(1, len(eigenvalues) + 1), np.maximum(eigenvalues.real, 1e-16), marker="o")
-    ax.set_xlabel("Mode index")
-    ax.set_ylabel("PSD-POD eigenvalue")
-    ax.set_title("PSD-POD eigenvalues")
-    path = figures_dir / f"{run_id}_eigenvalues.png"
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    saved.append(path)
-
-    cumulative = np.cumsum(eigenvalues.real)
-    total = cumulative[-1] if cumulative.size else 0.0
-    if total > 0:
-        fig, ax = plt.subplots()
-        ax.plot(np.arange(1, len(eigenvalues) + 1), cumulative / total * 100.0, marker="o")
-        ax.set_xlabel("Mode index")
-        ax.set_ylabel("Cumulative energy [%]")
-        ax.set_title("PSD-POD cumulative energy")
-        path = figures_dir / f"{run_id}_cumulative_energy.png"
-        fig.savefig(path, dpi=200, bbox_inches="tight")
-        plt.close(fig)
-        saved.append(path)
-
-    return saved
-
-
-def _plot_psd_pod_modes(
-    *,
-    modes: np.ndarray,
-    eigenvalues: np.ndarray,
-    data: dict[str, Any],
-    figures_dir: Path,
-    run_id: str,
-    plot_n_modes: int = 2,
-) -> list[Path]:
-    """Plot the leading PSD-POD spatial modes with the same 2D styling as other analyzers."""
-    saved: list[Path] = []
-    if modes.size == 0:
-        return saved
-
-    nx = int(data.get("Nx", 0))
-    ny = int(data.get("Ny", 0))
-    if nx <= 1 or ny <= 1 or modes.shape[0] != nx * ny:
-        return saved
-
-    x_coords = data.get("x", np.arange(nx))
-    y_coords = data.get("y", np.arange(ny))
-    if np.ndim(x_coords) == 1 and np.ndim(y_coords) == 1:
-        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
-    else:
-        x_mesh, y_mesh = x_coords, y_coords
-
-    total_energy = float(np.sum(np.real(eigenvalues)))
-    fig_aspect = get_fig_aspect_ratio(data)
-    n_modes = min(plot_n_modes, modes.shape[1])
-    ncols = n_modes
-    fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols * fig_aspect, 4), squeeze=False)
-    axes = axes.ravel()
-    var_name = data.get("metadata", {}).get("var_name", "q")
-
-    for idx in range(n_modes):
-        ax = axes[idx]
-        mode = np.asarray(modes[:, idx].real).reshape(nx, ny)
-        vmin, vmax = get_robust_clim(mode, method="percentile")
-        levels = np.linspace(vmin, vmax, 21)
-        cf = ax.contourf(x_mesh, y_mesh, mode, levels=levels, cmap="RdBu_r", extend="both")
-        ax.contour(x_mesh, y_mesh, mode, levels=levels[::4], colors="k", linewidths=0.5, alpha=0.5)
-        style_spatial_axes(ax, data, x_coords=x_coords, y_coords=y_coords, equal_default=True)
-        energy_pct = 100.0 * float(np.real(eigenvalues[idx])) / total_energy if total_energy > 0 else 0.0
-        ax.set_title(f"PSD-POD Mode {idx + 1} [{var_name}] | E={energy_pct:.2f}%")
-        add_inset_colorbar(
-            fig,
-            ax,
-            cf,
-            data,
-            ticks=[vmin, 0, vmax],
-            ticklabels=[f"{vmin:.2f}", "0", f"{vmax:.2f}"],
-        )
-
-    with plt.rc_context():
-        fig.tight_layout()
-    path = figures_dir / f"{run_id}_modes_1_to_{n_modes}.png"
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    saved.append(path)
-    return saved
-
-
-def _plot_psd_pod_modes_3d(
-    *,
-    modes: np.ndarray,
-    eigenvalues: np.ndarray,
-    data: dict[str, Any],
-    figures_dir: Path,
-    run_id: str,
-    plot_n_modes: int = 2,
-) -> list[Path]:
-    """Plot the leading PSD-POD modes with the shared 3D helpers."""
-    saved: list[Path] = []
-    if modes.size == 0 or resolve_volume_layout(data, modes.shape[0]) is None:
-        return saved
-
-    x_coords = data.get("x")
-    y_coords = data.get("y")
-    z_coords = data.get("z")
-    total_energy = float(np.sum(np.real(eigenvalues))) if eigenvalues.size else 0.0
-    n_modes = min(plot_n_modes, modes.shape[1])
-    for idx in range(n_modes):
-        mode_3d = reshape_mode_to_volume(np.asarray(modes[:, idx]).real, data)
-        energy_pct = 100.0 * float(np.real(eigenvalues[idx])) / total_energy if total_energy > 0 else 0.0
-        title = f"PSD-POD Mode {idx + 1} | E={energy_pct:.2f}%"
-        slice_path = figures_dir / f"{run_id}_mode_{idx + 1}_slices.png"
-        iso_path = figures_dir / f"{run_id}_mode_{idx + 1}_isometric.png"
-        plot_orthogonal_slices_3d(
-            mode_3d,
-            x_coords,
-            y_coords,
-            z_coords,
-            output_path=str(slice_path),
-            title_prefix=title,
-            data=data,
-            scalar_name="psd_pod_mode",
-        )
-        plot_isometric_slices_3d(
-            mode_3d,
-            x_coords,
-            y_coords,
-            z_coords,
-            output_path=str(iso_path),
-            title_prefix=title,
-            data=data,
-            scalar_name="psd_pod_mode",
-        )
-        saved.extend([slice_path, iso_path])
-    return saved
-
-
-def _maybe_plot_volumetric_modes(
-    analyzer: Any,
-    *,
-    plot_n_modes: int,
-    slices_kwargs: dict[str, Any] | None = None,
-    iso_kwargs: dict[str, Any] | None = None,
-) -> bool:
-    """Use analyzer-specific 3D plot hooks when volumetric data is present."""
-    if int(analyzer.data.get("Nz", 1)) <= 1:
-        return False
-    used = False
-    if hasattr(analyzer, "plot_modes_3d_slices"):
-        kwargs = {"plot_n_modes": plot_n_modes}
-        kwargs.update(slices_kwargs or {})
-        analyzer.plot_modes_3d_slices(**kwargs)
-        used = True
-    if hasattr(analyzer, "plot_modes_3d_isometric"):
-        kwargs = {"plot_n_modes": plot_n_modes}
-        kwargs.update(iso_kwargs or {})
-        analyzer.plot_modes_3d_isometric(**kwargs)
-        used = True
-    return used
-
-
 def _run_psd_pod(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
-    """Thin CLI/API runner: construct PSDPODAnalyzer, run, optionally plot."""
+    """Thin CLI runner: construct, hand the spec to the analyzer seam."""
     file_path, data_loader, results_dir, figures_dir = _prepare_common_run(spec, dry_run=dry_run)
     if dry_run:
         return _make_dry_run_outcome(spec, results_dir, figures_dir, results_dir / "dry_run_psd_pod.hdf5")
@@ -655,35 +445,12 @@ def _run_psd_pod(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
         blockwise_mean=blockwise_mean,
         n_modes_save=spec.case.n_modes_save,
     )
-    analyzer.load_and_preprocess()
-    _apply_snapshot_limit(analyzer, spec)
-    analyzer.compute_fft_blocks()
-    analyzer.perform_psd_pod()
-    analyzer.save_results()
+    analyzer.run_analysis(
+        plots=spec.case.generate_plots,
+        run_id=spec.run_id,
+        snapshot_limit=spec.params.get("max_snapshots"),
+    )
     save_path = Path(analyzer.results_path) if analyzer.results_path else _find_latest_result_file(results_dir)
-
-    if spec.case.generate_plots:
-        modes = np.asarray(analyzer.modes)
-        eigenvalues = np.asarray(analyzer.eigenvalues)
-        _plot_psd_pod_eigenvalues(eigenvalues, figures_dir, spec.run_id)
-        if resolve_volume_layout(analyzer.data, modes.shape[0]) is not None:
-            _plot_psd_pod_modes_3d(
-                modes=modes,
-                eigenvalues=eigenvalues,
-                data=analyzer.data,
-                figures_dir=figures_dir,
-                run_id=spec.run_id,
-                plot_n_modes=min(2, spec.case.n_modes_save),
-            )
-        else:
-            _plot_psd_pod_modes(
-                modes=modes,
-                eigenvalues=eigenvalues,
-                data=analyzer.data,
-                figures_dir=figures_dir,
-                run_id=spec.run_id,
-                plot_n_modes=min(2, spec.case.n_modes_save),
-            )
 
     return RunOutcome(
         run_id=spec.run_id,
@@ -700,7 +467,6 @@ def _run_psd_pod(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
 def _run_pod_like(
     spec: AnalyzeSpec,
     analyzer_cls: Any,
-    compute_fn: str,
     *,
     dry_run: bool,
     extra_kwargs: dict[str, Any] | None = None,
@@ -719,29 +485,11 @@ def _run_pod_like(
         "use_parallel": spec.case.use_parallel,
     }
     analyzer = analyzer_cls(**common_kwargs, **(extra_kwargs or {}))
-
-    analyzer.load_and_preprocess()
-    _apply_snapshot_limit(analyzer, spec)
-    getattr(analyzer, compute_fn)(**(compute_kwargs or {}))
-    analyzer.save_results()
-
-    if spec.case.generate_plots:
-        analyzer.plot_eigenvalues()
-        plotted_volumetric = _maybe_plot_volumetric_modes(
-            analyzer,
-            plot_n_modes=min(2, spec.case.n_modes_save),
-            slices_kwargs={"delay_idx": 0} if isinstance(analyzer, STPODAnalyzer) else None,
-            iso_kwargs={"delay_idx": 0} if isinstance(analyzer, STPODAnalyzer) else None,
-        )
-        if not plotted_volumetric:
-            if isinstance(analyzer, STPODAnalyzer):
-                analyzer.plot_modes(plot_n_modes=min(2, spec.case.n_modes_save))
-            else:
-                analyzer.plot_modes(plot_n_modes=min(2, spec.case.n_modes_save), modes_per_fig=2)
-        if hasattr(analyzer, "plot_time_coefficients"):
-            analyzer.plot_time_coefficients(n_coeffs_to_plot=min(2, spec.case.n_modes_save))
-        if hasattr(analyzer, "plot_cumulative_energy"):
-            analyzer.plot_cumulative_energy()
+    analyzer.run_analysis(
+        plots=spec.case.generate_plots,
+        snapshot_limit=spec.params.get("max_snapshots"),
+        **(compute_kwargs or {}),
+    )
 
     return RunOutcome(
         run_id=spec.run_id,
@@ -775,33 +523,24 @@ def _run_dmd(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
     if energy_fraction is not None:
         dmd_kwargs["energy_fraction"] = energy_fraction
     analyzer = DMDAnalyzer(**dmd_kwargs)
-    analyzer.load_and_preprocess()
-    _apply_snapshot_limit(analyzer, spec)
 
     _hodmd_variants = {"hodmd": "ls", "tls_hodmd": "tls"}
     if spec.method in _hodmd_variants:
         delays = int(spec.params.get("delays", spec.case.embedding_dim))
         if delays < 2:
             raise ValueError(f"{spec.method} requires delays >= 2.")
-        analyzer.perform_dmd(
-            method=_hodmd_variants[spec.method],
-            delays=delays,
-            named_variant=spec.method,
-        )
+        perform_kwargs = dict(method=_hodmd_variants[spec.method], delays=delays, named_variant=spec.method)
     else:
-        analyzer.perform_dmd(
+        perform_kwargs = dict(
             method=str(spec.params.get("method", "ls")),
             delays=int(spec.params.get("delays", 1)),
         )
-    analyzer.save_results()
 
-    if spec.case.generate_plots:
-        analyzer.plot_eigenvalues()
-        if not _maybe_plot_volumetric_modes(analyzer, plot_n_modes=min(2, spec.case.n_modes_save)):
-            analyzer.plot_modes(plot_n_modes=min(2, spec.case.n_modes_save), modes_per_fig=2)
-        analyzer.plot_time_coefficients(n_coeffs_to_plot=min(2, spec.case.n_modes_save))
-        analyzer.plot_cumulative_energy()
-
+    analyzer.run_analysis(
+        plots=spec.case.generate_plots,
+        snapshot_limit=spec.params.get("max_snapshots"),
+        **perform_kwargs,
+    )
     return RunOutcome(
         run_id=spec.run_id,
         method=spec.method,
@@ -829,28 +568,10 @@ def _run_spod(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
         spatial_weight_type=spec.case.spatial_weight_type,
         use_parallel=spec.case.use_parallel,
     )
-    analyzer.load_and_preprocess()
-    _apply_snapshot_limit(analyzer, spec)
-    analyzer.compute_fft_blocks()
-    analyzer.perform_spod()
-    analyzer.save_results()
-
-    if spec.case.generate_plots:
-        analyzer.plot_eigenvalues()
-        dominant_idx = int(np.argmax(analyzer.eigenvalues[:, 0]))
-        if not _maybe_plot_volumetric_modes(
-            analyzer,
-            plot_n_modes=min(2, analyzer.modes.shape[2]),
-            slices_kwargs={"freqs_to_plot": [dominant_idx]},
-            iso_kwargs={"freqs_to_plot": [dominant_idx]},
-        ):
-            analyzer.plot_modes(
-                freqs_to_plot=[dominant_idx],
-                plot_n_modes=min(2, analyzer.modes.shape[2]),
-                modes_per_fig=2,
-            )
-        analyzer.plot_cumulative_energy()
-
+    analyzer.run_analysis(
+        plots=spec.case.generate_plots,
+        snapshot_limit=spec.params.get("max_snapshots"),
+    )
     return RunOutcome(
         run_id=spec.run_id,
         method=spec.method,
@@ -879,17 +600,10 @@ def _run_bsmd(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
         use_parallel=spec.case.use_parallel,
         max_qhat_gb=float(spec.params.get("max_qhat_gb", 4.0)),
     )
-    analyzer.load_and_preprocess()
-    _apply_snapshot_limit(analyzer, spec)
-    analyzer.compute_fft_blocks()
-    analyzer.perform_bsmd()
-    analyzer.save_results()
-
-    if spec.case.generate_plots:
-        analyzer.plot_energy_map()
-        if not _maybe_plot_volumetric_modes(analyzer, plot_n_modes=2):
-            analyzer.plot_modes(plot_n_modes=2)
-
+    analyzer.run_analysis(
+        plots=spec.case.generate_plots,
+        snapshot_limit=spec.params.get("max_snapshots"),
+    )
     return RunOutcome(
         run_id=spec.run_id,
         method=spec.method,
@@ -908,7 +622,6 @@ def analyze_from_spec(spec: AnalyzeSpec, *, dry_run: bool = False) -> RunOutcome
         "pod": lambda: _run_pod_like(
             spec,
             PODAnalyzer,
-            "perform_pod",
             dry_run=dry_run,
             extra_kwargs={"n_modes_save": spec.case.n_modes_save},
             compute_kwargs={"solver": str(spec.params.get("solver", "eigh"))},
@@ -916,7 +629,6 @@ def analyze_from_spec(spec: AnalyzeSpec, *, dry_run: bool = False) -> RunOutcome
         "mpod": lambda: _run_pod_like(
             spec,
             MPODAnalyzer,
-            "perform_mpod",
             dry_run=dry_run,
             extra_kwargs={
                 "n_modes_save": spec.case.n_modes_save,
@@ -934,7 +646,6 @@ def analyze_from_spec(spec: AnalyzeSpec, *, dry_run: bool = False) -> RunOutcome
         "stpod": lambda: _run_pod_like(
             spec,
             STPODAnalyzer,
-            "perform_stpod",
             dry_run=dry_run,
             extra_kwargs={
                 "embedding_dim": int(spec.params.get("embedding_dim", spec.case.embedding_dim)),
@@ -1030,6 +741,9 @@ def run_from_config(config_path: str | Path, *, dry_run: bool = False) -> list[R
         print("Dry run only; no analyses executed.")
         return []
 
+    # TODO: each spec
+    # still loads its case from disk. Cache the loader result per data source
+    # here and hand it through data= once the pipelines accept a cache.
     outcomes = [analyze_from_spec(spec, dry_run=False) for spec in collection.analyses]
     return outcomes
 

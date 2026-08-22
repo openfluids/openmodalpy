@@ -26,7 +26,6 @@ from openmodalpy.core.base import (
     get_fig_aspect_ratio,
     make_result_filename,
     plot_modes_3d,
-    print_summary,
     reshape_mode_to_volume,
     resolve_volume_layout,
     spod_function,
@@ -84,9 +83,11 @@ class SPODAnalyzer(BaseAnalyzer):
     ############################################################
     # Initialization and Core Parameters                       #
     ############################################################
+    _METHOD_NAME = "spod"
+
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         nfft: int = 128,
         overlap: float = 0.5,
         results_dir: str = RESULTS_DIR_SPOD,
@@ -101,12 +102,14 @@ class SPODAnalyzer(BaseAnalyzer):
         characteristic_length: float | None = None,
         characteristic_velocity: float | None = None,
         spatial_weights: ArrayLike | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """
         Initializes the SPODAnalyzer instance.
 
         Args:
-            file_path (str): Path to the data file (e.g., .mat, .h5).
+            file_path (str | None): Path to the data file (e.g., .mat, .h5).
+                Optional when ``data`` carries the loaded dataset instead.
             nfft (int, optional): Number of points per FFT block. Defaults to 128.
             overlap (float, optional): Overlap fraction between FFT blocks (0 to <1).
                                      Defaults to 0.5 (50% overlap).
@@ -135,6 +138,8 @@ class SPODAnalyzer(BaseAnalyzer):
                 (None → 'uniform', or 'uniform', 'polar', 'prescribed'). Defaults to None.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed'.
+            data (dict | None): Already-loaded dataset following the data contract
+                (see DOC.md). Given instead of ``file_path``.
         """
         super().__init__(
             file_path=file_path,
@@ -146,6 +151,7 @@ class SPODAnalyzer(BaseAnalyzer):
             spatial_weight_type=spatial_weight_type,
             use_parallel=use_parallel,
             spatial_weights=spatial_weights,
+            data=data,
         )
 
         self._validate_inputs()
@@ -443,57 +449,28 @@ class SPODAnalyzer(BaseAnalyzer):
         kwargs = {k: v for k, v in options.items() if k != "enabled"}
         method(**kwargs)
 
-    def run_analysis(
-        self,
-        plot_modes_options: dict | None = None,
-        plot_reconstruction_options: dict | None = None,
-        plot_time_coeffs_options: dict | None = None,
-        plot_complex_plane_options: dict | None = None,
-        *,
-        plot_options: dict[str, dict] | None = None,
-    ) -> None:
+    _perform_name = "perform_spod"
+    _needs_fft_blocks = True
+
+    def _plot_run(self, run_id: str | None = None) -> None:
+        """Default figures after run_analysis — the CLI spod set.
+
+        Finer per-plot enable/disable control stays available through
+        ``_run_plot``; this default mirrors what the CLI always produced.
         """
-        Run the full SPOD analysis pipeline: load, compute, save, and plot.
-
-        Plot options can be passed per-plot as keyword arguments (legacy) or as a
-        single ``plot_options`` dict keyed by plot name.  When both are provided,
-        per-plot arguments take precedence.
-
-        Args:
-            plot_modes_options (dict, optional): Options for `plot_modes`.
-            plot_reconstruction_options (dict, optional): Options for `plot_reconstruction_error`.
-            plot_time_coeffs_options (dict, optional): Options for `plot_time_coefficients`.
-            plot_complex_plane_options (dict, optional): Options for `plot_eig_complex_plane`.
-            plot_options (dict, optional): Unified dict, e.g.
-                ``{"modes": {...}, "reconstruction": {...}, "time_coeffs": {...}, "complex_plane": {...}}``.
-        """
-        opts = dict(plot_options or {})
-        modes_opts = plot_modes_options or opts.get("modes")
-        recon_opts = plot_reconstruction_options or opts.get("reconstruction")
-        time_opts = plot_time_coeffs_options or opts.get("time_coeffs")
-        cplex_opts = plot_complex_plane_options or opts.get("complex_plane")
-
-        logger.info("Starting SPOD analysis for %s", os.path.basename(self.file_path))
-
-        self.load_and_preprocess()
-        super().run(compute_fft=True)  # Compute/load qhat before SPOD
-        self.perform_spod()
-        self.save_results()
-
-        # Generate plots
         self.plot_eigenvalues()
+        dominant_idx = int(np.argmax(self.eigenvalues[:, 0]))
+        if not self._maybe_plot_volumetric_modes(
+            plot_n_modes=min(2, self.modes.shape[2]),
+            slices_kwargs={"freqs_to_plot": [dominant_idx]},
+            iso_kwargs={"freqs_to_plot": [dominant_idx]},
+        ):
+            self.plot_modes(
+                freqs_to_plot=[dominant_idx],
+                plot_n_modes=min(2, self.modes.shape[2]),
+                modes_per_fig=2,
+            )
         self.plot_cumulative_energy()
-        if int(self.data.get("Nz", 1)) > 1:
-            dominant_idx = int(np.argmax(self.eigenvalues[:, 0]))
-            self.plot_modes_3d_slices(freqs_to_plot=[dominant_idx], plot_n_modes=min(2, self.modes.shape[2]))
-            self.plot_modes_3d_isometric(freqs_to_plot=[dominant_idx], plot_n_modes=min(2, self.modes.shape[2]))
-        else:
-            self._run_plot(self.plot_modes, modes_opts)
-        self._run_plot(self.plot_time_coefficients, time_opts)
-        self._run_plot(self.plot_reconstruction_error, recon_opts)
-        self._run_plot(self.plot_eig_complex_plane, cplex_opts)
-
-        print_summary("SPOD", self.results_dir, self.figures_dir)
 
     def plot_eigenvalues(self, n_modes_line_plot: int = 20, shading_cmap: str = "inferno_r") -> None:
         """Plot the SPOD eigenvalue spectrum (energy vs. Strouhal number).
@@ -675,9 +652,9 @@ class SPODAnalyzer(BaseAnalyzer):
                     ax = axes[j]
                     mode_real = self.modes[f_idx, :, m_idx].real
                     if Nx * Ny == mode_real.size and Nx > 1 and Ny > 1:
-                        mode_2d = mode_real.reshape(Nx, Ny)
+                        mode_2d = mode_real.reshape(Ny, Nx)
                         if x_coords.ndim == 1 and y_coords.ndim == 1:
-                            X, Y = np.meshgrid(x_coords, y_coords, indexing="ij")
+                            X, Y = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
                         else:
                             X, Y = x_coords, y_coords
                         # Optionally apply cylinder mask

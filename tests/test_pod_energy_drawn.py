@@ -45,7 +45,7 @@ def _make_truncated_pod(tmp_path, data: dict, *, n_modes_save: int = 3) -> PODAn
         use_parallel=False,
     )
     analyzer.load_and_preprocess()
-    analyzer._perform_decomposition()
+    analyzer.perform_pod()
     return analyzer
 
 

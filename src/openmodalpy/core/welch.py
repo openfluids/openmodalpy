@@ -114,6 +114,20 @@ def windowed_block_fft(
         block_centered = block - block_mean
 
         if normvar:
+            # Two-pass variance (mean first, then squared deviations) of an
+            # exactly constant block is exactly 0, and a division by it is
+            # impossible. For a NEARLY constant block every deviation is a
+            # handful of rounding steps on O(1)-scale samples, so the computed
+            # variance sits within a few eps of zero; dividing by such a value
+            # amplifies pure round-off to O(1) amplitudes. 4 * eps is two
+            # roundings of headroom above a single-precision artifact — the
+            # smallest round multiple that cannot be reached by honest
+            # round-off of one subtraction — while staying 10+ orders below
+            # any variance worth normalizing. Caveat: this is an absolute
+            # threshold for O(1)-scale data; data at scale S carries
+            # round-off-scale variances near eps*S^2, which for S >> 1 will
+            # not clamp (and does not need to: their relative variation is
+            # already resolved).
             block_var = np.var(block_centered, axis=0, ddof=1)
             block_var[block_var < 4 * np.finfo(float).eps] = 1.0
             block_centered = block_centered / block_var

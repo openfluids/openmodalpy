@@ -42,6 +42,7 @@ def _manual_windowed_rfft(block, window, window_norm):
     return (1.0 / (nfft * scale)) * full[: nfft // 2 + 1]
 
 
+@pytest.mark.oracle
 def test_parseval_bin_centred_tone_power_norm():
     """Power-norm one-sided mean-square spectrum sums to signal variance.
 
@@ -77,6 +78,7 @@ def test_parseval_bin_centred_tone_power_norm():
     np.testing.assert_allclose(total, variance, rtol=0, atol=1e-14)
 
 
+@pytest.mark.oracle
 def test_amplitude_norm_recovers_half_tone_amplitude():
     """With window_norm='amplitude', peak |q_hat| is half the cosine amplitude."""
     fs = 1000.0
@@ -102,6 +104,7 @@ def test_amplitude_norm_recovers_half_tone_amplitude():
     np.testing.assert_allclose(peak_mag, amp / 2.0, rtol=0, atol=1e-12)
 
 
+@pytest.mark.oracle
 def test_scipy_welch_broadband_mean_square_matches_psd_times_df():
     """One-sided mean-square spectrum equals scipy.signal.welch density * df.
 
@@ -379,6 +382,7 @@ def test_overlapped_blocks_share_the_overlap_region():
     ],
     ids=["ovl0", "ovl4-uneven"],
 )
+@pytest.mark.characterization
 def test_param_surface_matches_blockwise_definition(
     window_type, window_norm, blockwise_mean, normvar, novlap, nfft, Ns, nblocks
 ):
@@ -430,3 +434,158 @@ def test_param_surface_matches_blockwise_definition(
         expected[:, :, iblk] = (1.0 / (nfft * scale)) * full[: nfft // 2 + 1]
 
     np.testing.assert_allclose(got, expected, rtol=0, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Definition-level oracles extended across the flag/window surface, closing
+# earlier gaps: blackman / bartlett / sine were oracled only at single-block
+# power norm, and bartlett multi-block was never exercised.
+# ---------------------------------------------------------------------------
+
+_ALL_WINDOWS = ["hamming", "hann", "boxcar", "blackman", "bartlett", "sine"]
+
+
+def _bin_centred_tone(nfft, fs=1000.0, f0=125.0, amp=2.0):
+    """Pure cosine with an integer number of periods in nfft (no leakage)."""
+    t = np.arange(nfft) / fs
+    return amp * np.cos(2.0 * np.pi * f0 * t)
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("normvar", [False, True], ids=["nv0", "nv1"])
+@pytest.mark.parametrize("blockwise_mean", [False, True], ids=["bwmean0", "bwmean1"])
+@pytest.mark.parametrize("window_type", _ALL_WINDOWS)
+def test_parseval_power_norm_across_windows_and_flags(window_type, blockwise_mean, normvar):
+    """Power-norm mean-square spectrum sums to the signal variance.
+
+    For a bin-centred tone the window's coherent gain cancels against the
+    power scaling for every window in the set, with any blockwise-mean flag
+    (the tone's block mean is zero over full periods), and across blocks.
+    With normvar the divide is by the unbiased variance A^2/2, so the
+    recovered mean-square is var / var^2 = 1/var.
+    """
+    nfft = 256
+    amp = 2.0
+    x = _bin_centred_tone(nfft, amp=amp)
+    q = np.tile(x, 4)[:, np.newaxis]  # 4 identical blocks stacked in time, novlap=0
+    q_hat = blocksfft(
+        q,
+        nfft=nfft,
+        nblocks=4,
+        novlap=0,
+        window_type=window_type,
+        window_norm="power",
+        blockwise_mean=blockwise_mean,
+        normvar=normvar,
+    )
+    total = float(np.sum(_onesided_mean_square(q_hat)[:, 0]))
+    # The normvar divide is by the block's ddof=1 sample variance, so the
+    # normalized signal's population variance is var_pop / sample_var. Both
+    # quantities are measured here from the input itself.
+    var_pop = amp**2 / 2.0
+    sample_var = float(np.var(x, ddof=1))
+    # normvar divides amplitudes by the VARIANCE, so mean-square scales as
+    # 1/sample_var^2. rtol is 1e-3, not 1e-12: periodic bartlett is asymmetric
+    # (zero first sample), leaking O(1e-4) of the tone into the +-1 bins; every
+    # symmetric window here matches to ~1e-12.
+    expected = var_pop / sample_var**2 if normvar else var_pop
+    np.testing.assert_allclose(total, expected, rtol=1e-3, atol=1e-14)
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("normvar", [False, True], ids=["nv0", "nv1"])
+@pytest.mark.parametrize("window_type", _ALL_WINDOWS)
+def test_amplitude_norm_peak_recovers_half_amplitude_across_windows(window_type, normvar):
+    """Amplitude-norm peak |q_hat| is A/2 (scaled by 1/var when normvar)."""
+    nfft = 256
+    amp = 2.0
+    x = _bin_centred_tone(nfft, amp=amp)
+    q = x[:, np.newaxis]
+    q_hat = blocksfft(
+        q,
+        nfft=nfft,
+        nblocks=1,
+        novlap=0,
+        window_type=window_type,
+        window_norm="amplitude",
+        blockwise_mean=False,
+        normvar=normvar,
+    )
+    peak = float(np.abs(q_hat[32, 0, 0]))
+    sample_var = float(np.var(x, ddof=1))
+    # rtol 1e-3: the module's sine window uses mid-bin placement, so its
+    # coherent gain at an exact bin differs from scipy's periodic sine by
+    # O(1e-5); every scipy window matches to ~1e-12.
+    expected = amp / 2.0 / sample_var if normvar else amp / 2.0
+    np.testing.assert_allclose(peak, expected, rtol=1e-3, atol=1e-12)
+
+
+@pytest.mark.oracle
+def test_bartlett_multiblock_average_matches_single_block():
+    """Bartlett multi-block is the single
+    block's periodogram, averaged.
+
+    With novlap=0 and an integer number of periods per block every Bartlett
+    segment is identical, so per-block spectra must agree exactly and their
+    mean must reproduce the one-block Parseval value.
+    """
+    nfft, nblocks = 128, 5
+    amp = 2.0
+    x = _bin_centred_tone(nfft, amp=amp)
+    q = np.tile(x, nblocks)[:, np.newaxis]
+    q_hat = blocksfft(q, nfft=nfft, nblocks=nblocks, novlap=0, window_type="bartlett", window_norm="power")
+    per_block = np.abs(q_hat[:, 0, :]) ** 2
+    np.testing.assert_allclose(per_block, np.broadcast_to(per_block[:, [0]], per_block.shape), rtol=1e-12, atol=0)
+    total = float(np.sum(_onesided_mean_square(q_hat)[:, 0]))
+    # Same asymmetric-bartlett leakage tolerance as the sweep above.
+    np.testing.assert_allclose(total, amp**2 / 2.0, rtol=1e-3, atol=1e-14)
+
+
+@pytest.mark.oracle
+def test_normvar_clamp_sits_between_roundoff_and_meaningful_variances():
+    """The zero-variance clamp must not fire on real (tiny) variance.
+
+    Choose a tone whose unbiased sample variance (~1e-15) sits just above the
+    clamp region but far below anything a larger clamp constant would spare.
+    The expected peak amplitude is derived from the amplitude-recovery
+    identity divided by the tone's variance — no clamp constant is copied
+    from the source. If the clamp threshold were two orders of magnitude
+    larger, this variance would be clamped to 1.0 and the peak would come out
+    A/2 instead of A/(2 var), failing the comparison.
+    """
+    nfft = 256
+    var = 1.0e-15
+    amp = float(np.sqrt(2.0 * var))  # pure cosine: var = A^2 / 2
+    x = _bin_centred_tone(nfft, amp=amp)
+    q = x[:, np.newaxis]
+    q_hat = blocksfft(
+        q,
+        nfft=nfft,
+        nblocks=1,
+        novlap=0,
+        window_type="hann",
+        window_norm="amplitude",
+        blockwise_mean=False,
+        normvar=True,
+    )
+    peak = float(np.abs(q_hat[32, 0, 0]))
+    np.testing.assert_allclose(peak, amp / 2.0 / np.var(x, ddof=1), rtol=1e-6)
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("offset", [0.0, 25.0])
+def test_blockwise_mean_output_invariant_to_constant_offset(offset):
+    """blockwise_mean must remove the offset BEFORE windowing.
+
+    Metamorphic pin on operation order: adding a constant to the signal must
+    not change the block-mean-removed output at all (the per-block mean
+    absorbs it exactly). If the implementation windowed first and centred
+    second, the residual offset * (window - mean(window)) would inject
+    offset-scaled energy into every non-DC bin and the comparison would fail.
+    """
+    nfft = 64
+    base = _bin_centred_tone(nfft, f0=250.0, amp=1.0) + 0.3  # non-integer periods
+    q0 = (base)[:, np.newaxis]
+    qC = (base + offset)[:, np.newaxis]
+    kwargs = dict(nfft=nfft, nblocks=1, novlap=0, window_type="hamming", window_norm="power", blockwise_mean=True)
+    np.testing.assert_allclose(blocksfft(qC, **kwargs), blocksfft(q0, **kwargs), rtol=0, atol=1e-12)

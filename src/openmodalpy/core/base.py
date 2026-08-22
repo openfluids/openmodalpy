@@ -34,12 +34,13 @@ from openmodalpy.core.config import (
 from openmodalpy.core.io import load_data as di_load_data
 from openmodalpy.core.io import load_jetles_data as di_load_jetles_data
 from openmodalpy.core.io import load_mat_data as di_load_mat_data
-
-# Welch block FFT and helpers live in welch.py (single implementation) so base
-# remains importable when the parallel stack fails to load.
 from openmodalpy.core.threads import apply_blas_limit
 from openmodalpy.core.welch import sine_window as sine_window  # re-export; body in welch.py
 from openmodalpy.core.welch import welch_nblocks, windowed_block_fft
+
+# Welch block FFT and helpers live in welch.py (single implementation) so base
+# remains importable when the parallel stack fails to load.
+from openmodalpy.specs import display_name_for
 
 try:
     from openmodalpy.core.parallel import (
@@ -786,7 +787,13 @@ def resolve_volume_layout(data: dict, mode_size: int) -> tuple[int, int, int, in
 
 
 def reshape_mode_to_volume(mode_values: np.ndarray, data: dict, *, block_index: int = 0) -> np.ndarray:
-    """Reshape a flattened spatial mode into a 3D volume, selecting one block if needed."""
+    """Reshape a flattened spatial mode into a 3D volume, selecting one block if needed.
+
+    The flattened layout is the data contract (C-order, ``index =
+    iz*Ny*Nx + iy*Nx + ix``); the returned array is indexed ``[ix, iy, iz]``
+    because the PyVista slice plots downstream are built on
+    ``RectilinearGrid(x, y, z)``.
+    """
     mode_arr = np.asarray(mode_values)
     layout = resolve_volume_layout(data, mode_arr.size)
     if layout is None:
@@ -794,9 +801,8 @@ def reshape_mode_to_volume(mode_values: np.ndarray, data: dict, *, block_index: 
     nx, ny, nz, multiplier = layout
     if not 0 <= block_index < multiplier:
         raise ValueError(f"Requested block_index={block_index} but multiplier={multiplier}.")
-    if multiplier == 1:
-        return mode_arr.reshape((nx, ny, nz))
-    return mode_arr.reshape((multiplier, nx, ny, nz))[block_index]
+    blocks = mode_arr.reshape((multiplier, nz, ny, nx))  # contract C-order
+    return blocks[block_index].transpose(2, 1, 0)
 
 
 def plot_orthogonal_slices_3d(
@@ -1224,6 +1230,66 @@ def calculate_uniform_weights(
     return np.ones((Nx * Ny * Nz, 1))
 
 
+def _trapezoid_widths(a: np.ndarray, name: str) -> np.ndarray:
+    """Trapezoid cell widths along one 1-D axis (half spacing at the ends).
+
+    A single-point axis gets width 1.0 so an outer product across axes stays
+    well defined (same convention as the polar helper).
+    """
+    if a.ndim != 1:
+        raise ValueError(
+            f"{name} must be a 1-D coordinate array to derive cell volumes; "
+            f"got ndim={a.ndim}. Pass the axis coordinates, not a mesh."
+        )
+    if a.size == 0:
+        raise ValueError(f"{name} is empty; cannot derive cell widths.")
+    if a.size == 1:
+        return np.ones(1)
+    d = np.diff(a)
+    if np.any(d <= 0.0):
+        if np.all(d < 0.0):
+            raise ValueError(
+                f"{name} is strictly decreasing "
+                f"({a[0]:g} -> {a[-1]:g}). Cell-volume weights require "
+                f"strictly increasing coordinates; flip the axis first "
+                f"(e.g. {name} = {name}[::-1] together with the matching "
+                f"axis of q) instead of relying on a silent sort."
+            )
+        raise ValueError(
+            f"{name} is not strictly increasing (first bad step near index "
+            f"{int(np.argmax(d <= 0.0))}). Cell-volume weights refuse to "
+            f"sort or repair coordinates; pass monotone 1-D {name}."
+        )
+    w = np.empty_like(a)
+    w[0] = (a[1] - a[0]) / 2.0
+    w[-1] = (a[-1] - a[-2]) / 2.0
+    w[1:-1] = (a[2:] - a[:-2]) / 2.0
+    return w
+
+
+def calculate_cell_volume_weights(x: ArrayLike, y: ArrayLike, z: ArrayLike | None = None) -> np.ndarray:
+    """Cell-volume weights for a (possibly stretched) Cartesian grid.
+
+    Each axis contributes trapezoid cell widths (half the neighbouring
+    spacing at the boundary points); the outer product across x, y[, z] gives
+    one weight per cell, flattened in C-order to match the snapshot layout
+    ``(Ns, Ny*Nx*Nz)``: ``index = ((iz*Ny + iy)*Nx + ix)`` (``iy*Nx + ix``
+    in 2-D). Coordinates must be strictly increasing 1-D arrays; anything
+    else raises ``ValueError`` — decreasing axes are told to flip, never
+    sorted silently.
+    """
+    x_arr = np.asarray(x, dtype=np.float64)
+    y_arr = np.asarray(y, dtype=np.float64)
+    wx = _trapezoid_widths(x_arr, "x")
+    wy = _trapezoid_widths(y_arr, "y")
+    volumes = np.outer(wy, wx)  # (Ny, Nx); C-order flatten -> iy*Nx + ix
+    if z is not None:
+        z_arr = np.asarray(z, dtype=np.float64)
+        wz = _trapezoid_widths(z_arr, "z")
+        volumes = wz[:, None, None] * volumes[None, :, :]  # (Nz, Ny, Nx)
+    return volumes.reshape(-1, 1)
+
+
 def blocksfft(
     q: np.ndarray,
     nfft: int,
@@ -1528,7 +1594,7 @@ class BaseAnalyzer:
 
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         nfft: int = 128,
         overlap: float = 0.5,
         results_dir: str = "./preprocess",
@@ -1537,11 +1603,13 @@ class BaseAnalyzer:
         spatial_weight_type: str | None = None,
         use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the analyzer.
 
         Args:
-            file_path (str): Path to data file.
+            file_path (str | None): Path to data file. Optional when ``data``
+                carries the loaded dataset instead.
             nfft (int): Number of snapshots per FFT block.
             overlap (float): Overlap fraction between blocks.
             results_dir (str): Directory to save results.
@@ -1549,12 +1617,29 @@ class BaseAnalyzer:
             data_loader (callable): Function to load data.
             spatial_weight_type (str | None): Type of spatial weighting
                 (``None`` → ``"uniform"``, or ``"uniform"``, ``"polar"``,
-                ``"prescribed"``). ``"auto"`` is not accepted.
+                ``"prescribed"``, ``"cell_volume"``). ``"auto"`` is not accepted.
             spatial_weights: Optional array of spatial integration weights.
                 When given, the weight type becomes ``"prescribed"`` and the
                 vector is checked against the grid in ``load_and_preprocess``.
+            data (dict | None): Already-loaded dataset following the data
+                contract (``q``, ``x``, ``y``, ``dt``, ``Nx``, ``Ny``, ``Ns``;
+                see DOC.md). Given instead of ``file_path`` — exactly one of
+                the two is required. The dict is stored by reference, so one
+                load can feed several analyzers.
         """
         self.file_path = file_path
+
+        # Exactly one input source. ``data`` is the documented in-memory path;
+        # assigning ``.data`` after construction stays as the legacy escape hatch.
+        if data is not None:
+            if file_path is not None:
+                raise ValueError("Pass file_path or data, not both: an analyzer takes exactly one input source.")
+            if not isinstance(data, dict) or not data:
+                raise ValueError(
+                    "data must be a non-empty dict following the data contract (q, x, y, dt, Nx, Ny, Ns; see DOC.md)."
+                )
+        elif file_path is None:
+            raise ValueError("No input source: pass file_path (path to a data file) or data (the loaded dict).")
         self.nfft = nfft
         self.overlap = overlap
         self.results_dir = results_dir
@@ -1568,7 +1653,7 @@ class BaseAnalyzer:
         # None means "not specified" and resolves to uniform (same numeric default
         # as the former unconditional "auto" path). Keep None out of the conflict
         # check so spatial_weights=array with no type still prescribes a metric.
-        accepted = ("uniform", "polar", "prescribed")
+        accepted = ("uniform", "polar", "prescribed", "cell_volume")
         self._prescribed_spatial_weights: ArrayLike | None
         if spatial_weights is not None:
             if spatial_weight_type not in (None, "prescribed"):
@@ -1595,7 +1680,7 @@ class BaseAnalyzer:
 
         # Calculated later
         self.novlap = int(overlap * nfft)
-        self.data: dict[str, Any] = {}
+        self.data: dict[str, Any] = data if data is not None else {}
         self.W = np.array([])
         self.nblocks = 0
         self.fs = 0.0
@@ -1604,18 +1689,22 @@ class BaseAnalyzer:
         # Declared here so it always exists and readers can test it for None.
         self._qhat_cache_path: str | None = None
 
-        # Extract root name for output files
-        base = os.path.basename(file_path)
-        root, ext = os.path.splitext(base)
-        if ext == ".npz":
-            npz_files = glob.glob(os.path.join(os.path.dirname(file_path), "*.npz"))
-            if len(npz_files) > 1:
-                # Use directory name if multiple npz files were concatenated
-                self.data_root = os.path.basename(os.path.dirname(file_path))
+        # Extract root name for output files. With in-memory data there is no
+        # path to derive one from, so outputs are named after the analyzer.
+        if file_path is not None:
+            base = os.path.basename(file_path)
+            root, ext = os.path.splitext(base)
+            if ext == ".npz":
+                npz_files = glob.glob(os.path.join(os.path.dirname(file_path), "*.npz"))
+                if len(npz_files) > 1:
+                    # Use directory name if multiple npz files were concatenated
+                    self.data_root = os.path.basename(os.path.dirname(file_path))
+                else:
+                    self.data_root = root
             else:
                 self.data_root = root
         else:
-            self.data_root = root
+            self.data_root = getattr(self, "_METHOD_NAME", "analyzer")
 
         # Ensure output directories exist
         os.makedirs(self.results_dir, exist_ok=True)
@@ -1623,7 +1712,10 @@ class BaseAnalyzer:
 
     def load_and_preprocess(self) -> None:
         """Load data and calculate weights."""
-        # Load data from file only if not already provided
+        # Load data from file only if not already provided. The constructor
+        # guarantees a non-empty dict whenever ``data=`` was given, so an empty
+        # dict here can only come from a legacy side-channel assignment, which
+        # keeps its old reload semantics.
         if not self.data:
             self.data = self.data_loader(self.file_path)
 
@@ -1658,6 +1750,28 @@ class BaseAnalyzer:
                 calculate_polar_weights(self.data["x"], self.data["y"], use_parallel=self.use_parallel)
             )
             logger.info("Using polar (cylindrical) spatial weights.")
+        elif self.spatial_weight_type == "cell_volume":
+            x_arr = np.asarray(self.data["x"])
+            y_arr = np.asarray(self.data["y"])
+            z_raw = self.data.get("z")
+            z_arr = None if z_raw is None else np.asarray(z_raw)
+            axes_1d = x_arr.ndim == 1 and y_arr.ndim == 1 and (z_arr is None or z_arr.ndim == 1)
+            scattered = n_space is not None and x_arr.size == n_space and y_arr.size == n_space
+            n_axes = x_arr.size * y_arr.size * (1 if z_arr is None else z_arr.size)
+            if axes_1d and not scattered and n_space is not None and n_axes == n_space:
+                # 1-D monotone axis coordinates describe a Cartesian grid.
+                # Non-monotone axes raise from the helper; they are never sorted.
+                self.W = _as_spatial_weight_column(calculate_cell_volume_weights(x_arr, y_arr, z_arr))
+                logger.info("Using cell-volume spatial weights from the 1-D grid coordinates.")
+            else:
+                raise ValueError(
+                    "spatial_weight_type='cell_volume' needs 1-D Cartesian axis "
+                    f"coordinates whose sizes multiply to q.shape[1]={n_space}; got "
+                    f"x.shape={x_arr.shape}, y.shape={y_arr.shape}"
+                    + (f", z.shape={z_arr.shape}" if z_arr is not None else "")
+                    + ". A scattered point set has no cells; pass explicit "
+                    "spatial_weights= for a real metric."
+                )
         else:
             self.W = _as_spatial_weight_column(
                 calculate_uniform_weights(self.data["x"], self.data["y"], self.data.get("z"), n_space=n_space)
@@ -1971,8 +2085,110 @@ class BaseAnalyzer:
             },
         )
 
+    # Analysis-sequence seam.
+    # Subclasses declare their perform entry and whether Welch blocks precede
+    # it; plotting policy lives in _plot_run. Both the library entry point and
+    # the CLI call run_analysis, so the two paths cannot drift again.
+    _perform_name: str
+    _needs_fft_blocks: bool = False
+
+    def run_analysis(
+        self,
+        *,
+        plots: bool = True,
+        run_id: str | None = None,
+        snapshot_limit: int | None = None,
+        **perform_kwargs: Any,
+    ) -> "BaseAnalyzer":
+        """Run the full analysis sequence: load, decompose, save, plot.
+
+        This is the single analysis sequence for both the library and the CLI.
+        ``plots`` defaults to True (decision 2026-08-14); the CLI passes its
+        config's generate_plots through explicitly. Method-specific keyword
+        arguments go straight to this class's ``perform_*`` method.
+        """
+        display = display_name_for(getattr(self, "analysis_type", ""))
+        logger.info("Starting %s analysis", display)
+        start_time = time.time()
+        self.load_and_preprocess()
+        if snapshot_limit is not None:
+            self._apply_snapshot_limit(snapshot_limit)
+        if self._needs_fft_blocks:
+            self.compute_fft_blocks()
+        getattr(self, self._perform_name)(**perform_kwargs)
+        self.save_results()
+        if plots:
+            self._plot_run(run_id=run_id)
+        self._on_run_complete()
+        logger.info(
+            "%s analysis and plotting completed successfully in %.2f seconds.",
+            display,
+            time.time() - start_time,
+        )
+        return self
+
+    def _apply_snapshot_limit(self, limit_value: int | str | None) -> None:
+        """Optionally truncate the loaded snapshot matrix for heavy runs.
+
+        Moved verbatim from the CLI layer now that the seam owns the sequence:
+        same floor formula for Welch blocks, same guards.
+        """
+        if limit_value is None:
+            return
+        if "q" not in self.data:
+            return
+        limit = int(limit_value)
+        q = self.data["q"]
+        if limit < 2 or limit >= q.shape[0]:
+            return
+        self.data["q"] = q[:limit, :]
+        self.data["Ns"] = limit
+        if hasattr(self, "novlap") and hasattr(self, "nfft") and self.nfft > 1:
+            # Same floor formula as BaseAnalyzer.load_and_preprocess (welch_nblocks).
+            # The old ceil here overwrote a correct floor value and requested more
+            # blocks than fit after truncation (e.g. Ns=400, nfft=128, ovl=0.5).
+            n_snapshots = int(self.data["Ns"])
+            nblocks = welch_nblocks(n_snapshots, self.nfft, self.novlap)
+            if nblocks < 1:
+                raise ValueError(
+                    f"Cannot form Welch blocks: Ns={n_snapshots}, nfft={self.nfft} "
+                    f"(novlap={self.novlap}) yield nblocks={nblocks}"
+                )
+            self.nblocks = nblocks
+
+    def _plot_run(self, run_id: str | None = None) -> None:
+        """Method-specific default figures after a completed run."""
+        raise NotImplementedError(f"{type(self).__name__} must implement _plot_run")
+
+    def _maybe_plot_volumetric_modes(
+        self,
+        *,
+        plot_n_modes: int,
+        slices_kwargs: dict[str, Any] | None = None,
+        iso_kwargs: dict[str, Any] | None = None,
+    ) -> bool:
+        """Use analyzer-specific 3D plot hooks when volumetric data is present."""
+        if int(self.data.get("Nz", 1)) <= 1:
+            return False
+        used = False
+        if hasattr(self, "plot_modes_3d_slices"):
+            kwargs = {"plot_n_modes": plot_n_modes}
+            kwargs.update(slices_kwargs or {})
+            self.plot_modes_3d_slices(**kwargs)
+            used = True
+        if hasattr(self, "plot_modes_3d_isometric"):
+            kwargs = {"plot_n_modes": plot_n_modes}
+            kwargs.update(iso_kwargs or {})
+            self.plot_modes_3d_isometric(**kwargs)
+            used = True
+        return used
+
     def run(self, compute_fft: bool = True) -> BaseAnalyzer:
-        """Run the full analysis pipeline."""
+        """Prepare only: load and (optionally) build Welch blocks.
+
+        This is not the analysis entry point — it performs no decomposition
+        and saves nothing. The full sequence lives in :meth:`run_analysis`.
+        """
         start_time = time.time()
 
         # Load data and calculate weights
@@ -1987,9 +2203,14 @@ class BaseAnalyzer:
 
         return self
 
+    def _on_run_complete(self) -> None:
+        """Hook at the very end of run_analysis. Default: no-op.
+
+        BSMD uses this to release disk-backed FFT resources.
+        """
+
     def _resync_mode_count(self) -> None:
         """Lower ``n_modes_save`` to the solver's actual mode count and slice.
-
         The SVD/eigh solver may return fewer modes than the caller's cap after
         its relative cutoff. Keep the counter honest so save/plot paths never
         believe a wider array than exists. Slicing arrays already at that
@@ -2020,7 +2241,8 @@ class BaseAnalyzer:
         """Return a dictionary of common metadata for saving results."""
         meta = {
             "analysis_type": getattr(self, "analysis_type", ""),
-            "data_file": self.file_path,
+            # h5py cannot store None; an in-memory dataset has no file to name.
+            "data_file": self.file_path if self.file_path is not None else "<in-memory data>",
             "nfft": self.nfft,
             "overlap": self.overlap,
             "nblocks": self.nblocks,

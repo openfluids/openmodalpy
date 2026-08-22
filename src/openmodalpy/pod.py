@@ -39,7 +39,6 @@ from openmodalpy.core.base import (
     format_mode_title,
     get_fig_aspect_ratio,
     plot_modes_3d,
-    print_summary,
     reshape_mode_to_volume,
     resolve_volume_layout,
     style_spatial_axes,
@@ -89,9 +88,11 @@ class PODAnalyzer(BaseAnalyzer):
                       but are initialized with dummy values.
     """
 
+    _METHOD_NAME = "pod"
+
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         results_dir: str = RESULTS_DIR_POD,
         figures_dir: str = FIGURES_DIR_POD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
@@ -99,12 +100,14 @@ class PODAnalyzer(BaseAnalyzer):
         n_modes_save: int = 10,
         use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize the PODAnalyzer.
 
         Args:
-            file_path (str): Path to the data file (e.g., .mat, .h5).
+            file_path (str | None): Path to the data file (e.g., .mat, .h5).
+                Optional when ``data`` carries the loaded dataset instead.
             results_dir (str, optional): Directory to save analysis results (HDF5 files).
                                          Defaults to `RESULTS_DIR_POD` from `configs.py`.
             figures_dir (str, optional): Directory to save generated plots.
@@ -120,6 +123,8 @@ class PODAnalyzer(BaseAnalyzer):
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed' and the vector is checked against the grid
                 in load_and_preprocess.
+            data (dict | None): Already-loaded dataset following the data
+                contract (see DOC.md). Given instead of ``file_path``.
         """
         # Call BaseAnalyzer's __init__.
         # nfft and overlap are not directly used by POD but are part of BaseAnalyzer.
@@ -133,6 +138,7 @@ class PODAnalyzer(BaseAnalyzer):
             spatial_weight_type=spatial_weight_type,
             use_parallel=use_parallel,
             spatial_weights=spatial_weights,
+            data=data,
         )
 
         self.n_modes_save = n_modes_save
@@ -543,10 +549,10 @@ class PODAnalyzer(BaseAnalyzer):
                 ax = axes[0, idx]
                 mode = self.modes[:, mode_idx]
                 # Reshape mode to 2D
-                mode_2d = mode.reshape((Nx, Ny))
+                mode_2d = mode.reshape((Ny, Nx))
                 # Get meshgrid for plotting
                 if x_coords.ndim == 1 and y_coords.ndim == 1:
-                    x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+                    x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
                 else:
                     x_mesh, y_mesh = x_coords, y_coords
                 # Optionally apply cylinder mask (always mask NaNs)
@@ -657,9 +663,9 @@ class PODAnalyzer(BaseAnalyzer):
                 # ------------------ Only plot top row: raw mode ------------------
                 ax = axes[0, idx]
                 mode_vec = self.modes[:, mode_idx]
-                mode_2d = mode_vec.reshape((Nx, Ny))
+                mode_2d = mode_vec.reshape((Ny, Nx))
                 if x_coords.ndim == 1 and y_coords.ndim == 1:
-                    x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+                    x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
                 else:
                     x_mesh, y_mesh = x_coords, y_coords
                 # Optionally apply cylinder mask
@@ -818,11 +824,11 @@ class PODAnalyzer(BaseAnalyzer):
 
             if is_2d_plot:
                 # Reshape mode to 2D grid
-                mode_2d = mode_vec.reshape((Nx, Ny))
+                mode_2d = mode_vec.reshape((Ny, Nx))
 
                 # Create meshgrid for plotting
                 if x_coords.ndim == 1 and y_coords.ndim == 1:
-                    x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+                    x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
                 else:
                     x_mesh, y_mesh = x_coords, y_coords
 
@@ -1220,7 +1226,7 @@ class PODAnalyzer(BaseAnalyzer):
         # Setup mesh coordinates for 2D plotting
         if is_2d_plot:
             if x_coords.ndim == 1 and y_coords.ndim == 1:
-                x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+                x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
             else:
                 x_mesh, y_mesh = x_coords, y_coords
 
@@ -1230,7 +1236,7 @@ class PODAnalyzer(BaseAnalyzer):
             # Plot original snapshot
             ax = axes[i, 0]
             if is_2d_plot:
-                field_2d = original_snapshot.reshape((Nx, Ny))
+                field_2d = original_snapshot.reshape((Ny, Nx))
                 vmin, vmax = np.nanmin(field_2d), np.nanmax(field_2d)
                 levels = np.linspace(vmin, vmax, 21)
                 cf = ax.contourf(x_mesh, y_mesh, field_2d, levels=levels, cmap=CMAP_DIV, extend="both")
@@ -1251,7 +1257,7 @@ class PODAnalyzer(BaseAnalyzer):
                 reconstructed = self.modes[:, :n_modes_recon] @ self.time_coefficients[snap_idx, :n_modes_recon]
 
                 if is_2d_plot:
-                    recon_2d = reconstructed.reshape((Nx, Ny))
+                    recon_2d = reconstructed.reshape((Ny, Nx))
                     cf = ax_recon.contourf(x_mesh, y_mesh, recon_2d, levels=levels, cmap=CMAP_DIV, extend="both")
                     ax_recon.set_xlabel(r"$x/D$")
                     ax_recon.set_ylabel(r"$y/D$")
@@ -1431,77 +1437,12 @@ class PODAnalyzer(BaseAnalyzer):
         logger.info("Saving figure %s", plot_filename)
         return is_pseudo_orthogonal
 
-    def _perform_decomposition(self) -> None:
-        """Run this analyzer's decomposition. Subclasses override (e.g. mPOD)."""
-        self.perform_pod()
+    _perform_name = "perform_pod"
 
-    def run_analysis(
-        self,
-        plot_n_modes_spatial: int = 4,
-        plot_n_coeffs_time: int = 5,
-        plot_snapshot_indices: list[int] | None = None,
-        modes_for_reconstruction: list[int] | None = None,
-        check_orthogonality: bool = False,
-    ) -> None:
-        """
-        Main entry point for running POD analysis and plotting.
-            check_orthogonality (bool, optional): If True, perform and print orthogonality checks.
-                                                Defaults to True.
-        """
-        logger.info(
-            "Starting %s analysis for %s",
-            display_name_for(self.analysis_type),
-            os.path.basename(self.file_path),
-        )
-        start_total_time = time.time()
-
-        # Load data and calculate weights via BaseAnalyzer's run method.
-        # compute_fft=False because POD is time-domain.
-        super().run(compute_fft=False)
-
-        # Subclasses override _perform_decomposition (mPOD → perform_mpod).
-        self._perform_decomposition()
-
-        # Identify correlated mode pairs only when plotting
-
-        # Save results
-        self.save_results()  # This already calls super().save_results()
-
-        # Plotting
+    def _plot_run(self, run_id: str | None = None) -> None:
+        """Default figures after run_analysis — the CLI pod-like set."""
         self.plot_eigenvalues()
-        if int(self.data.get("Nz", 1)) > 1:
-            for stale_name in (
-                f"{self.data_root}_{self.analysis_type}_modes_grid_99.5perc.png",
-                f"{self.data_root}_{self.analysis_type}_reconstruction_comparison.png",
-            ):
-                stale_path = os.path.join(self.figures_dir, stale_name)
-                if os.path.exists(stale_path):
-                    os.remove(stale_path)
-            self.plot_modes_3d_slices(plot_n_modes=plot_n_modes_spatial)
-            self.plot_modes_3d_isometric(plot_n_modes=plot_n_modes_spatial)
-        else:
-            # Detailed 4-panel mode plots (pairs with magnitude)
-            self.plot_modes_pair_detailed(plot_n_modes=plot_n_modes_spatial)
-            # Phase portraits for correlated pairs
-            self.plot_mode_pair_phase()
-            # New: comprehensive grid of modes up to cumulative energy threshold for easy DMD comparison
-            self.plot_modes_grid(energy_threshold=99.5)
-        self.plot_time_coefficients(n_coeffs_to_plot=plot_n_coeffs_time)
+        if not self._maybe_plot_volumetric_modes(plot_n_modes=min(2, self.n_modes_save)):
+            self.plot_modes(plot_n_modes=min(2, self.n_modes_save), modes_per_fig=2)
+        self.plot_time_coefficients(n_coeffs_to_plot=min(2, self.n_modes_save))
         self.plot_cumulative_energy()
-        self.plot_reconstruction_error()
-        if int(self.data.get("Nz", 1)) <= 1:
-            self.plot_reconstruction_comparison(
-                snapshot_indices_to_plot=plot_snapshot_indices, modes_for_reconstruction=modes_for_reconstruction
-            )
-
-        if check_orthogonality:
-            self.check_spatial_mode_orthogonality()
-            self.check_temporal_coefficient_orthogonality()
-
-        end_total_time = time.time()
-        logger.info(
-            "%s analysis and plotting completed successfully in %.2f seconds.",
-            display_name_for(self.analysis_type),
-            end_total_time - start_total_time,
-        )
-        print_summary(display_name_for(self.analysis_type), self.results_dir, self.figures_dir)

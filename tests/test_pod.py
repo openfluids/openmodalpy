@@ -282,10 +282,14 @@ def test_run_analysis_uses_3d_slice_plots_for_volumetric_data(monkeypatch, tmp_p
         lambda self: (_ for _ in ()).throw(AssertionError("2D pair-phase plotting should not be used for 3D data")),
     )
 
-    analyzer.run_analysis(plot_n_modes_spatial=2, plot_n_coeffs_time=1)
+    # The unified run_analysis routes volumetric data to the 3-D hooks via
+    # _maybe_plot_volumetric_modes; the cap is min(2, n_modes_save).
+    analyzer.run_analysis()
 
-    assert slice_calls == [2]
-    assert iso_calls == [2]
+    # Cap is min(2, n_modes_save) AFTER the solver's honest resync: this
+    # 4-snapshot fixture supports a single mode, so the cap is 1.
+    assert slice_calls == [min(2, analyzer.n_modes_save)]
+    assert iso_calls == slice_calls
 
 
 def test_subset_volume_focus_3d_respects_volume_xlim():
@@ -346,13 +350,14 @@ def test_get_robust_clim_ignores_infinities_as_well_as_nan():
         assert vmin == -vmax, method
 
 
-def _make_pod_analyzer(data, tmp_path, n_modes_save=3):
+def _make_pod_analyzer(data, tmp_path, n_modes_save=3, spatial_weights=None):
     return PODAnalyzer(
         file_path="pod_check",
         results_dir=tmp_path,
         figures_dir=tmp_path,
         data_loader=lambda _: data,
-        spatial_weight_type="uniform",
+        spatial_weight_type="uniform" if spatial_weights is None else "prescribed",
+        spatial_weights=spatial_weights,
         n_modes_save=n_modes_save,
         use_parallel=False,
     )
@@ -402,8 +407,12 @@ def test_pod_temporal_and_spatial_kernel_branches_agree(small_pod_field, tmp_pat
     ("Using temporal kernel:" / "Using spatial kernel:"), not by re-deriving
     the Ns < Nspace predicate in the test.
 
-    Field is analytically rank-2, so n_modes_save=2 keeps both branches on the
-    energetic subspace (higher modes are pure numerical noise).
+    Both runs share a prescribed ones metric: kernel agreement is the property
+    under test, and the derived cell-volume metric would otherwise differ
+    between the variants (the padded grid makes former boundary columns
+    interior, doubling their cell weight), which is a metric difference, not a
+    kernel difference. Metric provenance has its own test
+    (test_pod_uniform_metric_moves_eigenvalues).
     """
     n_modes = 2
     data_spatial = {
@@ -419,7 +428,12 @@ def test_pod_temporal_and_spatial_kernel_branches_agree(small_pod_field, tmp_pat
     Nspace_s = data_spatial["Nx"]
     assert Ns_s >= Nspace_s  # fixture setup for the spatial case
 
-    analyzer_spatial = _make_pod_analyzer(data_spatial, tmp_path / "spatial", n_modes_save=n_modes)
+    analyzer_spatial = _make_pod_analyzer(
+        data_spatial,
+        tmp_path / "spatial",
+        n_modes_save=n_modes,
+        spatial_weights=np.ones(Nspace_s),
+    )
     analyzer_spatial.load_and_preprocess()
     with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
         caplog.clear()
@@ -428,7 +442,7 @@ def test_pod_temporal_and_spatial_kernel_branches_agree(small_pod_field, tmp_pat
     assert any("Using spatial kernel:" in m for m in spatial_msgs)
     assert not any("Using temporal kernel:" in m for m in spatial_msgs)
 
-    # Temporal-kernel case: same active q, zero-padded in space until Ns < Nspace
+    # Temporal-kernel case: same active q, zero-padded in space until Ns < Nspace.
     n_pad = Ns_s - Nspace_s + 1  # guarantees Ns < Nspace_padded
     q_temporal = np.hstack([data_spatial["q"], np.zeros((Ns_s, n_pad))])
     Nspace_t = q_temporal.shape[1]
@@ -443,7 +457,12 @@ def test_pod_temporal_and_spatial_kernel_branches_agree(small_pod_field, tmp_pat
     }
     assert data_temporal["Ns"] < data_temporal["Nx"]
 
-    analyzer_temporal = _make_pod_analyzer(data_temporal, tmp_path / "temporal", n_modes_save=n_modes)
+    analyzer_temporal = _make_pod_analyzer(
+        data_temporal,
+        tmp_path / "temporal",
+        n_modes_save=n_modes,
+        spatial_weights=np.ones(Nspace_t),
+    )
     analyzer_temporal.load_and_preprocess()
     with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
         caplog.clear()

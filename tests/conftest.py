@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -128,3 +129,45 @@ def _capture_line_ydata():
 def capture_line_ydata():
     """Fixture exposing the shared line y-data capture context manager."""
     return _capture_line_ydata
+
+
+# --- Evidence taxonomy enforcement ---
+# A test that replays the library's own formula in the library's own order is a
+# refactoring guard, not physics evidence. Every such test must be listed here
+# AND carry @pytest.mark.characterization; the hook below fails collection when
+# either side drifts (unlabelled twin, or marker used outside the registry).
+# Oracle tests carry @pytest.mark.oracle instead; counts:
+#   uv run pytest -q -m characterization --collect-only | tail -1
+#   uv run pytest -q -m oracle --collect-only | tail -1
+CHARACTERISATION_REGISTRY: dict[str, set[str]] = {
+    "test_psd_pod_numerics.py": {
+        "test_psd_pod_positive_nonuniform_metric",
+        "test_psd_pod_isolated_zero_weight_station",
+    },
+    "test_bsmd_core.py": {"test_static_bsmd_core_small"},
+    "test_spod_function.py": {"test_spod_modes_deterministic_and_canonical"},
+    "test_dmd.py": {
+        "test_dmd_uses_raw_shifted_snapshots_without_weighting",
+        "test_default_args_match_original",
+    },
+    "test_welch_analytical.py": {"test_param_surface_matches_blockwise_definition"},
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    problems: list[str] = []
+    for item in items:
+        module_name = Path(item.fspath).name
+        # Parametrized items carry bracketed ids; originalname is the bare
+        # function name the registry keys on.
+        bare_name = getattr(item, "originalname", None) or item.name
+        marked = item.get_closest_marker("characterization") is not None
+        expected = bare_name in CHARACTERISATION_REGISTRY.get(module_name, set())
+        if expected and not marked:
+            problems.append(f"{item.nodeid}: replays the library formula; add @pytest.mark.characterization")
+        if marked and not expected:
+            problems.append(
+                f"{item.nodeid}: marked characterization but absent from conftest CHARACTERISATION_REGISTRY"
+            )
+    if problems:
+        raise pytest.UsageError("characterization label registry out of sync:\n  " + "\n  ".join(problems))

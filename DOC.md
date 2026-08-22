@@ -16,7 +16,8 @@ src/openmodalpy/
 │   │                    #   spod_function, weight calculation, plot helpers
 │   ├── decomposition.py # lift / metric / weighted_second_order seam
 │   │                    #   (POD, mPOD, ST-POD, PSD-POD share this)
-│   ├── io.py            # MATDataLoader, DNamiDataLoader, _slice_block_in_time
+│   ├── io.py            # MATDataLoader, DNamiDataLoader, GenericDataLoader,
+│   │                    #   _slice_block_in_time
 │   ├── config.py        # FFT_BACKEND, FIG_DPI, directory defaults
 │   ├── threads.py       # process-wide BLAS thread policy (default 1)
 │   └── parallel.py      # thread-pool FFT + SPOD acceleration
@@ -107,7 +108,7 @@ named lifts (`IdentityLift`, `DelayEmbeddingLift`, `BandFilteredLift`), a
 PSD-POD all call that solver; `lift_kind` metadata comes from `lift.kind`.
 
 **Spatial weights.** Every analyzer accepts `spatial_weight_type` in
-`{"uniform", "polar", "prescribed"}` (anything else — including the former
+`{"uniform", "polar", "prescribed", "cell_volume"}` (anything else — including the former
 `"auto"` — raises at construction). Omitting the argument (`None`) resolves to
 `"uniform"`. Pass an array as `spatial_weights=` to prescribe a metric: the
 type becomes `"prescribed"`, and the vector is checked against the snapshot
@@ -122,8 +123,8 @@ is a library argument.
 grid spacing. Reported "energy" is therefore a **sum over mesh points**, not a
 domain integral, and is **mesh-resolution dependent**: refining the grid changes
 the numerical value even when the continuum field is unchanged. Comparing
-energies across resolutions requires care (or explicit cell-volume weights via
-`spatial_weights=`).
+energies across resolutions requires care (or `spatial_weight_type="cell_volume"`
+on a Cartesian grid, described under Spatial weights below).
 
 ---
 
@@ -133,7 +134,7 @@ Every analyzer expects a Python dict with these keys:
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `q` | `ndarray (Ns, Nspace)` | yes | snapshot matrix (time × flattened spatial) |
+| `q` | `ndarray (Ns, Nspace)` | yes | snapshot matrix (time × flattened spatial; C-order: `index = iy*Nx + ix`, plus `iz*Ny*Nx` per z-slab) |
 | `x` | `ndarray` | yes | x-coordinates (1D or 2D mesh) |
 | `y` | `ndarray` | yes | y-coordinates (1D or 2D mesh) |
 | `z` | `ndarray` or `None` | no | z-coordinates for 3D data |
@@ -148,8 +149,47 @@ Every analyzer expects a Python dict with these keys:
 ### Supported input formats
 
 - **MATLAB `.mat`** — auto-detected via `MATDataLoader`
-- **NumPy `.npz`** — consolidated or split layouts via `DNamiDataLoader`
+- **NumPy `.npz`** — plain contract layout via `GenericDataLoader`, or dNami-family
+  consolidated/split layouts via `DNamiDataLoader` (auto-detected by key signature;
+  an explicit `schema=` forces the dNami loader)
+- **HDF5 `.h5` / `.hdf5`** — plain contract layout via `GenericDataLoader`
 - **Custom loader** — any callable `(file_path: str) -> dict`
+
+The generic reader takes named datasets: `q` (as `(Ns, Nspace)` or `(Ns, Ny, Nx[, Nz])`,
+flattened C-order), `x`/`y` (required, passed through unchanged), optional `z`/`t`/`dt`,
+and optional integer `Nx`/`Ny`/`Nz`/`Ns` (derived from the array shapes when absent).
+When `t` is supplied it must sample uniformly (checked with `fftkit.describe_sampling`;
+relative jitter below 1e-12) and `dt` becomes the verified median step — a non-uniform
+`t` is refused with the observed spread unless the caller passes `resample_time=True`,
+which forwards the record through `fftkit.resample_uniform`.
+
+### Load once, loop over methods
+
+Every analyzer also accepts an already-loaded dataset directly through `data=` —
+no file path and no reload from disk per method. Exactly one of `file_path` and
+`data` is required; passing both or neither raises at construction. `data` must
+be a non-empty dict following the contract table above and is stored by
+reference, so one load can feed every analyzer. With `data=`, output files are
+named after the analyzer instead of the input path (`pod_64snapshots_pod.hdf5`)
+and the directories keep their usual defaults (`./results`, `./figures`). The
+spatial weights are recomputed by each analyzer — negligible on typical grids,
+but part of the per-method cost.
+
+```python
+def my_loader(path):
+    return {"q": q, "x": x, "y": y, "dt": 0.01,
+            "Nx": 100, "Ny": 50, "Ns": q.shape[0]}
+
+d = my_loader("run_001")          # one load
+
+for cls, perform in ((PODAnalyzer, "perform_pod"),
+                     (SPODAnalyzer, "perform_spod"),
+                     (DMDAnalyzer, "perform_dmd")):
+    analyzer = cls(data=d)        # no file_path, no disk reload
+    analyzer.load_and_preprocess()
+    getattr(analyzer, perform)()
+```
+
 
 ### Spatial weights
 
@@ -158,11 +198,25 @@ Every analyzer expects a Python dict with these keys:
 | `"uniform"` | Cartesian grids, single-component data (also the default when omitted) |
 | `"polar"` | Cylindrical grids (jet nozzle coordinates) |
 | `"prescribed"` | Caller-supplied metric via `spatial_weights=` |
+| `"cell_volume"` | Opt-in Cartesian-grid metric: trapezoid cell widths from 1-D axis coordinates |
 
-`"uniform"` currently returns ones (`calculate_uniform_weights`); it does **not**
-apply Δx·Δy cell volumes. Polar weights do use radial spacing. Until cell-volume
-weights exist for Cartesian grids, treat POD/SPOD eigenvalues under uniform W as
-mesh-dependent sums, not resolution-invariant energies.
+`"uniform"` is the all-ones vector (v0.5.0 behaviour): reported energies are
+mesh-point sums — see the limitation above. To integrate over the domain, opt
+in with `"cell_volume"` (`calculate_cell_volume_weights`): when the data dict
+carries 1-D strictly increasing `x`, `y` (and optional `z`) whose sizes
+multiply to `Nspace`, each axis contributes trapezoid cell widths (half the
+neighbouring spacing at boundary points) and POD/SPOD energies become
+resolution-invariant domain integrals, including on stretched grids. Without
+usable 1-D coordinates (absent, mesh-shaped arrays, or scattered points) it
+raises instead of falling back silently. Non-monotone 1-D coordinates are
+refused with an error, never sorted silently.
+
+Cell volumes are opt-in because trapezoid widths suit a wall-bounded stretched
+axis but not a periodic one. On a periodic axis equal weights are exact
+(Euler–Maclaurin: the boundary terms cancel), while trapezoid weights lose one
+cell of measure; a channel DNS (periodic x and z, stretched y) would get its
+streamwise and spanwise energies wrong by one cell. The library cannot tell
+the two cases apart from coordinates alone, so the user chooses.
 
 ---
 
@@ -294,6 +348,7 @@ psd.run_analysis()
 - Solves one global eigenproblem instead of per-frequency
 - Captures broadband coherent structures
 - Triggered via `method="psd-pod"` in config or by constructing `PSDPODAnalyzer` directly
+- `psd.plot_eigenvalues()`, `plot_cumulative_energy()`, `plot_modes()`, `plot_modes_3d()` save figures to the figures directory; `psd.load_results()` reloads a saved result file (0.4.0-layout files load with a `DeprecationWarning`)
 
 ### 4. SPOD — Spectral POD
 
@@ -534,7 +589,7 @@ implemented and raises `NotImplementedError`.
       "kind": "file",              // "file", "generator", or "dnami"
       "path": "../data/file.mat"   // relative to this config file
     },
-    "spatial_weight_type": "uniform",  // "uniform" or "polar" (library also accepts "prescribed" + spatial_weights=)
+    "spatial_weight_type": "uniform",  // "uniform", "polar", or "cell_volume" (library also accepts "prescribed" + spatial_weights=)
     "n_modes_save": 10,
     "rank": 10,                    // DMD only (required): positive int | "svht" | "energy"
     "energy_fraction": 0.999,      // DMD only: cumulative s² target when rank is "energy" (analyzer default 0.999)

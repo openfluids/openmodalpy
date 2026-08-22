@@ -219,9 +219,11 @@ class DMDAnalyzer(BaseAnalyzer):
     ``|lambda|``.
     """
 
+    _METHOD_NAME = "dmd"
+
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         results_dir: str = RESULTS_DIR_DMD,
         figures_dir: str = FIGURES_DIR_DMD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
@@ -231,6 +233,7 @@ class DMDAnalyzer(BaseAnalyzer):
         energy_fraction: float = 0.999,
         use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             file_path=file_path,
@@ -242,6 +245,7 @@ class DMDAnalyzer(BaseAnalyzer):
             spatial_weight_type=spatial_weight_type,
             use_parallel=use_parallel,
             spatial_weights=spatial_weights,
+            data=data,
         )
         self.n_modes_save = n_modes_save
         if rank is None:
@@ -522,12 +526,19 @@ class DMDAnalyzer(BaseAnalyzer):
         write_results(path, datasets, attrs=self._get_metadata())
         logger.info("DMD results saved to %s", path)
 
-    def run_analysis(self) -> None:
-        """One-call entry: load, compute DMD, save. No default plots."""
-        logger.info("Starting DMD analysis for %s", os.path.basename(self.file_path))
-        self.load_and_preprocess()
-        self.perform_dmd()
-        self.save_results()
+    _perform_name = "perform_dmd"
+
+    def _plot_run(self, run_id: str | None = None) -> None:
+        """Default figures after run_analysis — the CLI dmd set.
+
+        BEHAVIOUR CHANGE (v0.6.0): run_analysis plots by default now; the
+        docstring used to promise no default plots.
+        """
+        self.plot_eigenvalues()
+        if not self._maybe_plot_volumetric_modes(plot_n_modes=min(2, self.n_modes_save)):
+            self.plot_modes(plot_n_modes=min(2, self.n_modes_save), modes_per_fig=2)
+        self.plot_time_coefficients(n_coeffs_to_plot=min(2, self.n_modes_save))
+        self.plot_cumulative_energy()
 
     def load_results(self, filename: str | None = None) -> None:
         """Load DMD results from an HDF5 file."""
@@ -784,7 +795,7 @@ class DMDAnalyzer(BaseAnalyzer):
         cmaps = [CMAP_DIV, CMAP_DIV, CMAP_SEQ, "twilight"]
 
         if x_coords.ndim == 1 and y_coords.ndim == 1:
-            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+            x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
         else:
             x_mesh, y_mesh = x_coords, y_coords
         # Optionally create cylinder mask
@@ -809,7 +820,7 @@ class DMDAnalyzer(BaseAnalyzer):
             comps = [vec.real, vec.imag, np.abs(vec), phase_arr]
             for r, comp in enumerate(comps):
                 ax = axes[r, m]
-                comp2d = comp.reshape((nx, ny))
+                comp2d = comp.reshape((ny, nx))
                 if cylinder_mask is not None:
                     comp_plot = np.ma.array(comp2d, mask=cylinder_mask)
                 else:
@@ -959,12 +970,12 @@ class DMDAnalyzer(BaseAnalyzer):
                 mode = self.modes[:, i].real
                 if is_2d:
                     if lifted_delays > 1:
-                        mode_2d = mode.reshape((lifted_delays, Nx, Ny))[0]
+                        mode_2d = mode.reshape((lifted_delays, Ny, Nx))[0]
                     else:
-                        mode_2d = mode.reshape((Nx, Ny))
+                        mode_2d = mode.reshape((Ny, Nx))
                     # Get meshgrid for plotting
                     if x_coords.ndim == 1 and y_coords.ndim == 1:
-                        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords, indexing="ij")
+                        x_mesh, y_mesh = np.meshgrid(x_coords, y_coords)  # contract layout: arrays are (Ny, Nx)
                     else:
                         x_mesh, y_mesh = x_coords, y_coords
                     # Optionally apply cylinder mask (always mask NaNs)

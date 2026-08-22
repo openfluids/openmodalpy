@@ -8,6 +8,7 @@ from pathlib import Path
 import h5py
 import matplotlib
 import numpy as np
+import pytest
 
 matplotlib.use("Agg")
 
@@ -19,6 +20,7 @@ def _write_jsonc(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2))
 
 
+@pytest.mark.filterwarnings("ignore:This figure includes Axes that are not compatible with tight_layout:UserWarning")
 def test_psdpod_analyzer_runs_from_library_api(tmp_path: Path) -> None:
     """Construct and run PSDPODAnalyzer without going through the CLI."""
     data = generate_example_dataset("double_gyre", {"Nx": 8, "Ny": 4, "Nt": 24})
@@ -148,3 +150,41 @@ def test_psdpod_save_results_records_prescribed_metric(tmp_path: Path) -> None:
     # on the object at save time. Without this, a save that faithfully records a
     # metric the run had already replaced would still pass.
     np.testing.assert_array_equal(stored, weights.reshape(-1, 1))
+
+
+def test_psdpod_load_results_reads_legacy_040_layout(tmp_path: Path) -> None:
+    """A 0.4.0-layout file (capitalised dataset names) loads through load_results."""
+    legacy = tmp_path / "legacy_psd_pod.hdf5"
+    n_space, n_modes, n_realizations = 8 * 4, 3, 10
+    rng = np.random.default_rng(7)
+    with h5py.File(legacy, "w") as handle:
+        handle.create_dataset("Modes", data=rng.standard_normal((n_space, n_modes)) + 1j)
+        handle.create_dataset("Eigenvalues", data=np.abs(rng.standard_normal(n_modes)))
+        handle.create_dataset("TimeCoefficients", data=rng.standard_normal((n_realizations, n_modes)))
+        handle.create_dataset("Freq", data=np.linspace(0.0, 1.0, 5))
+        handle.create_dataset("St", data=np.linspace(0.0, 2.0, 5))
+        handle.create_dataset("Weights", data=np.ones(n_space))
+        handle.attrs["analysis_type"] = "psd_pod"
+
+    analyzer = PSDPODAnalyzer(
+        file_path="double_gyre",
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+        data_loader=lambda _: generate_example_dataset("double_gyre", {"Nx": 8, "Ny": 4, "Nt": 24}),
+        spatial_weight_type="uniform",
+        nfft=8,
+        overlap=0.5,
+        n_modes_save=n_modes,
+    )
+    analyzer.load_and_preprocess()
+
+    # Absolute filename bypasses the results_dir join, as in the SPOD loader tests.
+    with pytest.warns(DeprecationWarning, match="legacy name"):
+        analyzer.load_results(str(legacy))
+
+    assert analyzer.modes.shape == (n_space, n_modes)
+    assert analyzer.eigenvalues.shape == (n_modes,)
+    assert analyzer.time_coefficients.shape == (n_realizations, n_modes)
+    assert analyzer.freq.shape == (5,)
+    assert analyzer.St.shape == (5,)
+    np.testing.assert_array_equal(analyzer.W, np.ones((n_space, 1)))

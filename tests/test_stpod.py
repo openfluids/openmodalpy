@@ -60,8 +60,11 @@ class TestSTPODBasic:
         assert np.all(analyzer.eigenvalues >= -1e-14)
         assert np.all(np.diff(analyzer.eigenvalues) <= 1e-12)
 
-        # Weighted orthonormality under the uniform lifted metric (W = 1).
-        gram = analyzer.modes.T @ analyzer.modes
+        # Weighted orthonormality under the lifted metric the load built
+        # (analyzer.W, whatever load_and_preprocess constructed), extended
+        # over the embedding delays.
+        w_lift = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
+        gram = analyzer.modes.T @ (w_lift[:, None] * analyzer.modes)
         np.testing.assert_allclose(gram, np.eye(n_modes), rtol=0.0, atol=1e-10)
 
         # Attribute consistency: stored fraction equals sum(lambda) / total_energy.
@@ -242,14 +245,20 @@ class TestSTPODBasic:
 
         # Independent block-Hankel: column j stacks delays [Q[j], ..., Q[j+d-1]].
         # Shape (d * Nspace, m); library lift is the transpose layout, same SVD.
+        # Weighted by the metric the load built (analyzer.W), tiled over the
+        # embedding delays — the same sqrt(W) the solver applies.
         data_centered = data["q"] - np.mean(data["q"], axis=0)
         m_cols = Ns - embedding_dim + 1
         hankel = np.empty((embedding_dim * Nspace, m_cols), dtype=data_centered.dtype)
         for lag in range(embedding_dim):
             hankel[lag * Nspace : (lag + 1) * Nspace, :] = data_centered[lag : lag + m_cols, :].T
-        u, sigma, _vt = np.linalg.svd(hankel, full_matrices=False)
+        w_lift = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
+        u, sigma, _vt = np.linalg.svd(np.sqrt(w_lift)[:, None] * hankel, full_matrices=False)
         ref_eigs = (sigma[:n_modes] ** 2) / m_cols
         ref_modes, _ = canonicalize_reference(u[:, :n_modes])
+        # The solver recovers physical modes by dividing out sqrt(w); mirror
+        # that here so the comparison is mode-for-mode.
+        ref_modes = ref_modes / np.sqrt(w_lift)[:, None]
 
         np.testing.assert_allclose(
             analyzer.eigenvalues,
@@ -508,7 +517,7 @@ class TestSTPODTotalEnergy:
 
         data_centered = data["q"] - np.mean(data["q"], axis=0)
         lifted = decomposition.DelayEmbeddingLift(embedding_dim).apply(data_centered)
-        weights = np.tile(np.ones(Nspace), embedding_dim)
+        weights = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
         sqrt_w = np.sqrt(weights)
         data_weighted = lifted * sqrt_w
         m = lifted.shape[0]
@@ -601,7 +610,7 @@ class TestSTPODTotalEnergy:
         # Independent pre-truncation total: ‖data_weighted‖_F² / m.
         data_centered = data["q"] - np.mean(data["q"], axis=0)
         lifted = decomposition.DelayEmbeddingLift(embedding_dim).apply(data_centered)
-        weights = np.tile(np.ones(Nspace), embedding_dim)
+        weights = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
         data_weighted = lifted * np.sqrt(weights)
         m = lifted.shape[0]
         independent_total = float(np.linalg.norm(data_weighted, "fro") ** 2 / m)

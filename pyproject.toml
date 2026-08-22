@@ -154,3 +154,23 @@ python_files = ["test_*.py"]
 # Any uncaught warning is a failure. Intentional library notices are asserted
 # with pytest.warns in the tests that trigger them (never blanket-ignored).
 filterwarnings = ["error"]
+# Evidence taxonomy:
+# every test that recomputes the implementation's own formula in the
+# implementation's own order MUST carry `characterization`; tests that derive
+# expectations from independent mathematics or manufactured closed forms MAY
+# carry `oracle`. Counts are machine-readable:
+#   uv run pytest -q -m characterization --collect-only | tail -1
+#   uv run pytest -q -m oracle --collect-only | tail -1
+markers = [
+    "characterization: refactoring guard that replays the library's own formula; catches typos and drift, not specification misunderstandings",
+    "oracle: expectation built from independent mathematics (closed form, conservation law, or cross-implementation comparison)",
+]
+
+[tool.coverage.report]
+# Ratchet floor, enforced identically by local runs and CI (the workflow
+# carries no inline --cov-fail-under). Measured 2026-08-22 on Linux, CPython
+# 3.13: 74% total (6278 statements, 1605 missed); floor sits 2 points under
+# the measurement to absorb interpreter drift (CI measures on 3.14) and
+# dependency-coverage noise while still catching any real regression.
+# Ratchet policy lives in CONTRIBUTING.md ("Coverage floor ratchet").
+fail_under = 72

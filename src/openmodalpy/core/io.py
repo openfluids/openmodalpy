@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, Optional, cast
 
 import h5py
 import numpy as np
+from fftkit import SamplingReport, describe_sampling, resample_uniform
 
 logger = logging.getLogger(__name__)
 
@@ -1070,11 +1071,237 @@ class DNamiDataLoader(DataLoader):
         return data
 
 
+def _read_generic_npz(file_path: str) -> dict[str, np.ndarray]:
+    """Read every array of a plain NPZ file into memory."""
+    with np.load(file_path, allow_pickle=False) as npz:
+        return {key: np.asarray(npz[key]) for key in npz.files}
+
+
+def _read_generic_h5(file_path: str) -> dict[str, np.ndarray]:
+    """Read every root-level dataset of an HDF5 file into memory."""
+    datasets: dict[str, np.ndarray] = {}
+    with h5py.File(file_path, "r") as handle:
+        for name in handle:
+            obj = handle[name]
+            if isinstance(obj, h5py.Dataset):
+                datasets[name] = np.asarray(obj[()])
+    return datasets
+
+
+def _looks_like_generic_npz(file_path: str) -> bool:
+    """Decide whether a single .npz follows the plain contract instead of dNami.
+
+    A plain contract file carries ``q`` and never carries the dNami signature
+    (the ``times`` vector or one of the snapshot field candidates ``u``/``v``/
+    ``p`` from ``DEFAULT_DNAMI_SCHEMA``). Key inspection is lazy — no array
+    payloads are read.
+    """
+    with np.load(file_path, allow_pickle=False) as npz:
+        keys = set(npz.files)
+    if "q" not in keys:
+        return False
+    if "times" in keys:
+        return False
+    return not any(key in keys for key in DEFAULT_DNAMI_SCHEMA["snapshot"]["field_candidates"])
+
+
+def _assemble_contract_data(
+    datasets: dict[str, np.ndarray],
+    *,
+    file_path: str,
+    preview_ns: int | None,
+    resample_time: bool,
+) -> Dict[str, Any]:
+    """Build the data contract dict from named generic-reader datasets."""
+    missing = [key for key in ("q", "x", "y") if key not in datasets]
+    if missing:
+        raise KeyError(f"Missing required dataset(s) {missing} in {file_path}. Available keys: {sorted(datasets)}")
+
+    q = np.asarray(datasets["q"])
+    x = np.asarray(datasets["x"])
+    y = np.asarray(datasets["y"])
+    z = np.asarray(datasets["z"]) if "z" in datasets else None
+    t = np.asarray(datasets["t"]).reshape(-1) if "t" in datasets else None
+
+    if q.ndim < 2:
+        raise ValueError(f"'q' in {file_path} must be (Ns, Nspace) or (Ns, Ny, Nx[, Nz]); got shape {q.shape}.")
+
+    ns = int(q.shape[0])
+    nspace = int(np.prod(q.shape[1:]))
+
+    if q.ndim == 2:
+        nx = len(x)
+        ny = len(y)
+        nz = len(z) if z is not None else 1
+        if nx * ny * nz != nspace and all(name in datasets for name in ("Nx", "Ny")):
+            stated_nx = int(np.asarray(datasets["Nx"]).reshape(-1)[0])
+            stated_ny = int(np.asarray(datasets["Ny"]).reshape(-1)[0])
+            stated_nz = int(np.asarray(datasets["Nz"]).reshape(-1)[0]) if "Nz" in datasets else 1
+            if stated_nx * stated_ny * stated_nz == nspace:
+                nx, ny, nz = stated_nx, stated_ny, stated_nz
+    else:
+        ny, nx = int(q.shape[1]), int(q.shape[2])
+        nz = int(q.shape[3]) if q.ndim == 4 else 1
+
+    if nx * ny * nz != nspace:
+        raise ValueError(
+            f"Grid counts x={nx}, y={ny}, z={nz} give {nx * ny * nz} points but 'q' in "
+            f"{file_path} holds {nspace} per snapshot. Supply consistent coordinates or "
+            f"Ny/Nx[/Nz] counts."
+        )
+
+    for name, derived in (("Nx", nx), ("Ny", ny), ("Nz", nz), ("Ns", ns)):
+        if name in datasets:
+            stated = int(np.asarray(datasets[name]).reshape(-1)[0])
+            if stated != derived:
+                raise ValueError(f"{name}={stated} in {file_path} disagrees with derived value {derived}.")
+
+    if preview_ns is not None:
+        q = q[:preview_ns]
+        if t is not None:
+            t = t[:preview_ns]
+        ns = int(q.shape[0])
+
+    q_flat = np.ascontiguousarray(q).reshape(ns, nspace)
+    resampled_time = False
+    dt: float | None = None
+    if t is not None and t.size >= 2:
+        report: SamplingReport = describe_sampling(t)
+        if report.is_uniform:
+            dt = report.dt_median
+        elif resample_time:
+            columns = []
+            grid = None
+            for j in range(nspace):
+                result = resample_uniform(t, q_flat[:, j])
+                if grid is None:
+                    grid = result.t
+                columns.append(result.x)
+            q_flat = np.stack(columns, axis=1)
+            t = np.asarray(grid)
+            ns = int(q_flat.shape[0])
+            dt = float(np.median(np.diff(t)))
+            resampled_time = True
+            logger.warning(
+                "Non-uniform time base in %s (dt spans [%.6g, %.6g]) resampled onto %d uniform "
+                "samples at fs=%.6g Hz by explicit request.",
+                file_path,
+                report.dt_min,
+                report.dt_max,
+                ns,
+                1.0 / dt,
+            )
+        else:
+            raise ValueError(
+                f"Time base in {file_path} is not uniform: dt spans [{report.dt_min:.6g}, "
+                f"{report.dt_max:.6g}] (relative jitter {report.jitter:.3e}). Pass "
+                f"resample_time=True to resample onto a uniform grid via fftkit.resample_uniform."
+            )
+
+    if dt is None and t is None:
+        if "dt" in datasets:
+            dt = float(np.asarray(datasets["dt"]).reshape(-1)[0])
+        else:
+            # Leave absent so BaseAnalyzer._require_dt() raises rather than
+            # silently rescaling every growth rate / band edge.
+            logger.warning("No 't' or 'dt' found in %r; dt left unset", file_path)
+
+    return {
+        "q": q_flat,
+        "x": x,
+        "y": y,
+        "z": z,
+        "t": t,
+        "dt": dt,
+        "Nx": nx,
+        "Ny": ny,
+        "Nz": nz,
+        "Ns": ns,
+        "metadata": {
+            "format": "generic",
+            "original_shape": tuple(int(size) for size in q.shape),
+            "file_path": file_path,
+            "var_name": "q",
+            "available_fields": sorted(datasets),
+            "resampled_time": resampled_time,
+        },
+    }
+
+
+class GenericDataLoader(DataLoader):
+    """Loader for plain Cartesian NPZ/HDF5 files holding contract-named datasets.
+
+    Datasets are addressed by name: ``q``, ``x`` and ``y`` are required;
+    ``z``, ``t`` and ``dt`` are optional; integer ``Nx``/``Ny``/``Nz``/``Ns``
+    may be supplied and are otherwise derived from the array shapes. ``q`` may
+    be (Ns, Nspace) or (Ns, Ny, Nx[, Nz]) and is flattened C-order. Coordinate
+    vectors pass through unchanged. A supplied ``t`` must sample uniformly;
+    non-uniform records are refused unless ``resample_time=True`` forwards them
+    through ``fftkit.resample_uniform``.
+    """
+
+    extensions = (".h5", ".hdf5")
+
+    def supports_format(self, file_path: str) -> bool:
+        return str(file_path).lower().endswith(self.extensions)
+
+    def load(
+        self,
+        file_path: str,
+        *,
+        preview_ns: int | None = None,
+        field: str | None = None,
+        load_single: bool = False,
+        schema: dict[str, Any] | None = None,
+        resample_time: bool = False,
+        **kwargs: object,
+    ) -> Dict[str, Any]:
+        """Load a plain NPZ or HDF5 file into the standardized contract."""
+        del field, load_single
+        if schema is not None:
+            raise TypeError("GenericDataLoader takes no schema; it reads named contract datasets.")
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected generic loader options: {unexpected}.")
+
+        suffix = Path(file_path).suffix.lower()
+        if suffix == ".npz":
+            datasets = _read_generic_npz(str(file_path))
+        elif suffix in self.extensions:
+            datasets = _read_generic_h5(str(file_path))
+        else:
+            raise ValueError(f"GenericDataLoader cannot read '{suffix}' files: {file_path}")
+
+        return _assemble_contract_data(
+            datasets,
+            file_path=str(file_path),
+            preview_ns=preview_ns,
+            resample_time=resample_time,
+        )
+
+
 class DataInterfaceManager:
     """Select and run the appropriate loader."""
 
     def __init__(self) -> None:
-        self.loaders = [MATDataLoader(), DNamiDataLoader()]
+        self.loaders = [MATDataLoader(), DNamiDataLoader(), GenericDataLoader()]
+
+    def _select_file_loader(self, file_path: str, kwargs: dict[str, object]) -> DataLoader:
+        """Pick the loader for a single file, sniffing .npz layout when needed."""
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in (".h5", ".hdf5"):
+            return GenericDataLoader()
+        if ext == ".npz":
+            if "schema" in kwargs:
+                return DNamiDataLoader()
+            return GenericDataLoader() if _looks_like_generic_npz(file_path) else DNamiDataLoader()
+        for loader in self.loaders:
+            if loader.supports_format(file_path):
+                return loader
+        raise ValueError(
+            f"No loader found for file extension '{ext}'. "
+            f"Supported formats: ['.mat', '.npz', '.h5', '.hdf5', directory]"
+        )
 
     def load_data(self, file_path: str, loader_type: Optional[str] = None, **kwargs: object) -> Dict[str, Any]:
         """Load ``file_path`` with the matching loader."""
@@ -1082,11 +1309,12 @@ class DataInterfaceManager:
             raise FileNotFoundError(f"Data file not found: {file_path}")
 
         if loader_type:
-            loader_map: dict[str, type[MATDataLoader] | type[DNamiDataLoader]] = {
+            loader_map: dict[str, type[MATDataLoader] | type[DNamiDataLoader] | type[GenericDataLoader]] = {
                 "mat": MATDataLoader,
                 "dnami": DNamiDataLoader,
                 "dnami_npz": DNamiDataLoader,
                 "dnamiX_npz": DNamiDataLoader,
+                "generic": GenericDataLoader,
             }
             if loader_type not in loader_map:
                 raise ValueError(f"Unknown loader type: {loader_type}")
@@ -1094,13 +1322,13 @@ class DataInterfaceManager:
             load_fn = cast(Callable[..., Dict[str, Any]], loader_map[loader_type]().load)
             return load_fn(file_path, **kwargs)
 
-        for loader in self.loaders:
-            if loader.supports_format(file_path):
-                load_fn = cast(Callable[..., Dict[str, Any]], loader.load)
-                return load_fn(file_path, **kwargs)
-
-        ext = os.path.splitext(file_path)[1].lower()
-        raise ValueError(f"No loader found for file extension '{ext}'. Supported formats: ['.mat', '.npz', directory]")
+        if os.path.isdir(file_path):
+            loader = next(loader for loader in self.loaders if loader.supports_format(file_path))
+        else:
+            loader = self._select_file_loader(file_path, kwargs)
+        # cast: typed keyword-only options on load cannot accept **dict[str, object]
+        load_fn = cast(Callable[..., Dict[str, Any]], loader.load)
+        return load_fn(file_path, **kwargs)
 
     def get_weight_type(self, data: Dict[str, Any], file_path: str) -> str:
         """Return spatial weight type for ``file_path``."""
@@ -1108,10 +1336,11 @@ class DataInterfaceManager:
         return "uniform"
 
     def list_supported_formats(self) -> Dict[str, str]:
-        """Return supported format descriptions."""
         return {
             ".mat": "MATLAB data files",
-            ".npz": "dNami-family consolidated NPZ files",
+            ".npz": "NumPy NPZ files — plain contract layout (GenericDataLoader) or dNami-family layouts (auto-detected)",
+            ".h5": "Generic HDF5 files with named q/x/y[/z/t/dt] datasets",
+            ".hdf5": "Generic HDF5 files with named q/x/y[/z/t/dt] datasets",
             "directory": "dNami-family split NPZ dataset directories",
         }
 

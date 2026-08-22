@@ -24,9 +24,9 @@ def generate_double_gyre(
     y = np.linspace(0.0, 1.0, Ny)
     t = np.linspace(0.0, t_max, Nt)
     dt = float(t[1] - t[0])
-    X, Y = np.meshgrid(x, y, indexing="ij")
+    X, Y = np.meshgrid(x, y)  # contract layout: (Ny, Nx), index = iy*Nx + ix
 
-    u = np.zeros((Nt, Nx, Ny))
+    u = np.zeros((Nt, Ny, Nx))
     for i, ti in enumerate(t):
         a = epsilon * np.sin(omega * ti)
         b = 1.0 - 2.0 * epsilon * np.sin(omega * ti)
@@ -66,9 +66,9 @@ def generate_taylor_green(
     y = np.linspace(0.0, L, Ny, endpoint=False)
     t = np.linspace(0.0, t_max, Nt)
     dt = float(t[1] - t[0])
-    X, Y = np.meshgrid(x, y, indexing="ij")
+    X, Y = np.meshgrid(x, y)  # contract layout: (Ny, Nx), index = iy*Nx + ix
 
-    u = np.zeros((Nt, Nx, Ny))
+    u = np.zeros((Nt, Ny, Nx))
     decay = np.exp(-2.0 * nu * t)
     for i, d in enumerate(decay):
         u[i] = -U0 * np.cos(X) * np.sin(Y) * d
@@ -111,14 +111,14 @@ def generate_cylinder_wake(
     y = np.linspace(-2.5, 2.5, Ny)
     t = np.linspace(0.0, t_max, Nt)
     dt = float(t[1] - t[0])
-    X, Y = np.meshgrid(x, y, indexing="ij")
+    X, Y = np.meshgrid(x, y)  # contract layout: (Ny, Nx), index = iy*Nx + ix
 
     x_cyl = 1.0
     wake_width = D * (1.0 + 0.1 * np.sqrt(np.maximum(X - x_cyl, 0.0)))
     wake_decay = np.exp(-0.1 * np.maximum(X - x_cyl, 0.0))
     amp = 0.3 * U_inf * wake_decay
 
-    u = np.zeros((Nt, Nx, Ny))
+    u = np.zeros((Nt, Ny, Nx))
     rng = np.random.default_rng(seed=seed)
     for i, ti in enumerate(t):
         phase = omega * ti

@@ -154,6 +154,19 @@ def write_results(
         h5py compression filter, or ``None`` to disable.
     """
     path_str = str(path)
+    # A results file without decomposition output looks complete (it carries
+    # W, coordinates, metadata) but holds an empty mode array. Refuse before
+    # opening the file: mode="w" would truncate a previous good result.
+    # Carve-out: SPOD/BSMD persist FFTBlocks into the same file before the
+    # decomposition runs - such a save is a cache write, not a fake result.
+    for mode_name in ("modes", "modes1"):
+        value = datasets.get(mode_name)
+        if value is not None and np.asarray(value).size == 0 and "FFTBlocks" not in datasets:
+            raise ValueError(
+                f"refusing to write {path_str}: dataset '{mode_name}' is empty "
+                "- the decomposition has not run. Call the perform step before "
+                "save_results."
+            )
     merged_attrs = dict(attrs or {})
     # Provenance is attached here only so every write path inherits it.
     # Caller keys keep their names; prov_* is reserved for this block.

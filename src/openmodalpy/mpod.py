@@ -76,9 +76,11 @@ def _pooled_mode_order(eigenvalues: np.ndarray, band_ids: np.ndarray) -> np.ndar
 class MPODAnalyzer(PODAnalyzer):
     """Multiscale POD using non-overlapping temporal frequency bands."""
 
+    _METHOD_NAME = "mpod"
+
     def __init__(
         self,
-        file_path: str,
+        file_path: str | None = None,
         results_dir: str = RESULTS_DIR_POD,
         figures_dir: str = FIGURES_DIR_POD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
@@ -89,7 +91,16 @@ class MPODAnalyzer(PODAnalyzer):
         filter_kind: str = "rectangular",
         use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
+        """Initialize the MPODAnalyzer.
+
+        Args:
+            file_path (str | None): Path to the data file. Optional when
+                ``data`` carries the loaded dataset instead.
+            data (dict | None): Already-loaded dataset following the data
+                contract (see DOC.md). Given instead of ``file_path``.
+        """
         super().__init__(
             file_path=file_path,
             results_dir=results_dir,
@@ -99,6 +110,7 @@ class MPODAnalyzer(PODAnalyzer):
             n_modes_save=n_modes_save,
             use_parallel=use_parallel,
             spatial_weights=spatial_weights,
+            data=data,
         )
         self.band_edges = list(band_edges) if band_edges is not None else None
         self.band_scale = band_scale
@@ -253,8 +265,6 @@ class MPODAnalyzer(PODAnalyzer):
         logger.info("Computed %d %s modes.", self.modes.shape[1], name)
         logger.info("%s per-band mode counts: %s", name, [int(n) for n in self.band_mode_counts])
 
-    def _perform_decomposition(self) -> None:
-        """mPOD one-call path: do not inherit POD's perform_pod dispatch."""
-        self.perform_mpod()
+    _perform_name = "perform_mpod"
 
     # Reuse POD save/load/plot methods.

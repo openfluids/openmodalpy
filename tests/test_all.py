@@ -123,9 +123,13 @@ def test_pod(tmp_path):
     recon_error = np.linalg.norm(q - q_reconstructed) / np.linalg.norm(q)
     assert recon_error < TOL_LOOSE, f"Reconstruction (3 modes): error={recon_error:.2e}"
 
-    # Test 5: Energy conservation - sum of eigenvalues = Frobenius norm squared
-    # For snapshot POD: eigenvalues are squared singular values / Ns
-    total_energy_data = np.linalg.norm(q, "fro") ** 2 / Ns
+    # Test 5: Energy conservation - sum of eigenvalues = weighted Frobenius norm
+    # For snapshot POD: eigenvalues are squared singular values / Ns of the
+    # sqrt(W)-weighted centered data. The metric is the one the load built
+    # (cell volumes for grid-shaped 1-D coordinates), so the unweighted
+    # ‖q‖²/Ns is no longer the reference — mean-centering included.
+    q_centered = q - q.mean(axis=0)
+    total_energy_data = float(np.sum(q_centered**2 * analyzer.W.ravel())) / Ns
     total_energy_modes = np.sum(eigenvalues)
     energy_ratio = total_energy_modes / total_energy_data
     assert abs(energy_ratio - 1.0) < TOL_LOOSE, f"Energy conservation: ratio={energy_ratio:.6f}"

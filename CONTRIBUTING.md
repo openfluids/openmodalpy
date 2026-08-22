@@ -25,13 +25,36 @@ uv run --group test pytest -q
 uv run --group lint ruff check .
 uv run --group lint ruff format --check .
 uv lock --check
+# Last step, after the local checks pass: refuse green while CI is red.
+scripts/check_ci_status.sh
 ```
 
-CI also enforces a coverage floor:
+CI also enforces a coverage floor. The number lives in `pyproject.toml`
+(`[tool.coverage.report] fail_under`), so the same gate runs locally:
 
 ```bash
-uv run --group test pytest -q --cov=openmodalpy --cov-fail-under=50
+uv run --group test pytest -q --cov=openmodalpy
 ```
+
+### Coverage floor ratchet
+
+The floor is a ratchet, not a target: it sits a couple of points under the
+measured coverage and moves up only when someone has measured again and
+decided to move it. Concretely:
+
+- Raise it when actual coverage exceeds the floor comfortably (say, by 3
+  points or more) after your change. Measure with the command above, set
+  `fail_under` just under what you measured, and say so in the pull request.
+- Nobody lowers the floor to land a change. If your change drops coverage
+  below the floor, the fix is tests for the new code — not a smaller number.
+- The floor is measured on Linux; treat the exact percentage as
+  platform-specific and keep the margin in the pyproject comment honest.
+- The floor is aggregate-only, deliberately: coverage has no native
+  per-module gate, so one would mean custom scripting in CI. The numerical
+  core modules sit well above the aggregate (welch 100%, threads 98%,
+  decomposition 94%, pod 86%); io.py and commands.py drag it down, and both
+  are glue where the marginal test is worth less than one on the numerics.
+  Revisit per-module floors if the aggregate ever reaches 85%.
 
 If one fails for a reason you think is unrelated to your change, say so in the
 pull request rather than working around it — that is useful information, and

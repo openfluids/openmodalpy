@@ -92,6 +92,7 @@ def _fourier_ensemble(seed: int = 4242) -> tuple[np.ndarray, np.ndarray]:
     return ensemble, weights
 
 
+@pytest.mark.oracle
 def test_manufactured_rank_one_ensemble_matches_closed_form():
     """Rank-1 ensemble a_n * phi has a closed-form leading eigenvalue and mode.
 
@@ -131,6 +132,7 @@ def test_manufactured_rank_one_ensemble_matches_closed_form():
     assert float(overlap) >= 1.0 - 1e-8
 
 
+@pytest.mark.characterization
 def test_psd_pod_positive_nonuniform_metric():
     ensemble, weights = _fourier_ensemble()
     assert np.all(weights > 0)
@@ -138,6 +140,7 @@ def test_psd_pod_positive_nonuniform_metric():
     _assert_matches_reference(ensemble, weights, n_keep=4)
 
 
+@pytest.mark.characterization
 def test_psd_pod_isolated_zero_weight_station():
     ensemble, weights = _fourier_ensemble()
     weights = weights.copy()

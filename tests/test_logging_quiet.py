@@ -391,8 +391,8 @@ def _make_mpod(tmp_path, data: dict, **kw) -> MPODAnalyzer:
 def test_mpod_banner_does_not_say_pod(tmp_path, caplog):
     """mPOD run_analysis banner uses display_name_for → mPOD, not POD/MPOD."""
     analyzer = _make_mpod(tmp_path, _synthetic_data())
-    with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
-        analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
+    with caplog.at_level(logging.INFO, logger="openmodalpy"):
+        analyzer.run_analysis()
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
     assert any("Starting mPOD analysis" in m for m in info_msgs), info_msgs
@@ -403,8 +403,8 @@ def test_mpod_banner_does_not_say_pod(tmp_path, caplog):
 def test_pod_banner_still_says_pod(tmp_path, caplog):
     """POD run_analysis banner remains Starting POD analysis."""
     analyzer = _make_pod(tmp_path, _synthetic_data())
-    with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
-        analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
+    with caplog.at_level(logging.INFO, logger="openmodalpy"):
+        analyzer.run_analysis()
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
     assert any("Starting POD analysis" in m for m in info_msgs), info_msgs
@@ -437,7 +437,7 @@ def test_mpod_console_labels_say_mpod_not_pod(tmp_path, caplog, mpod_kw):
     """
     analyzer = _make_mpod(tmp_path, _synthetic_data(), **mpod_kw)
     with caplog.at_level(logging.INFO, logger="openmodalpy"):
-        analyzer.run_analysis(plot_n_modes_spatial=1, plot_n_coeffs_time=1)
+        analyzer.run_analysis()
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
     offenders = _bare_pod_label_msgs(info_msgs)

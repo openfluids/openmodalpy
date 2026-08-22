@@ -71,7 +71,7 @@ def _wrap_on_mro(cls, name: str, called: list, monkeypatch) -> None:
             "perform_pod",
             (),
             lambda c: PODAnalyzer(n_modes_save=4, **c),
-            {"plot_n_modes_spatial": 0, "plot_n_coeffs_time": 0},
+            {},
         ),
         (
             MPODAnalyzer,
@@ -83,7 +83,7 @@ def _wrap_on_mro(cls, name: str, called: list, monkeypatch) -> None:
                 band_scale="normalized_nyquist",
                 **c,
             ),
-            {"plot_n_modes_spatial": 0, "plot_n_coeffs_time": 0},
+            {},
         ),
         (
             DMDAnalyzer,
@@ -117,7 +117,7 @@ def _wrap_on_mro(cls, name: str, called: list, monkeypatch) -> None:
             "perform_stpod",
             (),
             lambda c: STPODAnalyzer(embedding_dim=2, n_modes_save=2, **c),
-            {"plot_n_modes": 0, "plot_n_coeffs": 0},
+            {},
         ),
         (
             PSDPODAnalyzer,
@@ -171,15 +171,18 @@ def _all_subclasses(cls):
         yield from _all_subclasses(sub)
 
 
-def test_every_pod_subclass_overrides_the_decomposition_hook():
+def test_every_analyzer_declares_its_own_perform_name():
     """The parametrized test above only covers classes someone listed by hand.
 
-    This one needs no list: it walks every PODAnalyzer subclass that exists and
-    requires its own ``_perform_decomposition``. Without it a subclass inherits
-    POD's, which is exactly how mPOD came to run plain POD and save it as mPOD.
+    This one needs no list: it walks every BaseAnalyzer subclass that exists
+    and requires an explicit ``_perform_name``. Without one, run_analysis
+    would silently call the parent's decomposition — exactly how mPOD once
+    came to run plain POD and save it as mPOD.
     """
-    missing = [c.__name__ for c in _all_subclasses(PODAnalyzer) if "_perform_decomposition" not in vars(c)]
+    import openmodalpy.core.base as base_module
+
+    missing = [c.__name__ for c in _all_subclasses(base_module.BaseAnalyzer) if "_perform_name" not in vars(c)]
     assert not missing, (
-        f"{missing} inherit PODAnalyzer._perform_decomposition, so their run_analysis "
-        f"would silently run perform_pod. Override it (see MPODAnalyzer)."
+        f"{missing} do not declare _perform_name, so run_analysis would "
+        f"silently call their parent's decomposition (see MPODAnalyzer)."
     )
