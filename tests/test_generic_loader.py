@@ -292,3 +292,84 @@ def test_generic_loader_rejects_foreign_extension(tmp_path):
     stray.write_text("not data")
     with pytest.raises(ValueError, match="cannot read"):
         GenericDataLoader().load(str(stray))
+
+
+def test_scattered_points_inferred_from_1d_coords(tmp_path):
+    rng = np.random.default_rng(11)
+    ns, n = 5, 7
+    x = rng.uniform(0.0, 1.0, n)
+    y = rng.uniform(0.1, 2.0, n)
+    q = rng.standard_normal((ns, n))
+    path = tmp_path / "scattered.npz"
+    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1))
+
+    d = load_data(str(path))
+
+    assert (d["Nx"], d["Ny"], d["Nz"]) == (n, 1, 1)
+    assert np.array_equal(d["x"], x)
+    assert np.array_equal(d["y"], y)
+    assert d["q"].shape == (ns, n)
+
+
+def test_scattered_points_through_pod_analyzer_weights(tmp_path):
+    rng = np.random.default_rng(12)
+    ns, n = 5, 7
+    x = rng.uniform(0.0, 1.0, n)
+    y = rng.uniform(0.1, 2.0, n)
+    q = rng.standard_normal((ns, n))
+    path = tmp_path / "scattered_weights.npz"
+    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1))
+
+    pod_uniform = PODAnalyzer(
+        file_path=str(path),
+        spatial_weight_type="uniform",
+        n_modes_save=2,
+        results_dir=str(tmp_path / "results_uniform"),
+        figures_dir=str(tmp_path / "figures_uniform"),
+    )
+    pod_uniform.load_and_preprocess()
+    w_uniform = np.asarray(pod_uniform.W).ravel()
+    assert w_uniform.shape == (n,)
+    np.testing.assert_array_equal(w_uniform, np.ones(n))
+
+    pod_polar = PODAnalyzer(
+        file_path=str(path),
+        spatial_weight_type="polar",
+        n_modes_save=2,
+        results_dir=str(tmp_path / "results_polar"),
+        figures_dir=str(tmp_path / "figures_polar"),
+    )
+    pod_polar.load_and_preprocess()
+    w_polar = np.asarray(pod_polar.W).ravel()
+    assert w_polar.shape == (n,)
+    np.testing.assert_array_equal(w_polar, np.abs(y))
+
+
+def test_square_grid_still_loads_as_grid(tmp_path):
+    # x and y both have length n, same as a scattered file would, but q holds
+    # n*n points per snapshot: the product test must pick the grid reading.
+    n = 4
+    ns = 3
+    x = np.linspace(-1.0, 1.0, n)
+    y = np.linspace(0.0, 2.0, n)
+    q = np.random.default_rng(13).standard_normal((ns, n * n))
+    path = tmp_path / "square_grid.npz"
+    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1))
+
+    d = load_data(str(path))
+
+    assert (d["Nx"], d["Ny"], d["Nz"]) == (n, n, 1)
+    assert d["q"].shape == (ns, n * n)
+
+
+def test_nothing_fits_names_both_readings(tmp_path):
+    n = 6
+    ns = 3
+    x = np.linspace(-1.0, 1.0, n)
+    y = np.linspace(0.0, 2.0, n)
+    q = np.random.default_rng(14).standard_normal((ns, n + 1))
+    path = tmp_path / "nothing_fits.npz"
+    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1))
+
+    with pytest.raises(ValueError, match="state Nx/Ny.*1-D x and y of length Nspace"):
+        load_data(str(path))

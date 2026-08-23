@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `spatial_weight_type="polar"` on a 3-D grid now reads `z` as azimuth theta
   in radians and weights each (x, r, theta) cell as a sector of the (x, r)
   annulus; a `z` range beyond one revolution (2*pi) raises.
+- The generic loader now infers scattered points from 1-D `x`/`y` of length
+  `Nspace` whose product does not match `Nspace`, without needing `Nx`/`Ny`
+  stated in the file.
 
 - The test-suite coverage floor moved from a nominal 50% (24 points under the
   measured value, so real regressions stayed invisible) to a 72% ratchet read

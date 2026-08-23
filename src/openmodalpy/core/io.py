@@ -1139,6 +1139,17 @@ def _assemble_contract_data(
             stated_nz = int(np.asarray(datasets["Nz"]).reshape(-1)[0]) if "Nz" in datasets else 1
             if stated_nx * stated_ny * stated_nz == nspace:
                 nx, ny, nz = stated_nx, stated_ny, stated_nz
+        if (
+            nx * ny * nz != nspace
+            and x.ndim == 1
+            and y.ndim == 1
+            and len(x) == len(y) == nspace
+            and (z is None or (z.ndim == 1 and len(z) == nspace))
+        ):
+            # Two equal-length axes are ambiguous between an n x n grid and n
+            # scattered points; the product test above already ruled out the
+            # grid reading, so treat x/y(/z) as per-point coordinates.
+            nx, ny, nz = nspace, 1, 1
     else:
         ny, nx = int(q.shape[1]), int(q.shape[2])
         nz = int(q.shape[3]) if q.ndim == 4 else 1
@@ -1146,8 +1157,8 @@ def _assemble_contract_data(
     if nx * ny * nz != nspace:
         raise ValueError(
             f"Grid counts x={nx}, y={ny}, z={nz} give {nx * ny * nz} points but 'q' in "
-            f"{file_path} holds {nspace} per snapshot. Supply consistent coordinates or "
-            f"Ny/Nx[/Nz] counts."
+            f"{file_path} holds {nspace} per snapshot. Supply consistent coordinates: "
+            f"state Nx/Ny[/Nz], or give 1-D x and y of length Nspace for scattered points."
         )
 
     for name, derived in (("Nx", nx), ("Ny", ny), ("Nz", nz), ("Ns", ns)):

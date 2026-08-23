@@ -158,6 +158,9 @@ Every analyzer expects a Python dict with these keys:
 The generic reader takes named datasets: `q` (as `(Ns, Nspace)` or `(Ns, Ny, Nx[, Nz])`,
 flattened C-order), `x`/`y` (required, passed through unchanged), optional `z`/`t`/`dt`,
 and optional integer `Nx`/`Ny`/`Nz`/`Ns` (derived from the array shapes when absent).
+If `x` and `y` are both 1-D and the same length as `Nspace` but their product does not
+equal `Nspace`, the file is read as scattered points: `x`, `y` (and `z` if also 1-D of
+that length) pass through unchanged and `Nx`, `Ny`, `Nz` are reported as `Nspace`, `1`, `1`.
 When `t` is supplied it must sample uniformly (checked with `fftkit.describe_sampling`;
 relative jitter below 1e-12) and `dt` becomes the verified median step — a non-uniform
 `t` is refused with the observed spread unless the caller passes `resample_time=True`,

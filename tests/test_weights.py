@@ -788,7 +788,7 @@ def test_polar_weights_scattered_end_to_end_npz(tmp_path):
     q = rng.standard_normal((ns, n))
 
     path = tmp_path / "scattered_polar.npz"
-    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1), Nx=n, Ny=1)
+    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1))
     pod = PODAnalyzer(
         file_path=str(path),
         spatial_weight_type="polar",
