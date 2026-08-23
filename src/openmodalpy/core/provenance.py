@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -58,6 +59,21 @@ def _fft_backend() -> str:
         return "unavailable"
 
 
+def _threadpools() -> list[dict[str, Any]]:
+    """threadpoolctl's ``threadpool_info()``, empty when it is unavailable.
+
+    Shared by ``_blas_threads`` and ``_blas_identity`` so the process's
+    threadpools are inspected once per provenance collection rather than
+    twice.
+    """
+    try:
+        from threadpoolctl import threadpool_info
+
+        return list(threadpool_info())
+    except Exception:
+        return []
+
+
 def _blas_threads() -> int:
     """Effective BLAS thread limit for this process.
 
@@ -71,16 +87,33 @@ def _blas_threads() -> int:
     n = get_blas_threads()
     if n != 0:
         return int(n)
-    try:
-        from threadpoolctl import threadpool_info
-
-        pools = threadpool_info()
-        counts = [int(p["num_threads"]) for p in pools if p.get("num_threads") is not None]
-        if counts:
-            return max(counts)
-    except Exception:
-        pass
+    pools = _threadpools()
+    counts = [int(p["num_threads"]) for p in pools if p.get("num_threads") is not None]
+    if counts:
+        return max(counts)
     return 0
+
+
+def _blas_identity() -> str:
+    """One line per bound threadpool: which BLAS/LAPACK library actually ran.
+
+    NumPy and SciPy can bind different builds in the same process, so every
+    entry threadpoolctl reports is recorded, not just the first. The library
+    filepath is deliberately omitted: it is a machine-local path that would
+    leak a username or directory layout into a file meant to be shared, and
+    the internal_api/version pair already identifies the build.
+    """
+    pools = _threadpools()
+    if not pools:
+        return "unknown"
+    entries = []
+    for pool in pools:
+        api = pool.get("internal_api", "unknown")
+        version = pool.get("version", "unknown")
+        threads = pool.get("num_threads", "unknown")
+        user_api = pool.get("user_api", "unknown")
+        entries.append(f"{api} {version} threads={threads} ({user_api})")
+    return "; ".join(entries) if entries else "unknown"
 
 
 def _git_sha() -> str:
@@ -133,6 +166,32 @@ def _git_sha() -> str:
 
     _GIT_SHA = "unavailable"
     return _GIT_SHA
+
+
+def _platform() -> str:
+    try:
+        value = platform.platform()
+        return value if value else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _machine() -> str:
+    try:
+        value = platform.machine()
+        return value if value else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _hdf5_version() -> str:
+    try:
+        import h5py
+
+        value = h5py.version.hdf5_version
+        return str(value) if value else "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _seed_from_attrs(attrs: Mapping[str, Any]) -> str:
@@ -253,10 +312,11 @@ def safe_attrs_for_hdf5(attrs: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def collect_provenance(attrs: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Build the twelve-field provenance block for one result write.
+    """Build the sixteen-field provenance block for one result write.
 
     All string fields are non-empty. ``prov_blas_threads`` is an ``int``.
-    Unresolved values are ``"unavailable"`` or ``"none"`` — never omitted.
+    Unresolved values are ``"unavailable"``, ``"unknown"``, or ``"none"`` —
+    never omitted.
     """
     attrs = dict(attrs or {})
     return {
@@ -268,6 +328,10 @@ def collect_provenance(attrs: Mapping[str, Any] | None = None) -> dict[str, Any]
         "prov_fftkit_version": _package_version("fftkit"),
         "prov_fft_backend": _fft_backend(),
         "prov_blas_threads": _blas_threads(),
+        "prov_blas": _blas_identity(),
+        "prov_platform": _platform(),
+        "prov_machine": _machine(),
+        "prov_hdf5_version": _hdf5_version(),
         "prov_config_sha256": config_sha256(attrs),
         "prov_created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "prov_git_sha": _git_sha(),

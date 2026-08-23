@@ -841,6 +841,10 @@ exist report an empty mapping; missing keys never raise.
 | `prov_fftkit_version` | str | Installed fftkit version |
 | `prov_fft_backend` | str | `fftkit.DEFAULT_BACKEND` at write time |
 | `prov_blas_threads` | int | Effective BLAS thread limit used by kernels (`0` = no package limit / observation failed) |
+| `prov_blas` | str | One entry per bound BLAS/LAPACK threadpool, `"<internal_api> <version> threads=<n> (<user_api>)"`, joined with `"; "` |
+| `prov_platform` | str | `platform.platform()` at write time |
+| `prov_machine` | str | `platform.machine()` at write time |
+| `prov_hdf5_version` | str | HDF5 C library version (`h5py.version.hdf5_version`), distinct from `prov_h5py_version` |
 | `prov_config_sha256` | str | SHA-256 of analysis attrs (not data); excludes `prov_*` |
 | `prov_created_utc` | str | UTC write timestamp (`YYYY-MM-DDTHH:MM:SSZ`) |
 | `prov_git_sha` | str | openmodalpy package checkout HEAD when available, else `unavailable` |

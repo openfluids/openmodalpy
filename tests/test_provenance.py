@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import h5py
@@ -27,6 +28,10 @@ REQUIRED = frozenset(
         "prov_fftkit_version",
         "prov_fft_backend",
         "prov_blas_threads",
+        "prov_blas",
+        "prov_platform",
+        "prov_machine",
+        "prov_hdf5_version",
         "prov_config_sha256",
         "prov_created_utc",
         "prov_git_sha",
@@ -221,3 +226,111 @@ def test_unknown_blas_threads_report_zero() -> None:
         threadpoolctl.threadpool_info = saved
         omp.set_blas_threads(previous)
     assert int(threads) == 0
+
+
+def test_new_prov_keys_present_pod_and_dmd(tmp_path: Path) -> None:
+    """AC1 (regression subset): the four new keys land for POD and DMD alike."""
+    field = _toy_field()
+    common = dict(
+        results_dir=tmp_path,
+        figures_dir=tmp_path,
+        data_loader=lambda _: field,
+        spatial_weight_type="uniform",
+    )
+    new_keys = {"prov_blas", "prov_platform", "prov_machine", "prov_hdf5_version"}
+
+    pod = PODAnalyzer(file_path="new_prov_pod", n_modes_save=3, **common)
+    pod.load_and_preprocess()
+    pod.perform_pod()
+    pod.save_results("new_prov_pod.hdf5")
+    with h5py.File(tmp_path / "new_prov_pod.hdf5", "r") as handle:
+        pod_attrs = dict(handle.attrs)
+
+    dmd = DMDAnalyzer(file_path="new_prov_dmd", n_modes_save=3, rank=3, **common)
+    dmd.load_and_preprocess()
+    dmd.perform_dmd()
+    dmd.save_results("new_prov_dmd.hdf5")
+    with h5py.File(tmp_path / "new_prov_dmd.hdf5", "r") as handle:
+        dmd_attrs = dict(handle.attrs)
+
+    for attrs in (pod_attrs, dmd_attrs):
+        for key in new_keys:
+            assert key in attrs, f"missing {key}"
+            value = attrs[key]
+            text = value.decode() if isinstance(value, bytes) else value
+            assert isinstance(text, str) and text, f"{key} empty or not a string ({value!r})"
+
+
+def test_prov_blas_matches_expected_format(tmp_path: Path) -> None:
+    """`prov_blas` has at least one entry shaped like a threadpoolctl record."""
+    data = {"modes": np.arange(6.0).reshape(3, 2)}
+    write_results(tmp_path / "blas.h5", data, attrs={"analysis_type": "pod"})
+    with h5py.File(tmp_path / "blas.h5", "r") as handle:
+        raw = handle.attrs["prov_blas"]
+    text = raw.decode() if isinstance(raw, bytes) else str(raw)
+    entries = text.split("; ")
+    pattern = re.compile(r"^\w+ \S+ threads=\d+ \(\w+\)")
+    assert any(pattern.match(entry) for entry in entries), text
+
+
+# Pinned at HEAD before the prov_blas/prov_platform/prov_machine/prov_hdf5_version
+# addition: config_sha256({"analysis_type": "pod", "nfft": 8}). The new prov_ keys
+# must never move this digest, since config_sha256 excludes every prov_ key by
+# construction.
+_PINNED_CONFIG_SHA256 = "bd6a0fe6dd4174dae76ae40cac1fabd227a7e20584747c27f28928dae4361e39"
+
+
+def test_config_sha256_unchanged_by_new_prov_keys(tmp_path: Path) -> None:
+    from openmodalpy.core.provenance import config_sha256
+
+    attrs = {"analysis_type": "pod", "nfft": 8}
+    assert config_sha256(attrs) == _PINNED_CONFIG_SHA256
+
+    data = {"modes": np.arange(6.0).reshape(3, 2)}
+    write_results(tmp_path / "pinned.h5", data, attrs=attrs)
+    with h5py.File(tmp_path / "pinned.h5", "r") as handle:
+        raw = handle.attrs["prov_config_sha256"]
+    text = raw.decode() if isinstance(raw, bytes) else str(raw)
+    assert text == _PINNED_CONFIG_SHA256
+
+
+def test_provenance_legacy_old_key_set_missing_new_keys(tmp_path: Path) -> None:
+    """A file written with only the old twelve prov_ keys reads without raising
+
+    and exposes no value for the four keys added since.
+    """
+    legacy = tmp_path / "legacy_old_prov.h5"
+    with h5py.File(legacy, "w") as handle:
+        handle.attrs["analysis_type"] = "pod"
+        handle.attrs["prov_openmodalpy_version"] = "0.4.0"
+        handle.attrs["prov_python_version"] = "3.11.0"
+        handle.attrs["prov_numpy_version"] = "1.26.0"
+        handle.attrs["prov_scipy_version"] = "1.11.0"
+        handle.attrs["prov_h5py_version"] = "3.10.0"
+        handle.attrs["prov_fftkit_version"] = "0.1.0"
+        handle.attrs["prov_fft_backend"] = "numpy"
+        handle.attrs["prov_blas_threads"] = 1
+        handle.attrs["prov_config_sha256"] = "0" * 64
+        handle.attrs["prov_created_utc"] = "2026-01-01T00:00:00Z"
+        handle.attrs["prov_git_sha"] = "unavailable"
+        handle.attrs["prov_seed"] = "none"
+        handle.create_dataset("modes", data=np.arange(6.0).reshape(3, 2))
+
+    res = read_results(legacy)
+    assert res.modes is not None and res.modes.shape == (3, 2)
+    assert set(res.provenance) == {
+        "openmodalpy_version",
+        "python_version",
+        "numpy_version",
+        "scipy_version",
+        "h5py_version",
+        "fftkit_version",
+        "fft_backend",
+        "blas_threads",
+        "config_sha256",
+        "created_utc",
+        "git_sha",
+        "seed",
+    }
+    for key in ("blas", "platform", "machine", "hdf5_version"):
+        assert key not in res.provenance

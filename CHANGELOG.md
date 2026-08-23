@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The provenance block written to every result file now also records which
+  BLAS/LAPACK library actually ran (`prov_blas`), the OS platform and machine
+  architecture (`prov_platform`, `prov_machine`), and the HDF5 C library
+  version (`prov_hdf5_version`).
+
 ### Changed
 
 - CI: mypy now runs on macOS and Windows as well as Linux; a weekly
