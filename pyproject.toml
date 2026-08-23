@@ -177,3 +177,18 @@ markers = [
 # dependency-coverage noise while still catching any real regression.
 # Ratchet policy lives in CONTRIBUTING.md ("Coverage floor ratchet").
 fail_under = 72
+
+[tool.mutmut]
+# source_paths must cover the whole package: mutmut copies only these paths into
+# mutants/, and the tests import openmodalpy as a package, so anything left out
+# breaks collection. only_mutate is what actually scopes which lines get mutated,
+# to the two numerical-core files (see DOC.md "Mutation testing").
+source_paths = ["src"]
+only_mutate = [
+    "src/openmodalpy/core/decomposition.py",
+    "src/openmodalpy/core/welch.py",
+]
+# tests/test_external_reference.py loads this script by path relative to the
+# repo root; without it the run fails at test collection, not at a mutant.
+also_copy = ["scripts"]
+pytest_add_cli_args_test_selection = ["tests/"]
