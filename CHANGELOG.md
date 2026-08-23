@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepted (its diagonal is used); any other square raises. The loose
   `np.allclose` that used to wave through a small off-diagonal is gone.
 
+### Fixed
+
+- `spatial_weight_type="polar"` on a grid flattened the 2-D (x, r) weights
+  x-major instead of the contract's y-major order, so every column of `q`
+  was paired with the weight of the transposed cell. Every polar-grid result
+  changes, square grids included; only the total measure was unaffected.
+
 ### Breaking
 
 - `DMDAnalyzer.run_analysis()` and `BSMDAnalyzer.run_analysis()` now produce

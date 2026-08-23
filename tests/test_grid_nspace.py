@@ -315,10 +315,10 @@ def test_three_d_polar_builds_sector_metric(tmp_path):
     analyzer.load_and_preprocess()
     assert len(np.asarray(analyzer.W).ravel()) == 24
 
-    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(4, 3)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(3, 4)
     w3d = np.asarray(analyzer.W).reshape(2, 3, 4)
     summed = w3d.sum(axis=0)  # (Ny, Nx)
-    np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)
+    np.testing.assert_allclose(summed, w2d, rtol=1e-15, atol=0.0)
 
 
 def test_square_cartesian_grid_is_not_read_as_scattered(tmp_path):

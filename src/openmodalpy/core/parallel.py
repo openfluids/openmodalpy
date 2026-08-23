@@ -39,8 +39,8 @@ def calculate_polar_weights_optimized(
     ``z`` is ignored in that branch.
 
     With ``z`` given (and not scattered), ``z`` is a 1-D azimuth axis theta in
-    radians; see ``calculate_polar_weights`` for the sector-weight definition
-    and the flatten order.
+    radians; see ``calculate_polar_weights`` for the sector-weight definition.
+    Flattened in the order documented in ``calculate_cell_volume_weights``.
 
     Parameters:
     -----------
@@ -110,8 +110,8 @@ def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray, z: np.ndarray | None 
         Wx[0] = 1.0
 
     if z is None:
-        # Combine weights using outer product (much faster than loops)
-        W = np.outer(Wx, Wy).flatten()
+        # Combine weights: (Ny, Nx) outer product, flattened C-order.
+        W = np.outer(Wy, Wx).flatten()
         return W.reshape(-1, 1)
 
     # 3-D polar: fold in the azimuth sector fraction and flatten (theta, r, x).

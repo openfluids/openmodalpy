@@ -1160,6 +1160,8 @@ def _polar_theta_sector_fractions(z: np.ndarray) -> np.ndarray:
     axis covering only part of the circle -- a wrap gap much larger than the
     largest interior spacing -- is refused: sector weights assume one full
     revolution, and a wedge needs an explicit ``spatial_weights=`` metric.
+
+    Flattened in the order documented in ``calculate_cell_volume_weights``.
     """
     z_arr = np.asarray(z, dtype=np.float64)
     if z_arr.ndim != 1:
@@ -1227,10 +1229,8 @@ def calculate_polar_weights(
     With ``z`` given (and not scattered), ``z`` is a 1-D azimuth axis theta in
     radians and the weight per (x, r, theta) cell is the 2-D (x, r) weight
     times the sector fraction ``Delta-theta / (2*pi)`` (see
-    ``_polar_theta_sector_fractions``). ``z=None`` reproduces today's
-    ``(Nx*Ny, 1)`` result bit-for-bit. The result is flattened C-order over
-    (theta, r, x), matching ``calculate_cell_volume_weights``:
-    ``index = (itheta*Ny + iy)*Nx + ix``.
+    ``_polar_theta_sector_fractions``). Flattened in the order documented in
+    ``calculate_cell_volume_weights``.
     """
     if (
         n_space is not None
@@ -1287,8 +1287,8 @@ def calculate_polar_weights(
         Wx[Nx - 1] = (x_line[Nx - 1] - x_line[Nx - 2]) / 2
 
     if z is None:
-        # Combine weights
-        W = np.reshape(Wx @ np.transpose(Wy), (Nx * Ny, 1))
+        # Combine weights: (Ny, Nx) outer product, flattened C-order.
+        W = np.reshape(np.outer(Wy.ravel(), Wx.ravel()), (Nx * Ny, 1))
         return W
 
     # 3-D polar: fold in the azimuth sector fraction and flatten (theta, r, x).
@@ -1309,7 +1309,8 @@ def calculate_uniform_weights(
     ``n == 1``; scattered is preferred then only if ``n_space`` says so.
     With ``n_space=None`` the result is always the tensor product (historical
     behaviour). Grid spacing / cell volumes are not applied; callers that need
-    a domain integral must supply their own W.
+    a domain integral must supply their own W. Flattened in the order
+    documented in ``calculate_cell_volume_weights``.
     """
     if (
         n_space is not None

@@ -217,7 +217,9 @@ refused with an error, never sorted silently.
 `"polar"` on scattered points (1-D `x`, `y` of length `Nspace`) weights each
 point by its radius, `w_i = |y_i|`, the cylindrical Jacobian at the point;
 like scattered `"uniform"`, it carries no cell measure. Grid input (2-D
-`x`/`y`, or 1-D axes whose product is `Nspace`) is unchanged.
+`x`/`y`, or 1-D axes whose product is `Nspace`) is unchanged, and its weights
+are flattened in the same contract order as `calculate_cell_volume_weights`
+(`index = iy*Nx + ix`).
 
 On a 3-D polar grid, `z` is azimuth theta in radians, not a Cartesian
 coordinate; weights are sectors of the (x, r) annulus (`Wx * Wr *

@@ -859,10 +859,10 @@ def test_polar_weights_3d_theta_sum_matches_2d(theta):
     """Summing the 3-D weight over theta at each (x, r) reproduces the 2-D weight."""
     x, y = _xr_grid_for_theta_tests()
     Nx, Ny, Ntheta = len(x), len(y), len(theta)
-    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Ny, Nx)
     w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
     summed = w3d.sum(axis=0)  # (Ny, Nx)
-    np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)
+    np.testing.assert_allclose(summed, w2d, rtol=1e-15, atol=0.0)
 
 
 def test_polar_weights_3d_uniform_theta_equal_sectors():
@@ -871,9 +871,9 @@ def test_polar_weights_3d_uniform_theta_equal_sectors():
     Ntheta = 6
     theta = np.linspace(0.0, 2.0 * np.pi, Ntheta, endpoint=False)
     Nx, Ny = len(x), len(y)
-    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Ny, Nx)
     w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
-    expected_sector = w2d.T / Ntheta  # (Ny, Nx)
+    expected_sector = w2d / Ntheta  # (Ny, Nx)
     for a in range(Ntheta):
         np.testing.assert_allclose(w3d[a], expected_sector, rtol=1e-14)
 
@@ -901,6 +901,69 @@ def test_polar_weights_z_none_matches_no_z_argument():
     w_opt_none = calculate_polar_weights_optimized(x, y, z=None)
     np.testing.assert_array_equal(w_opt_default, w_opt_none)
     np.testing.assert_array_equal(w_default, w_opt_default)
+
+
+def _hand_built_axial_weights(x_axis):
+    """Trapezoid axial weights, same arithmetic as calculate_polar_weights' Wx."""
+    w = np.zeros(len(x_axis))
+    w[0] = (x_axis[1] - x_axis[0]) / 2
+    for i in range(1, len(x_axis) - 1):
+        w[i] = (x_axis[i + 1] - x_axis[i - 1]) / 2
+    w[-1] = (x_axis[-1] - x_axis[-2]) / 2
+    return w
+
+
+def _hand_built_radial_weights(y_axis):
+    """Cylindrical annulus weights, same arithmetic as calculate_polar_weights' Wy."""
+    w = np.zeros(len(y_axis))
+    w[0] = np.pi * ((y_axis[0] + y_axis[1]) / 2) ** 2
+    for i in range(1, len(y_axis) - 1):
+        left = (y_axis[i - 1] + y_axis[i]) / 2
+        right = (y_axis[i] + y_axis[i + 1]) / 2
+        w[i] = np.pi * (right**2 - left**2)
+    left = (y_axis[-2] + y_axis[-1]) / 2
+    w[-1] = np.pi * (y_axis[-1] ** 2 - left**2)
+    return w
+
+
+def test_polar_weights_2d_matches_hand_built_y_major_order():
+    """Falsifier: the flatten order is y-major, index = iy*Nx + ix.
+
+    q is separable, q[:, iy*Nx + ix] = g(x[ix]) * h(r[iy]); the weighted
+    energy sum(W * q**2) must equal the analytic integral built by hand from
+    the same Wx/Wy outer product in (Ny, Nx) order. Nx != Ny catches an
+    x-major flatten that a square grid would hide.
+    """
+    x = np.array([0.0, 0.5, 1.5])  # Nx = 3
+    r = np.array([0.2, 0.6, 1.0, 1.3])  # Ny = 4
+
+    Wx = _hand_built_axial_weights(x)
+    Wy = _hand_built_radial_weights(r)
+    hand_built = np.outer(Wy, Wx)  # (Ny, Nx), contract order
+
+    def g(v):
+        return 2.0 * v + 1.0
+
+    def h(v):
+        return v**2 + 0.3
+
+    field = np.outer(h(r), g(x))  # (Ny, Nx), q[iy, ix]
+    expected_energy = float(np.sum(hand_built * field**2))
+
+    w = calculate_polar_weights(x, r, use_parallel=False).reshape(-1)
+    q = field.reshape(-1)  # index = iy*Nx + ix
+    actual_energy = float(np.dot(w, q**2))
+
+    assert actual_energy == pytest.approx(expected_energy, rel=1e-12)
+
+
+def test_polar_weights_plain_and_optimized_agree_on_nonsquare_grid():
+    """calculate_polar_weights and its optimized twin flatten a 3x4 grid the same way."""
+    x = np.array([0.0, 0.5, 1.5])
+    r = np.array([0.2, 0.6, 1.0, 1.3])
+    w_plain = calculate_polar_weights(x, r, use_parallel=False)
+    w_optimized = calculate_polar_weights_optimized(x, r)
+    np.testing.assert_allclose(w_plain, w_optimized, rtol=1e-15, atol=0.0)
 
 
 @pytest.mark.parametrize(
@@ -943,8 +1006,8 @@ def test_polar_weights_3d_c_order_matches_analytic_integral():
     theta_fraction = _polar_theta_sector_fractions(theta)
     expected_theta_factor = float(np.dot(theta_fraction, h(theta)))
 
-    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
-    expected_xr_factor = float(np.sum(w2d * np.outer(f(x), g(y))))
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Ny, Nx)
+    expected_xr_factor = float(np.sum(w2d * np.outer(g(y), f(x))))
     expected_total = expected_xr_factor * expected_theta_factor
 
     w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
@@ -991,10 +1054,10 @@ def test_polar_weights_duplicated_endpoint_full_circle_passes():
     Nx, Ny = len(x), len(y)
     theta = np.linspace(0.0, 2.0 * np.pi, 6, endpoint=True)
     Ntheta = len(theta)
-    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Ny, Nx)
     w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
     summed = w3d.sum(axis=0)  # (Ny, Nx)
-    np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)
+    np.testing.assert_allclose(summed, w2d, rtol=1e-15, atol=0.0)
 
 
 def test_apply_sqrt_metric_matches_elementwise_scaling():
