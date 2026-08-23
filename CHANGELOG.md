@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: mypy now runs on macOS and Windows as well as Linux; a weekly
+  unpinned-resolution run is informational only and does not gate merges.
 - The sqrt(W) weighting of a samples x features matrix now lives in one
   place (`apply_sqrt_metric`, `core/decomposition.py`); ST-POD's total
   energy and the SVD solver both call it instead of each re-deriving it.

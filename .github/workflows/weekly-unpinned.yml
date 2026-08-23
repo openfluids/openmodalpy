@@ -1,0 +1,35 @@
+# Informational only: not in any required-check set and does not gate merges
+# or releases. If this run fails, GitHub emails the person who last committed
+# to this workflow file; the run also shows under the Actions tab.
+name: Weekly unpinned resolution (informational)
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unpinned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Drop the lockfile
+        # This run deliberately ignores the lockfile: it tests what a fresh
+        # `pip install openmodalpy` resolves today. The normal CI job tests
+        # the lock instead.
+        run: rm uv.lock
+
+      - name: Resolve and install
+        run: uv sync --group test --python 3.14
+
+      - name: Run tests
+        run: uv run --python 3.14 pytest -q
+
+      - name: Record resolved versions
+        run: uv pip list
