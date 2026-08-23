@@ -20,7 +20,12 @@ from openmodalpy.core.base import (
     calculate_uniform_weights,
     require_spatial_metric,
 )
-from openmodalpy.core.decomposition import SpatialMetric, _as_weight_vector
+from openmodalpy.core.decomposition import (
+    SpatialMetric,
+    _as_weight_vector,
+    apply_sqrt_metric,
+    weighted_total_energy,
+)
 from openmodalpy.core.parallel import calculate_polar_weights_optimized
 
 
@@ -990,3 +995,20 @@ def test_polar_weights_duplicated_endpoint_full_circle_passes():
     w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
     summed = w3d.sum(axis=0)  # (Ny, Nx)
     np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)
+
+
+def test_apply_sqrt_metric_matches_elementwise_scaling():
+    """apply_sqrt_metric on a 3x4 matrix equals data * sqrt(w) elementwise."""
+    data = np.arange(12.0).reshape(3, 4)
+    w = np.array([1.0, 4.0, 9.0, 16.0])
+    scaled = apply_sqrt_metric(data, w)
+    np.testing.assert_allclose(scaled, data * np.sqrt(w))
+
+
+def test_weighted_total_energy_with_unit_weights_is_plain_frobenius():
+    """With w = ones, weighted_total_energy is the plain Frobenius norm^2 / n."""
+    data = np.arange(12.0).reshape(3, 4)
+    w = np.ones(4)
+    energy = weighted_total_energy(data, w)
+    expected = float(np.linalg.norm(data, "fro") ** 2 / data.shape[0])
+    assert energy == pytest.approx(expected, rel=1e-14)

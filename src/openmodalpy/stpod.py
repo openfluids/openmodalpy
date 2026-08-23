@@ -229,11 +229,7 @@ class STPODAnalyzer(BaseAnalyzer):
         )
 
         # True pre-truncation total: sum of all sigma²/m = ‖data_weighted‖_F² / m.
-        # Same exact sqrt(W) as _solve_svd so the identity holds.
-        sqrt_weights = np.sqrt(lifted_metric.weights)
-        data_weighted = lifted * sqrt_weights
-        n_samples = lifted.shape[0]
-        self.total_energy = float(np.linalg.norm(data_weighted, "fro") ** 2 / n_samples)
+        self.total_energy = decomposition.weighted_total_energy(lifted, lifted_metric)
         # Solver may return fewer modes than the caller's cap; keep the counter
         # honest before energy logging / save / plot paths read it.
         self._resync_mode_count()

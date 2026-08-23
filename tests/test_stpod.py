@@ -575,6 +575,51 @@ class TestSTPODTotalEnergy:
         unweighted = float(np.linalg.norm(lifted, "fro") ** 2 / lifted.shape[0])
         assert abs(analyzer.total_energy - unweighted) > 0.5 * unweighted
 
+    def test_total_energy_matches_the_shared_helper_across_extreme_weights(self):
+        """total_energy equals the sum of all squared singular values of the
+        shared apply_sqrt_metric weighting, including one near-zero and one
+        large weight entry.
+
+        Reference is computed with numpy's own full SVD, independent of the
+        analyzer's SVD route.
+        """
+        from openmodalpy.core import decomposition
+
+        rng = np.random.default_rng(31)
+        Ns, Nspace = 18, 6
+        embedding_dim = 4
+        weights = np.array([1.0e-14, 0.2, 0.7, 2.0, 5.0, 1.0e3])
+        data = {
+            "q": rng.standard_normal((Ns, Nspace)),
+            "x": np.arange(Nspace),
+            "y": np.array([0.0]),
+            "dt": 0.1,
+            "Nx": Nspace,
+            "Ny": 1,
+            "Ns": Ns,
+        }
+        analyzer = STPODAnalyzer(
+            file_path="test_stpod_extreme_weights",
+            embedding_dim=embedding_dim,
+            n_modes_save=3,
+            data_loader=lambda _: data,
+            spatial_weights=weights,
+        )
+        analyzer.load_and_preprocess()
+        analyzer.perform_stpod()
+
+        data_centered = data["q"] - np.mean(data["q"], axis=0)
+        hankel = decomposition.DelayEmbeddingLift(embedding_dim).apply(data_centered)
+        base_metric = decomposition.SpatialMetric(np.asarray(analyzer.W).ravel())
+        lifted_metric = decomposition.SpatialMetric(base_metric.tile(embedding_dim))
+
+        data_weighted = decomposition.apply_sqrt_metric(hankel, lifted_metric)
+        _u, sigma, _vt = np.linalg.svd(data_weighted.T, full_matrices=False)
+        expected = float(np.sum(sigma**2) / hankel.shape[0])
+
+        np.testing.assert_allclose(analyzer.total_energy, expected, rtol=1e-14, atol=0.0)
+        assert analyzer.energy_captured_fraction <= 1.0 + 1e-12
+
     def test_truncated_percentages_sum_to_captured_fraction(self):
         """With truncation below full rank, percentages sum to less than 100%.
 

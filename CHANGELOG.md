@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The sqrt(W) weighting of a samples x features matrix now lives in one
+  place (`apply_sqrt_metric`, `core/decomposition.py`); ST-POD's total
+  energy and the SVD solver both call it instead of each re-deriving it.
 - `spatial_weight_type="uniform"` is back to all-ones weights (v0.5.0
   behaviour). The trapezoid cell-volume metric is now the explicit opt-in
   type `"cell_volume"`; without usable 1-D grid coordinates it raises.

@@ -185,6 +185,23 @@ def _as_weight_vector(metric: SpatialMetric | np.ndarray, n_space: int) -> np.nd
     return _coerce_spatial_weights(metric, n_space)
 
 
+def apply_sqrt_metric(data: np.ndarray, metric: SpatialMetric | np.ndarray) -> np.ndarray:
+    """Row (samples) x column (features) data scaled by sqrt of the metric weights.
+
+    This is the only place the sqrt(W) weighting of a samples x features matrix
+    is applied. ``_solve_eigh``, ``_solve_svd`` and ST-POD's total energy call this, so they
+    stay in exact agreement.
+    """
+    weights = _as_weight_vector(metric, data.shape[1])
+    return data * np.sqrt(weights)
+
+
+def weighted_total_energy(data: np.ndarray, metric: SpatialMetric | np.ndarray) -> float:
+    """Pre-truncation total energy: ||sqrt(W)-weighted data||_F^2 / n_samples."""
+    data_weighted = apply_sqrt_metric(data, metric)
+    return float(np.linalg.norm(data_weighted, "fro") ** 2 / data.shape[0])
+
+
 # Row-centeredness discriminator for the SVD route when ``n_keep is None``.
 # Statistic: max|mean over axis 0| / std(data). Real ST-POD delay lifts bottom
 # out near 2e-3 (~2000x above this). Centered data stays below it through
@@ -362,8 +379,7 @@ def _solve_eigh(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n_samples, n_space = data.shape
     weights = _as_weight_vector(metric, n_space)
-    sqrt_weights = np.sqrt(weights)
-    data_weighted = data * sqrt_weights
+    data_weighted = apply_sqrt_metric(data, metric)
 
     # Complex ensembles (PSD-POD Fourier realizations) use the Hermitian
     # temporal kernel and the reconstruction that path has always used.
@@ -523,8 +539,7 @@ def _solve_svd(
     """
     n_samples, n_space = data.shape
     weights = _as_weight_vector(metric, n_space)
-    sqrt_weights = np.sqrt(weights)
-    data_weighted = data * sqrt_weights
+    data_weighted = apply_sqrt_metric(data, metric)
 
     # n_kernel scales the singular-value floor: dimension of the Gram that
     # would have been factored (temporal if n_samples < n_space, else spatial).
