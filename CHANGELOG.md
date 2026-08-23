@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The library entry point and the command line now execute ONE analysis
   sequence per method (`run_analysis`), so the two paths can no longer drift
   apart in plotting or save behaviour.
+- POD and ST-POD now read a square spatial weight matrix through the same
+  shared rule as everywhere else: only an exactly diagonal square is
+  accepted (its diagonal is used); any other square raises. The loose
+  `np.allclose` that used to wave through a small off-diagonal is gone.
 
 ### Breaking
 

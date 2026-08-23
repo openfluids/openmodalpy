@@ -609,3 +609,126 @@ def test_prescribed_weights_change_the_eigenvalues(
             "DMD modes changed under a different spatial metric, but "
             "dmd.py documents that the regression does not use self.W"
         )
+
+
+_SQUARE_DIAG_W = np.diag([0.5, 1.0, 2.0, 4.0])
+_SQUARE_NONDIAG_W = _SQUARE_DIAG_W.copy()
+_SQUARE_NONDIAG_W[0, 1] = _SQUARE_NONDIAG_W[1, 0] = 1e-8
+
+
+def _square_metric_field(n_space: int = 4, n_snapshots: int = 12) -> dict:
+    rng = np.random.default_rng(0)
+    return {
+        "q": rng.standard_normal((n_snapshots, n_space)),
+        "x": np.arange(n_space, dtype=float),
+        "y": np.array([0.0]),
+        "dt": 1.0,
+        "Nx": n_space,
+        "Ny": 1,
+        "Ns": n_snapshots,
+    }
+
+
+def test_pod_perform_pod_square_diagonal_matches_column_form(tmp_path):
+    """perform_pod reads a diagonal square W the same way it reads its column form."""
+    field = _square_metric_field()
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        spatial_weights=np.diag(_SQUARE_DIAG_W),
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+    column_eigenvalues = analyzer.eigenvalues.copy()
+
+    analyzer.W = _SQUARE_DIAG_W.copy()
+    analyzer.perform_pod()
+
+    np.testing.assert_allclose(analyzer.eigenvalues, column_eigenvalues)
+
+
+def test_pod_perform_pod_nondiagonal_square_raises(tmp_path):
+    """perform_pod rejects a square W with a real off-diagonal, not just a loose one."""
+    field = _square_metric_field()
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        spatial_weights=np.diag(_SQUARE_DIAG_W),
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    analyzer.load_and_preprocess()
+    analyzer.W = _SQUARE_NONDIAG_W.copy()
+    with pytest.raises(ValueError, match=r"np\.diag"):
+        analyzer.perform_pod()
+
+
+def test_pod_orthogonality_check_square_diagonal_matches_column_form(tmp_path):
+    """check_spatial_mode_orthogonality reads a diagonal square W the same way it reads its column form."""
+    field = _square_metric_field()
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        spatial_weights=np.diag(_SQUARE_DIAG_W),
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+    column_result = analyzer.check_spatial_mode_orthogonality()
+
+    analyzer.W = _SQUARE_DIAG_W.copy()
+    square_result = analyzer.check_spatial_mode_orthogonality()
+
+    assert square_result == column_result
+
+
+def test_pod_orthogonality_check_nondiagonal_square_raises(tmp_path):
+    """check_spatial_mode_orthogonality rejects a square W with a real off-diagonal instead of the allclose it used to accept."""
+    field = _square_metric_field()
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: field,
+        spatial_weights=np.diag(_SQUARE_DIAG_W),
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+    analyzer.W = _SQUARE_NONDIAG_W.copy()
+    with pytest.raises(ValueError, match=r"np\.diag"):
+        analyzer.check_spatial_mode_orthogonality()
+
+
+def test_stpod_get_weight_vector_square_diagonal_matches_column_form(tmp_path):
+    """_get_weight_vector reads a diagonal square W the same way it reads its column form."""
+    analyzer = STPODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: {},
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    analyzer.W = _SQUARE_DIAG_W.copy()
+    vector = analyzer._get_weight_vector(4)
+    np.testing.assert_allclose(vector, np.diag(_SQUARE_DIAG_W))
+
+
+def test_stpod_get_weight_vector_nondiagonal_square_raises(tmp_path):
+    """_get_weight_vector rejects a square W with a real off-diagonal, matching the shared coercion."""
+    analyzer = STPODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: {},
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    analyzer.W = _SQUARE_NONDIAG_W.copy()
+    with pytest.raises(ValueError, match=r"np\.diag"):
+        analyzer._get_weight_vector(4)

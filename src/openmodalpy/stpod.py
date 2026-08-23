@@ -151,7 +151,7 @@ class STPODAnalyzer(BaseAnalyzer):
         """Extract weight vector from self.W, handling various shapes."""
         if self.W.ndim == 2:
             if self.W.shape[0] == self.W.shape[1]:
-                return np.diag(self.W)
+                return decomposition._as_weight_vector(np.asarray(self.W), num_space_points)
             elif self.W.shape[1] == 1:
                 return self.W.ravel()
             else:

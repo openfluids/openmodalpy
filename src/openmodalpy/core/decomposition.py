@@ -163,9 +163,9 @@ class SpatialMetric:
             )
         if w.ndim == 2 and w.shape[0] == w.shape[1] and w.shape[0] > 1:
             raise ValueError(
-                f"SpatialMetric holds a diagonal metric as a vector and cannot "
-                f"represent a square matrix of shape {w.shape}. If the metric "
-                f"is diagonal, pass np.diag(W) instead."
+                f"SpatialMetric never accepts a square matrix, diagonal or not "
+                f"(got shape {w.shape}). Pass the diagonal itself as a 1-D "
+                f"vector: np.diag(W)."
             )
         # Validate on the raw input before any real cast — complex would
         # otherwise truncate under ComplexWarning and store only the real part.

@@ -211,7 +211,7 @@ class PODAnalyzer(BaseAnalyzer):
         # Ensure W is a 1D array for efficient broadcasting
         if self.W.ndim == 2:
             if self.W.shape[0] == self.W.shape[1]:
-                weight_vector = np.diag(self.W)
+                weight_vector = decomposition._as_weight_vector(np.asarray(self.W), num_space_points)
             elif self.W.shape[1] == 1:
                 weight_vector = self.W.ravel()
             else:
@@ -1300,18 +1300,8 @@ class PODAnalyzer(BaseAnalyzer):
         Nspace, n_saved_modes = self.modes.shape
 
         # Ensure W is a diagonal matrix for the check
-        if self.W.ndim == 1:
-            W_diag_matrix = np.diag(self.W)
-        elif self.W.ndim == 2 and self.W.shape[0] == self.W.shape[1] and np.allclose(self.W, np.diag(np.diag(self.W))):
-            W_diag_matrix = self.W
-        elif self.W.ndim == 2 and self.W.shape[1] == 1:  # (Nspace, 1) column vector
-            W_diag_matrix = np.diag(self.W.flatten())
-        else:
-            logger.warning(
-                "Unexpected shape or type for spatial weights W: %s. Cannot perform accurate orthogonality check.",
-                self.W.shape,
-            )
-            return False
+        weight_vector = decomposition._as_weight_vector(np.asarray(self.W), Nspace)
+        W_diag_matrix = np.diag(weight_vector)
 
         ortho_check_matrix = self.modes.T @ W_diag_matrix @ self.modes
         # Check diagonals are close to 1
