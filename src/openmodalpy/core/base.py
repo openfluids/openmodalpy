@@ -496,7 +496,10 @@ def _hdf5_write_mode(path: str) -> str:
 
 
 def print_summary(analysis: str, results_dir: str, figures_dir: str) -> None:
-    """Log a short summary of where results and figures were saved."""
+    """Log a short summary of where results and figures were saved.
+
+    No longer called by ``run_analysis``; kept only for compatibility.
+    """
     logger.info("%s analysis finished", analysis)
     logger.info("Results: %s", results_dir)
     logger.info("Figures: %s", figures_dir)
@@ -2255,11 +2258,18 @@ class BaseAnalyzer:
         if plots:
             self._plot_run(run_id=run_id)
         self._on_run_complete()
-        logger.info(
-            "%s analysis and plotting completed successfully in %.2f seconds.",
-            display,
-            time.time() - start_time,
-        )
+        if plots:
+            logger.info(
+                "%s analysis and plotting completed successfully in %.2f seconds.",
+                display,
+                time.time() - start_time,
+            )
+        else:
+            logger.info(
+                "%s analysis completed successfully in %.2f seconds (no figures written: plots=False).",
+                display,
+                time.time() - start_time,
+            )
         return self
 
     def _apply_snapshot_limit(self, limit_value: int | str | None) -> None:

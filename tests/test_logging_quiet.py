@@ -500,3 +500,44 @@ def test_mpod_load_results_keyerror_names_mpod(tmp_path):
     analyzer = _make_mpod(tmp_path, _synthetic_data())
     with pytest.raises(KeyError, match="not a mPOD result file"):
         analyzer.load_results("not_mpod.hdf5")
+
+
+def test_run_analysis_plots_false_says_no_figures_written(tmp_path, caplog):
+    """run_analysis(plots=False) must not claim plotting completed.
+
+    The finish line is the last thing a caller reads; with plots=False no
+    figure ever gets written, so the line must say that instead of the
+    plots=True wording.
+    """
+    results_dir = tmp_path / "results"
+    figures_dir = tmp_path / "figures"
+    results_dir.mkdir()
+    figures_dir.mkdir()
+    analyzer = _make_pod(tmp_path, _synthetic_data())
+    analyzer.results_dir = str(results_dir)
+    analyzer.figures_dir = str(figures_dir)
+
+    with caplog.at_level(logging.INFO, logger="openmodalpy"):
+        analyzer.run_analysis(plots=False)
+
+    info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("no figures written" in m for m in info_msgs), info_msgs
+    assert not any("plotting completed" in m for m in info_msgs), info_msgs
+    assert list(figures_dir.iterdir()) == []
+
+
+def test_run_analysis_plots_true_still_says_plotting_completed(tmp_path, caplog):
+    """Pins the working case: plots=True keeps the original finish line."""
+    results_dir = tmp_path / "results"
+    figures_dir = tmp_path / "figures"
+    results_dir.mkdir()
+    figures_dir.mkdir()
+    analyzer = _make_pod(tmp_path, _synthetic_data())
+    analyzer.results_dir = str(results_dir)
+    analyzer.figures_dir = str(figures_dir)
+
+    with caplog.at_level(logging.INFO, logger="openmodalpy"):
+        analyzer.run_analysis(plots=True)
+
+    info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("analysis and plotting completed" in m for m in info_msgs), info_msgs

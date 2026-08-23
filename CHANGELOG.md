@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `run_analysis` with `plots=False` no longer reports that plotting completed.
 - **Numerical change: polar grid weights.** `spatial_weight_type="polar"`
   on a grid flattened the 2-D (x, r) weights x-major (`index = ix*Ny + iy`)
   while the snapshot contract is y-major (`index = iy*Nx + ix`), so every
