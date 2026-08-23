@@ -792,3 +792,44 @@ def test_pod_uniform_metric_moves_eigenvalues(monkeypatch, tmp_path):
         "POD eigenvalues did not move when calculate_uniform_weights returned "
         "a ramp; the uniform path discarded the metric"
     )
+
+
+def test_pod_total_energy_matches_full_untruncated_weighted_spectrum():
+    """total_energy is the pre-truncation total, independent of the internal path.
+
+    Build the sqrt(W)-weighted, mean-removed data by hand and take the full
+    eigh of the temporal kernel; the sum of ALL its eigenvalues must match
+    ``analyzer.total_energy`` even though the analyzer only keeps a few
+    modes. Weights are non-uniform so the comparison actually exercises the
+    metric.
+    """
+    rng = np.random.default_rng(0)
+    n_samples, n_space = 5, 4
+    q = rng.standard_normal((n_samples, n_space))
+    weights = np.array([0.5, 1.0, 2.0, 3.5])
+    data = {
+        "q": q,
+        "x": np.arange(n_space, dtype=float),
+        "y": np.array([0.0]),
+        "dt": 1.0,
+        "Nx": n_space,
+        "Ny": 1,
+        "Ns": n_samples,
+    }
+    analyzer = PODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: data,
+        spatial_weights=weights,
+        n_modes_save=2,
+    )
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+
+    mean_removed = q - np.mean(q, axis=0)
+    weighted = mean_removed * np.sqrt(weights)
+    kernel = weighted @ weighted.T / n_samples
+    full_eigenvalues = np.linalg.eigvalsh(kernel)
+    expected_total_energy = float(np.sum(full_eigenvalues))
+
+    assert analyzer.total_energy == pytest.approx(expected_total_energy, rel=1e-13)
+    assert analyzer.energy_captured_fraction <= 1 + 1e-12

@@ -263,12 +263,7 @@ class PODAnalyzer(BaseAnalyzer):
         )
 
         # True pre-truncation total: sum of all sigma²/m = ‖data_weighted‖_F² / m.
-        # Same exact sqrt(W) as the solver so the identity holds on both routes,
-        # independent of k.
-        sqrt_weights = np.sqrt(metric.weights)
-        data_weighted = lifted * sqrt_weights
-        n_samples = lifted.shape[0]
-        self.total_energy = float(np.linalg.norm(data_weighted, "fro") ** 2 / n_samples)
+        self.total_energy = decomposition.weighted_total_energy(lifted, metric)
 
         # Truncate to requested number of modes (solver may still return fewer
         # after its relative cutoff).
