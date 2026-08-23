@@ -1264,13 +1264,13 @@ class GenericDataLoader(DataLoader):
         field: str | None = None,
         load_single: bool = False,
         schema: dict[str, Any] | None = None,
-        resample_time: bool = False,
         **kwargs: object,
     ) -> Dict[str, Any]:
         """Load a plain NPZ or HDF5 file into the standardized contract."""
         del field, load_single
         if schema is not None:
             raise TypeError("GenericDataLoader takes no schema; it reads named contract datasets.")
+        resample_time = bool(kwargs.pop("resample_time", False))
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected generic loader options: {unexpected}.")

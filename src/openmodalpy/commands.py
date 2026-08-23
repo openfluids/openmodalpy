@@ -7,7 +7,7 @@ import importlib.resources
 import json
 from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from openmodalpy.bsmd import BSMDAnalyzer
 from openmodalpy.config_io import load_jsonc, resolve_path
@@ -503,6 +503,14 @@ def _run_pod_like(
     )
 
 
+class _DMDPerformKwargs(TypedDict, total=False):
+    """Keyword arguments accepted by ``DMDAnalyzer.perform_dmd``."""
+
+    method: str
+    delays: int
+    named_variant: str
+
+
 def _run_dmd(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
     file_path, data_loader, results_dir, figures_dir = _prepare_common_run(spec, dry_run=dry_run)
     if dry_run:
@@ -525,6 +533,7 @@ def _run_dmd(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
     analyzer = DMDAnalyzer(**dmd_kwargs)
 
     _hodmd_variants = {"hodmd": "ls", "tls_hodmd": "tls"}
+    perform_kwargs: _DMDPerformKwargs
     if spec.method in _hodmd_variants:
         delays = int(spec.params.get("delays", spec.case.embedding_dim))
         if delays < 2:

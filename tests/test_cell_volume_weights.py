@@ -283,9 +283,7 @@ def test_cell_volume_branch_refuses_non_monotone_coordinates(tmp_path):
         "Ny": n,
         "Ns": 4,
     }
-    pod = PODAnalyzer(
-        data=d, spatial_weight_type="cell_volume", results_dir=tmp_path, figures_dir=tmp_path
-    )
+    pod = PODAnalyzer(data=d, spatial_weight_type="cell_volume", results_dir=tmp_path, figures_dir=tmp_path)
     with pytest.raises(ValueError, match="flip"):
         pod.load_and_preprocess()
 

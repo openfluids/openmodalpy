@@ -1253,6 +1253,7 @@ def calculate_polar_weights(
     ``_polar_theta_sector_fractions``). Flattened in the order documented in
     ``calculate_cell_volume_weights``.
     """
+    z_arr = None if z is None else np.asarray(z, dtype=np.float64)
     if (
         n_space is not None
         and x.ndim == 1
@@ -1262,7 +1263,7 @@ def calculate_polar_weights(
     ):
         return np.abs(y).reshape(int(n_space), 1)
     if use_parallel and PARALLEL_AVAILABLE:
-        return calculate_polar_weights_optimized(x, y, z=z, n_space=n_space)
+        return calculate_polar_weights_optimized(x, y, z=z_arr, n_space=n_space)
     # Support both 1-D and 2-D coordinate arrays
     x_line = x[:, 0] if x.ndim > 1 else x
     y_line = y[0, :] if y.ndim > 1 else y
@@ -1307,13 +1308,13 @@ def calculate_polar_weights(
     if Nx > 1:
         Wx[Nx - 1] = (x_line[Nx - 1] - x_line[Nx - 2]) / 2
 
-    if z is None:
+    if z_arr is None:
         # Combine weights: (Ny, Nx) outer product, flattened C-order.
         W = np.reshape(np.outer(Wy.ravel(), Wx.ravel()), (Nx * Ny, 1))
         return W
 
     # 3-D polar: fold in the azimuth sector fraction and flatten (theta, r, x).
-    theta_fraction = _polar_theta_sector_fractions(np.asarray(z, dtype=np.float64))
+    theta_fraction = _polar_theta_sector_fractions(z_arr)
     volumes_2d = np.outer(Wy.ravel(), Wx.ravel())  # (Ny, Nx)
     volumes = theta_fraction[:, None, None] * volumes_2d[None, :, :]  # (Ntheta, Ny, Nx)
     return volumes.reshape(-1, 1)
@@ -1843,6 +1844,8 @@ class BaseAnalyzer:
         # dict here can only come from a legacy side-channel assignment, which
         # keeps its old reload semantics.
         if not self.data:
+            if self.file_path is None:
+                raise ValueError("no file_path and no data were given")
             self.data = self.data_loader(self.file_path)
 
         # data_loader is any (str) -> dict. If the dataset reports a grid, its

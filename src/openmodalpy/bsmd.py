@@ -895,9 +895,7 @@ class BSMDAnalyzer(BaseAnalyzer):
                 self.data[attr_key] = res.attrs[attr_key]
         logger.info("BSMD results loaded.")
 
-    def _triad_plot_order(
-        self, lambdas: NDArray[np.floating], valid_idx: NDArray[np.integer]
-    ) -> list[int]:
+    def _triad_plot_order(self, lambdas: NDArray[np.floating], valid_idx: NDArray[np.integer]) -> list[int]:
         """Canonical plot order of ``valid_idx`` triads: |lambda| descending, ties by triad tuple.
 
         Grouping uses the same ``CANONICAL_TIE_RTOL`` band as the DMD spectrum order
