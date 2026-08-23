@@ -24,12 +24,18 @@ OPENMP_AVAILABLE = False
 PARALLEL_AVAILABLE = True
 
 
-def calculate_polar_weights_optimized(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+def calculate_polar_weights_optimized(
+    x: np.ndarray, y: np.ndarray, n_space: int | None = None
+) -> np.ndarray:
     """
     Calculate integration weights for 2D cylindrical grid.
 
     This function uses a fully vectorized NumPy implementation that works on any
     platform without special dependencies.
+
+    With ``n_space`` set and ``x``/``y`` both 1-D of length ``n_space``, the
+    coordinates are scattered points and the weight per point is its radius,
+    ``w_i = |y_i|`` (no cell measure), matching ``calculate_polar_weights``.
 
     Parameters:
     -----------
@@ -37,12 +43,22 @@ def calculate_polar_weights_optimized(x: np.ndarray, y: np.ndarray) -> np.ndarra
         Axial coordinates
     y : np.ndarray
         Radial coordinates
+    n_space : int | None
+        Number of snapshot columns; set to read ``x``/``y`` as scattered points.
 
     Returns:
     --------
     np.ndarray
         Integration weights, shape (Nx * Ny, 1)
     """
+    if (
+        n_space is not None
+        and x.ndim == 1
+        and y.ndim == 1
+        and int(x.shape[0]) == int(n_space)
+        and int(y.shape[0]) == int(n_space)
+    ):
+        return np.abs(y).reshape(int(n_space), 1)
     return _calculate_weights_numpy(x, y)
 
 

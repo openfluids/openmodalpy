@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `spatial_weight_type="uniform"` is back to all-ones weights (v0.5.0
   behaviour). The trapezoid cell-volume metric is now the explicit opt-in
   type `"cell_volume"`; without usable 1-D grid coordinates it raises.
+- `spatial_weight_type="polar"` now accepts scattered points (1-D `x`, `y`
+  of length `Nspace`) and weights each point by its radius, `w_i = |y_i|`;
+  grid input is unchanged.
 
 - The test-suite coverage floor moved from a nominal 50% (24 points under the
   measured value, so real regressions stayed invisible) to a 72% ratchet read

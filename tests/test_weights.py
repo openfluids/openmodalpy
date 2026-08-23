@@ -732,3 +732,109 @@ def test_stpod_get_weight_vector_nondiagonal_square_raises(tmp_path):
     analyzer.W = _SQUARE_NONDIAG_W.copy()
     with pytest.raises(ValueError, match=r"np\.diag"):
         analyzer._get_weight_vector(4)
+
+
+# ---------------------------------------------------------------------------
+# Polar weights on scattered points (1-D x, y, no grid)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("use_parallel", [False, True])
+def test_polar_weights_scattered_points_equal_radius(use_parallel):
+    """Scattered polar points: the weight per point is just its radius |y_i|."""
+    rng = np.random.default_rng(7)
+    n = 7
+    x = rng.uniform(0.0, 1.0, n)
+    y = rng.uniform(-2.0, 2.0, n)
+    w = calculate_polar_weights(x, y, use_parallel=use_parallel, n_space=n)
+    assert w.shape == (n, 1)
+    np.testing.assert_array_equal(w.ravel(), np.abs(y))
+
+
+def test_polar_weights_grid_unchanged_by_n_space():
+    """Grid input keeps today's tensor-product result, bit-for-bit, once n_space is passed."""
+    x = np.array([0.0, 1.0, 2.0])
+    y = np.array([0.0, 1.0, 2.0, 3.0])
+    n_space = x.size * y.size
+    w_no_n_space = calculate_polar_weights(x, y, use_parallel=False)
+    w_with_n_space = calculate_polar_weights(x, y, use_parallel=False, n_space=n_space)
+    assert np.array_equal(w_no_n_space, w_with_n_space)
+
+    x2d = np.repeat(x[:, None], len(y), axis=1)
+    y2d = np.repeat(y[None, :], len(x), axis=0)
+    w_2d = calculate_polar_weights(x2d, y2d, use_parallel=False, n_space=n_space)
+    assert np.array_equal(w_no_n_space, w_2d)
+
+
+def test_polar_weights_scattered_optimized_matches_plain():
+    """The optimized route and the plain route agree on scattered points."""
+    rng = np.random.default_rng(11)
+    n = 7
+    x = rng.uniform(0.0, 1.0, n)
+    y = rng.uniform(-2.0, 2.0, n)
+    w_plain = calculate_polar_weights(x, y, use_parallel=False, n_space=n)
+    w_optimized = calculate_polar_weights(x, y, use_parallel=True, n_space=n)
+    np.testing.assert_array_equal(w_plain, w_optimized)
+
+
+def test_polar_weights_scattered_end_to_end_npz(tmp_path):
+    """POD with spatial_weight_type='polar' on a scattered .npz builds a length-n W and runs."""
+    rng = np.random.default_rng(3)
+    ns, n = 6, 9
+    x = rng.uniform(0.0, 1.0, n)
+    y = rng.uniform(0.1, 2.0, n)
+    q = rng.standard_normal((ns, n))
+
+    path = tmp_path / "scattered_polar.npz"
+    np.savez(path, q=q, x=x, y=y, dt=np.float64(0.1), Nx=n, Ny=1)
+    pod = PODAnalyzer(
+        file_path=str(path),
+        spatial_weight_type="polar",
+        use_parallel=False,
+        n_modes_save=2,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    pod.load_and_preprocess()
+    assert np.asarray(pod.W).shape == (n, 1)
+    np.testing.assert_array_equal(np.asarray(pod.W).ravel(), np.abs(y))
+    pod.perform_pod()
+    assert pod.eigenvalues.shape[0] > 0
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=ValueError,
+    reason="3-D polar metric: third-axis meaning pending",
+)
+def test_polar_weights_3d_grid_raises_length_mismatch(tmp_path):
+    """A 3-D (x, r, third axis) polar field: the metric length still must equal q.shape[1].
+
+    Polar weights only use x and r; a claimed third grid axis inflates
+    q.shape[1] beyond what the 2-D (x, r) metric can cover, and today's
+    length check catches that. This is the falsifier for a future 3-D polar
+    metric: once the third axis gets a defined meaning, W will have the
+    right length and this test flips to green, at which point the
+    ``xfail`` marker should come off.
+    """
+    nx, ny, nz = 3, 4, 2
+    n_space = nx * ny * nz
+    d = {
+        "q": np.random.default_rng(5).standard_normal((5, n_space)),
+        "x": np.linspace(0.0, 1.0, nx),
+        "y": np.linspace(0.1, 2.0, ny),
+        "dt": 0.1,
+        "Nx": nx,
+        "Ny": ny,
+        "Nz": nz,
+        "Ns": 5,
+    }
+    pod = PODAnalyzer(
+        data=d,
+        spatial_weight_type="polar",
+        use_parallel=False,
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+    )
+    pod.load_and_preprocess()
+    assert len(np.asarray(pod.W).ravel()) == n_space

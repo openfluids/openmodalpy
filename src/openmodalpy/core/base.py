@@ -1140,10 +1140,28 @@ def generate_dummy_data_like_jetles(
     return output_path
 
 
-def calculate_polar_weights(x: np.ndarray, y: np.ndarray, use_parallel: bool = True) -> np.ndarray:
-    """Calculate integration weights for a 2D cylindrical grid (x, r)."""
+def calculate_polar_weights(
+    x: np.ndarray, y: np.ndarray, use_parallel: bool = True, n_space: int | None = None
+) -> np.ndarray:
+    """Calculate integration weights for a 2D cylindrical grid (x, r).
+
+    With ``n_space`` set and ``x``/``y`` both 1-D of length ``n_space``, the
+    coordinates are read as scattered points rather than grid axes: the
+    weight per point is its radius, ``w_i = r_i = |y_i|``. This is the
+    cylindrical Jacobian at the point, not a cell measure — it carries no
+    integration cell, same as the scattered branch of
+    ``calculate_uniform_weights``.
+    """
+    if (
+        n_space is not None
+        and x.ndim == 1
+        and y.ndim == 1
+        and int(x.shape[0]) == int(n_space)
+        and int(y.shape[0]) == int(n_space)
+    ):
+        return np.abs(y).reshape(int(n_space), 1)
     if use_parallel and PARALLEL_AVAILABLE:
-        return calculate_polar_weights_optimized(x, y)
+        return calculate_polar_weights_optimized(x, y, n_space=n_space)
     # Support both 1-D and 2-D coordinate arrays
     x_line = x[:, 0] if x.ndim > 1 else x
     y_line = y[0, :] if y.ndim > 1 else y
@@ -1747,7 +1765,9 @@ class BaseAnalyzer:
             logger.info("Using prescribed spatial weights.")
         elif self.spatial_weight_type == "polar":
             self.W = _as_spatial_weight_column(
-                calculate_polar_weights(self.data["x"], self.data["y"], use_parallel=self.use_parallel)
+                calculate_polar_weights(
+                    self.data["x"], self.data["y"], use_parallel=self.use_parallel, n_space=n_space
+                )
             )
             logger.info("Using polar (cylindrical) spatial weights.")
         elif self.spatial_weight_type == "cell_volume":

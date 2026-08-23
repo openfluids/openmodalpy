@@ -75,7 +75,7 @@ def test_invalid_timestep_raises_value_error_naming_source(dt):
 
 @pytest.mark.parametrize("dt", [0.25, 2.0])
 def test_valid_timestep_sets_fs(dt):
-    """Two distinct dt, so the bead cannot be satisfied by always raising."""
+    """Two distinct dt, so this check cannot be satisfied by always raising."""
     analyzer = _load(dt)
     assert np.isclose(analyzer.fs, 1.0 / dt)
     # Validation must read dt, never write it back -- a coerced or defaulted
@@ -104,8 +104,8 @@ def test_load_and_preprocess_routes_through_require_dt(monkeypatch):
     """load_and_preprocess must call _require_dt, not keep a second copy of the check.
 
     Asserting the attribute merely exists would pass against a duplicated
-    inline check, which is the arrangement this bead exists to remove. Making
-    the accessor raise a sentinel is what actually proves the call routes
+    inline check, which is the arrangement this fix removes. Making the
+    accessor raise a sentinel is what actually proves the call routes
     through it.
     """
     sentinel = ValueError("sentinel raised by _require_dt")
@@ -166,8 +166,9 @@ def test_dmd_reload_without_dt_raises():
 def test_dmd_omega_scales_inversely_with_dt():
     """omega = log(lambda)/dt, so halving dt must double every omega.
 
-    The positive control for this bead: without it, routing every dt read
-    through an accessor that always raised would satisfy the negative tests.
+    The positive control for routing every dt read through validation:
+    without it, an accessor that always raised would satisfy the negative
+    tests.
     It also pins the direction of the division, which a wrong-way fix would
     otherwise pass silently.
     """
