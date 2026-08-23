@@ -216,6 +216,10 @@ point by its radius, `w_i = |y_i|`, the cylindrical Jacobian at the point;
 like scattered `"uniform"`, it carries no cell measure. Grid input (2-D
 `x`/`y`, or 1-D axes whose product is `Nspace`) is unchanged.
 
+On a 3-D polar grid, `z` is azimuth theta in radians, not a Cartesian
+coordinate; weights are sectors of the (x, r) annulus (`Wx * Wr *
+Delta-theta / (2*pi)`), and a `z` range beyond one revolution (2*pi) raises. `z` must cover one full revolution (sampled half-open or with both 0 and 2*pi given); a wrap gap much larger than the regular spacing -- a partial wedge -- also raises.
+
 Cell volumes are opt-in because trapezoid widths suit a wall-bounded stretched
 axis but not a periodic one. On a periodic axis equal weights are exact
 (Euler–Maclaurin: the boundary terms cancel), while trapezoid weights lose one

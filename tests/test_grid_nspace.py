@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from openmodalpy import BSMDAnalyzer, PODAnalyzer, SPODAnalyzer, STPODAnalyzer
-from openmodalpy.core.base import _reported_grid
+from openmodalpy.core.base import _reported_grid, calculate_polar_weights
 
 
 def _analyzer(loader, tmp_path):
@@ -280,15 +280,23 @@ def test_z_missing_while_nz_gt_1_raises(tmp_path):
     assert "q.shape[1]=24" in msg, msg
 
 
-def test_three_d_polar_raises(tmp_path):
-    """Polar ignores z, so a 3-D polar field must not silently get an Nx*Ny metric."""
+def test_three_d_polar_builds_sector_metric(tmp_path):
+    """A 3-D polar field reads z as azimuth and builds a full-length sector metric.
+
+    z is a full revolution sampled at two azimuths (half-open); the metric
+    then covers all Nx*Ny*Nz columns, and summing it over the two azimuths
+    reproduces the 2-D (x, r) weight.
+    """
+    x = np.linspace(0.0, 1.0, 4)
+    y = np.linspace(0.2, 1.0, 3)
+    z = np.linspace(0.0, 2.0 * np.pi, 2, endpoint=False)
 
     def loader(_: str) -> dict:
         return {
             "q": np.ones((6, 24), dtype=np.float32),
-            "x": np.linspace(0.0, 1.0, 4),
-            "y": np.linspace(0.2, 1.0, 3),
-            "z": np.linspace(0.0, 1.0, 2),
+            "x": x,
+            "y": y,
+            "z": z,
             "Nx": 4,
             "Ny": 3,
             "Nz": 2,
@@ -304,11 +312,13 @@ def test_three_d_polar_raises(tmp_path):
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
-    with pytest.raises(ValueError, match=r"q\.shape\[1\]") as info:
-        analyzer.load_and_preprocess()
-    msg = str(info.value)
-    assert "length 12" in msg, msg
-    assert "q.shape[1]=24" in msg, msg
+    analyzer.load_and_preprocess()
+    assert len(np.asarray(analyzer.W).ravel()) == 24
+
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(4, 3)
+    w3d = np.asarray(analyzer.W).reshape(2, 3, 4)
+    summed = w3d.sum(axis=0)  # (Ny, Nx)
+    np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)
 
 
 def test_square_cartesian_grid_is_not_read_as_scattered(tmp_path):

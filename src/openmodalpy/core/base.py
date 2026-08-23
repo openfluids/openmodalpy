@@ -1140,8 +1140,80 @@ def generate_dummy_data_like_jetles(
     return output_path
 
 
+def _polar_theta_sector_fractions(z: np.ndarray) -> np.ndarray:
+    """Sector fraction Delta-theta / (2*pi) for the polar third axis.
+
+    ``z`` is azimuth theta in radians, strictly increasing, spanning at most
+    one revolution (``theta_max - theta_min <= 2*pi + 1e-9``). Theta is
+    periodic, so each point's width also counts the gap that wraps back to
+    the first point one revolution later: append a virtual point at
+    ``theta[0] + 2*pi``, take the plain trapezoid widths of that extended
+    axis with ``_trapezoid_widths``, then fold the last (virtual) width back
+    onto the first point. A partition covering the full circle then sums to
+    exactly 2*pi, whatever its spacing.
+
+    Two full-revolution samplings are accepted: half-open (``endpoint=False``
+    style, the wrap gap back to ``theta[0] + 2*pi`` is close to the regular
+    interior spacing) and closed (``z`` includes both 0 and ``2*pi``, wrap
+    gap 0 -- the plain trapezoid widths of ``z`` itself already sum to
+    ``2*pi`` and are used directly, with no wraparound extension). A theta
+    axis covering only part of the circle -- a wrap gap much larger than the
+    largest interior spacing -- is refused: sector weights assume one full
+    revolution, and a wedge needs an explicit ``spatial_weights=`` metric.
+    """
+    z_arr = np.asarray(z, dtype=np.float64)
+    if z_arr.ndim != 1:
+        raise ValueError(
+            "z must be a 1-D azimuth theta axis in radians; got ndim="
+            f"{z_arr.ndim}. The polar third axis is azimuth, not a mesh."
+        )
+    if z_arr.size == 0:
+        raise ValueError("z is empty; cannot derive azimuth sector widths.")
+    if z_arr.size > 1 and np.any(np.diff(z_arr) <= 0.0):
+        raise ValueError(
+            f"z is not strictly increasing (range [{z_arr[0]:g}, {z_arr[-1]:g}] "
+            "rad). The polar third axis is azimuth theta in radians; sort it "
+            "before calling."
+        )
+    theta_range = float(z_arr[-1] - z_arr[0]) if z_arr.size > 1 else 0.0
+    if theta_range > 2.0 * np.pi + 1e-9:
+        raise ValueError(
+            f"z spans {theta_range:g} rad, more than one revolution (2*pi "
+            f"rad ~= {2.0 * np.pi:g}). The polar third axis is azimuth theta "
+            "in radians, not a Cartesian z; a Cartesian z passed by mistake "
+            "must be caught here."
+        )
+    if z_arr.size == 1:
+        return np.array([1.0])
+    wrap_gap = float((z_arr[0] + 2.0 * np.pi) - z_arr[-1])
+    max_interior_gap = float(np.diff(z_arr).max())
+    if wrap_gap > 1.5 * max_interior_gap:
+        raise ValueError(
+            f"z covers only part of one revolution: range [{z_arr[0]:g}, "
+            f"{z_arr[-1]:g}] rad, wrap gap {wrap_gap:g} rad back to "
+            f"theta[0] + 2*pi versus largest interior spacing "
+            f"{max_interior_gap:g} rad. Sector weights assume a full "
+            "revolution; a partial wedge needs an explicit spatial_weights= "
+            "metric instead."
+        )
+    if abs(wrap_gap) < 1e-9:
+        # Closed sampling: z already includes both 0 and 2*pi, so the plain
+        # trapezoid widths already sum to 2*pi -- no wraparound extension.
+        w = _trapezoid_widths(z_arr, "z")
+        return w / (2.0 * np.pi)
+    z_ext = np.concatenate([z_arr, [z_arr[0] + 2.0 * np.pi]])
+    w_ext = _trapezoid_widths(z_ext, "z")
+    w = w_ext[:-1].copy()
+    w[0] += w_ext[-1]
+    return w / (2.0 * np.pi)
+
+
 def calculate_polar_weights(
-    x: np.ndarray, y: np.ndarray, use_parallel: bool = True, n_space: int | None = None
+    x: np.ndarray,
+    y: np.ndarray,
+    z: ArrayLike | None = None,
+    use_parallel: bool = True,
+    n_space: int | None = None,
 ) -> np.ndarray:
     """Calculate integration weights for a 2D cylindrical grid (x, r).
 
@@ -1150,7 +1222,15 @@ def calculate_polar_weights(
     weight per point is its radius, ``w_i = r_i = |y_i|``. This is the
     cylindrical Jacobian at the point, not a cell measure — it carries no
     integration cell, same as the scattered branch of
-    ``calculate_uniform_weights``.
+    ``calculate_uniform_weights``. ``z`` is ignored in the scattered branch.
+
+    With ``z`` given (and not scattered), ``z`` is a 1-D azimuth axis theta in
+    radians and the weight per (x, r, theta) cell is the 2-D (x, r) weight
+    times the sector fraction ``Delta-theta / (2*pi)`` (see
+    ``_polar_theta_sector_fractions``). ``z=None`` reproduces today's
+    ``(Nx*Ny, 1)`` result bit-for-bit. The result is flattened C-order over
+    (theta, r, x), matching ``calculate_cell_volume_weights``:
+    ``index = (itheta*Ny + iy)*Nx + ix``.
     """
     if (
         n_space is not None
@@ -1161,7 +1241,7 @@ def calculate_polar_weights(
     ):
         return np.abs(y).reshape(int(n_space), 1)
     if use_parallel and PARALLEL_AVAILABLE:
-        return calculate_polar_weights_optimized(x, y, n_space=n_space)
+        return calculate_polar_weights_optimized(x, y, z=z, n_space=n_space)
     # Support both 1-D and 2-D coordinate arrays
     x_line = x[:, 0] if x.ndim > 1 else x
     y_line = y[0, :] if y.ndim > 1 else y
@@ -1206,10 +1286,16 @@ def calculate_polar_weights(
     if Nx > 1:
         Wx[Nx - 1] = (x_line[Nx - 1] - x_line[Nx - 2]) / 2
 
-    # Combine weights
-    W = np.reshape(Wx @ np.transpose(Wy), (Nx * Ny, 1))
+    if z is None:
+        # Combine weights
+        W = np.reshape(Wx @ np.transpose(Wy), (Nx * Ny, 1))
+        return W
 
-    return W
+    # 3-D polar: fold in the azimuth sector fraction and flatten (theta, r, x).
+    theta_fraction = _polar_theta_sector_fractions(np.asarray(z, dtype=np.float64))
+    volumes_2d = np.outer(Wy.ravel(), Wx.ravel())  # (Ny, Nx)
+    volumes = theta_fraction[:, None, None] * volumes_2d[None, :, :]  # (Ntheta, Ny, Nx)
+    return volumes.reshape(-1, 1)
 
 
 def calculate_uniform_weights(
@@ -1766,7 +1852,11 @@ class BaseAnalyzer:
         elif self.spatial_weight_type == "polar":
             self.W = _as_spatial_weight_column(
                 calculate_polar_weights(
-                    self.data["x"], self.data["y"], use_parallel=self.use_parallel, n_space=n_space
+                    self.data["x"],
+                    self.data["y"],
+                    z=self.data.get("z"),
+                    use_parallel=self.use_parallel,
+                    n_space=n_space,
                 )
             )
             logger.info("Using polar (cylindrical) spatial weights.")

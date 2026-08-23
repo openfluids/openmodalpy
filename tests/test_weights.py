@@ -15,11 +15,13 @@ from openmodalpy import (
 from openmodalpy.core.base import (
     BaseAnalyzer,
     _coerce_spatial_weights,
+    _polar_theta_sector_fractions,
     calculate_polar_weights,
     calculate_uniform_weights,
     require_spatial_metric,
 )
 from openmodalpy.core.decomposition import SpatialMetric, _as_weight_vector
+from openmodalpy.core.parallel import calculate_polar_weights_optimized
 
 
 def test_square_weight_matrix_yields_diagonal():
@@ -802,20 +804,12 @@ def test_polar_weights_scattered_end_to_end_npz(tmp_path):
     assert pod.eigenvalues.shape[0] > 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason="3-D polar metric: third-axis meaning pending",
-)
-def test_polar_weights_3d_grid_raises_length_mismatch(tmp_path):
-    """A 3-D (x, r, third axis) polar field: the metric length still must equal q.shape[1].
+def test_polar_weights_3d_grid_metric_length(tmp_path):
+    """A 3-D (x, r, theta) polar field: the metric length equals q.shape[1].
 
-    Polar weights only use x and r; a claimed third grid axis inflates
-    q.shape[1] beyond what the 2-D (x, r) metric can cover, and today's
-    length check catches that. This is the falsifier for a future 3-D polar
-    metric: once the third axis gets a defined meaning, W will have the
-    right length and this test flips to green, at which point the
-    ``xfail`` marker should come off.
+    The third grid axis is azimuth theta in radians; once it is passed as
+    ``z``, the 3-D polar weight covers the whole (x, r, theta) grid and its
+    length matches q.shape[1] exactly.
     """
     nx, ny, nz = 3, 4, 2
     n_space = nx * ny * nz
@@ -823,6 +817,7 @@ def test_polar_weights_3d_grid_raises_length_mismatch(tmp_path):
         "q": np.random.default_rng(5).standard_normal((5, n_space)),
         "x": np.linspace(0.0, 1.0, nx),
         "y": np.linspace(0.1, 2.0, ny),
+        "z": np.linspace(0.0, 2.0 * np.pi, nz, endpoint=False),
         "dt": 0.1,
         "Nx": nx,
         "Ny": ny,
@@ -838,3 +833,160 @@ def test_polar_weights_3d_grid_raises_length_mismatch(tmp_path):
     )
     pod.load_and_preprocess()
     assert len(np.asarray(pod.W).ravel()) == n_space
+
+
+def _xr_grid_for_theta_tests():
+    """A small (x, r) grid, distinct sizes, shared by the theta-axis tests below."""
+    x = np.array([0.0, 0.4, 1.0])
+    y = np.array([0.0, 0.3, 0.9, 2.0])
+    return x, y
+
+
+@pytest.mark.parametrize(
+    "theta",
+    [
+        np.linspace(0.0, 2.0 * np.pi, 6, endpoint=False),
+        np.array([0.0, 0.3, 1.1, 2.0, 3.9, 5.8]),
+    ],
+    ids=["uniform", "stretched"],
+)
+def test_polar_weights_3d_theta_sum_matches_2d(theta):
+    """Summing the 3-D weight over theta at each (x, r) reproduces the 2-D weight."""
+    x, y = _xr_grid_for_theta_tests()
+    Nx, Ny, Ntheta = len(x), len(y), len(theta)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
+    summed = w3d.sum(axis=0)  # (Ny, Nx)
+    np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)
+
+
+def test_polar_weights_3d_uniform_theta_equal_sectors():
+    """A uniform theta axis splits each 2-D weight into Ntheta equal sectors."""
+    x, y = _xr_grid_for_theta_tests()
+    Ntheta = 6
+    theta = np.linspace(0.0, 2.0 * np.pi, Ntheta, endpoint=False)
+    Nx, Ny = len(x), len(y)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
+    expected_sector = w2d.T / Ntheta  # (Ny, Nx)
+    for a in range(Ntheta):
+        np.testing.assert_allclose(w3d[a], expected_sector, rtol=1e-14)
+
+
+def test_polar_weights_theta_range_over_2pi_raises():
+    """A theta axis spanning more than one revolution is refused, both routes."""
+    x = np.array([0.0, 1.0])
+    y = np.array([0.0, 1.0])
+    theta_bad = np.linspace(0.0, 2.0 * np.pi * 1.1, 5)
+    with pytest.raises(ValueError, match="azimuth"):
+        calculate_polar_weights(x, y, z=theta_bad, use_parallel=False)
+    with pytest.raises(ValueError, match="azimuth"):
+        calculate_polar_weights_optimized(x, y, z=theta_bad)
+
+
+def test_polar_weights_z_none_matches_no_z_argument():
+    """Passing z=None reproduces today's (Nx*Ny, 1) result bit-for-bit, both routes."""
+    x = np.array([0.0, 1.0, 2.0])
+    y = np.array([0.0, 1.0, 2.0, 3.0])
+    w_default = calculate_polar_weights(x, y, use_parallel=False)
+    w_explicit_none = calculate_polar_weights(x, y, z=None, use_parallel=False)
+    np.testing.assert_array_equal(w_default, w_explicit_none)
+
+    w_opt_default = calculate_polar_weights_optimized(x, y)
+    w_opt_none = calculate_polar_weights_optimized(x, y, z=None)
+    np.testing.assert_array_equal(w_opt_default, w_opt_none)
+    np.testing.assert_array_equal(w_default, w_opt_default)
+
+
+@pytest.mark.parametrize(
+    "theta",
+    [
+        np.linspace(0.0, 2.0 * np.pi, 7, endpoint=False),
+        np.array([0.0, 0.3, 1.1, 2.0, 3.9, 5.8]),
+    ],
+    ids=["uniform", "stretched"],
+)
+def test_polar_weights_3d_plain_and_optimized_agree(theta):
+    """calculate_polar_weights and calculate_polar_weights_optimized agree to round-off."""
+    x, y = _xr_grid_for_theta_tests()
+    w_plain = calculate_polar_weights(x, y, z=theta, use_parallel=False)
+    w_optimized = calculate_polar_weights(x, y, z=theta, use_parallel=True)
+    np.testing.assert_allclose(w_plain, w_optimized, rtol=1e-14, atol=0.0)
+
+
+def test_polar_weights_3d_c_order_matches_analytic_integral():
+    """The (theta, r, x) flatten order integrates a separable field correctly.
+
+    x, r and theta each carry a distinct, non-constant factor and the grid
+    sizes are all different, so a swapped flatten order would not reproduce
+    the analytic total (a plain product of three independent 1-D sums).
+    """
+    x = np.array([0.0, 0.4, 1.0])
+    y = np.array([0.0, 0.3, 0.9, 2.0])
+    theta = np.array([0.0, 0.5, 1.3, 3.0, 5.5])
+    Nx, Ny, Ntheta = len(x), len(y), len(theta)
+
+    def f(v):
+        return 2.0 * v + 1.0
+
+    def g(v):
+        return v**2 + 0.5
+
+    def h(v):
+        return np.sin(v) + 2.0
+
+    theta_fraction = _polar_theta_sector_fractions(theta)
+    expected_theta_factor = float(np.dot(theta_fraction, h(theta)))
+
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    expected_xr_factor = float(np.sum(w2d * np.outer(f(x), g(y))))
+    expected_total = expected_xr_factor * expected_theta_factor
+
+    w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
+    field = h(theta)[:, None, None] * g(y)[None, :, None] * f(x)[None, None, :]
+    actual_total = float(np.dot(field.reshape(-1), w3d.reshape(-1)))
+
+    assert actual_total == pytest.approx(expected_total, rel=1e-12)
+
+
+def test_polar_weights_partial_sector_raises():
+    """A theta axis covering only part of the circle is refused, both routes.
+
+    linspace(0, pi/2, 5) is a quarter revolution: the wrap gap back to
+    theta[0] + 2*pi is far larger than the regular interior spacing, so
+    sector weights (which assume a full revolution) must not be built
+    silently.
+    """
+    x = np.array([0.0, 1.0])
+    y = np.array([0.0, 1.0])
+    theta_wedge = np.linspace(0.0, np.pi / 2.0, 5)
+    with pytest.raises(ValueError, match="part of one revolution"):
+        calculate_polar_weights(x, y, z=theta_wedge, use_parallel=False)
+    with pytest.raises(ValueError, match="part of one revolution"):
+        calculate_polar_weights_optimized(x, y, z=theta_wedge)
+
+
+def test_polar_weights_endpoint_false_full_circle_passes():
+    """A half-open full-circle theta axis (wrap gap == regular spacing) is accepted."""
+    x, y = _xr_grid_for_theta_tests()
+    Nx, Ny = len(x), len(y)
+    theta = np.linspace(0.0, 2.0 * np.pi, 6, endpoint=False)
+    w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False)
+    assert w3d.shape == (len(theta) * Ny * Nx, 1)
+
+
+def test_polar_weights_duplicated_endpoint_full_circle_passes():
+    """A closed theta axis (both 0 and 2*pi present, wrap gap 0) is accepted.
+
+    Its sectors still sum to the 2-D weight: the duplicated endpoint carries
+    two half-weight columns that together make up the true sector at that
+    angle.
+    """
+    x, y = _xr_grid_for_theta_tests()
+    Nx, Ny = len(x), len(y)
+    theta = np.linspace(0.0, 2.0 * np.pi, 6, endpoint=True)
+    Ntheta = len(theta)
+    w2d = calculate_polar_weights(x, y, use_parallel=False).reshape(Nx, Ny)
+    w3d = calculate_polar_weights(x, y, z=theta, use_parallel=False).reshape(Ntheta, Ny, Nx)
+    summed = w3d.sum(axis=0)  # (Ny, Nx)
+    np.testing.assert_allclose(summed, w2d.T, rtol=1e-15, atol=0.0)

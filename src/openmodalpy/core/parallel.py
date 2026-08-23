@@ -25,7 +25,7 @@ PARALLEL_AVAILABLE = True
 
 
 def calculate_polar_weights_optimized(
-    x: np.ndarray, y: np.ndarray, n_space: int | None = None
+    x: np.ndarray, y: np.ndarray, z: np.ndarray | None = None, n_space: int | None = None
 ) -> np.ndarray:
     """
     Calculate integration weights for 2D cylindrical grid.
@@ -36,6 +36,11 @@ def calculate_polar_weights_optimized(
     With ``n_space`` set and ``x``/``y`` both 1-D of length ``n_space``, the
     coordinates are scattered points and the weight per point is its radius,
     ``w_i = |y_i|`` (no cell measure), matching ``calculate_polar_weights``.
+    ``z`` is ignored in that branch.
+
+    With ``z`` given (and not scattered), ``z`` is a 1-D azimuth axis theta in
+    radians; see ``calculate_polar_weights`` for the sector-weight definition
+    and the flatten order.
 
     Parameters:
     -----------
@@ -43,13 +48,15 @@ def calculate_polar_weights_optimized(
         Axial coordinates
     y : np.ndarray
         Radial coordinates
+    z : np.ndarray | None
+        Azimuth axis theta in radians, or None for the 2-D (x, r) grid.
     n_space : int | None
         Number of snapshot columns; set to read ``x``/``y`` as scattered points.
 
     Returns:
     --------
     np.ndarray
-        Integration weights, shape (Nx * Ny, 1)
+        Integration weights, shape (Nx * Ny, 1) or (Nx * Ny * Ntheta, 1)
     """
     if (
         n_space is not None
@@ -59,10 +66,10 @@ def calculate_polar_weights_optimized(
         and int(y.shape[0]) == int(n_space)
     ):
         return np.abs(y).reshape(int(n_space), 1)
-    return _calculate_weights_numpy(x, y)
+    return _calculate_weights_numpy(x, y, z=z)
 
 
-def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray, z: np.ndarray | None = None) -> np.ndarray:
     """Vectorized NumPy implementation of polar weights."""
     Nx, Ny = len(x), len(y)
 
@@ -102,10 +109,20 @@ def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     else:
         Wx[0] = 1.0
 
-    # Combine weights using outer product (much faster than loops)
-    W = np.outer(Wx, Wy).flatten()
+    if z is None:
+        # Combine weights using outer product (much faster than loops)
+        W = np.outer(Wx, Wy).flatten()
+        return W.reshape(-1, 1)
 
-    return W.reshape(-1, 1)
+    # 3-D polar: fold in the azimuth sector fraction and flatten (theta, r, x).
+    # Imported lazily: base.py imports this module at load time, so importing
+    # base at this module's top level would be circular.
+    from openmodalpy.core.base import _polar_theta_sector_fractions
+
+    theta_fraction = _polar_theta_sector_fractions(np.asarray(z, dtype=np.float64))
+    volumes_2d = np.outer(Wy, Wx)  # (Ny, Nx)
+    volumes = theta_fraction[:, None, None] * volumes_2d[None, :, :]  # (Ntheta, Ny, Nx)
+    return volumes.reshape(-1, 1)
 
 
 # Placeholder function maintained for backward compatibility. It simply calls
