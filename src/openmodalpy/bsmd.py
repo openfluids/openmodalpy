@@ -50,6 +50,7 @@ from openmodalpy.core.base import (
     _as_spatial_weight_column,
     _hdf5_write_mode,
     add_inset_colorbar,
+    canonical_tie_groups,
     canonicalize_modes,
     get_fig_aspect_ratio,
     make_result_filename,
@@ -894,6 +895,26 @@ class BSMDAnalyzer(BaseAnalyzer):
                 self.data[attr_key] = res.attrs[attr_key]
         logger.info("BSMD results loaded.")
 
+    def _triad_plot_order(
+        self, lambdas: NDArray[np.floating], valid_idx: NDArray[np.integer]
+    ) -> list[int]:
+        """Canonical plot order of ``valid_idx`` triads: |lambda| descending, ties by triad tuple.
+
+        Grouping uses the same ``CANONICAL_TIE_RTOL`` band as the DMD spectrum order
+        (``canonical_tie_groups``); within a tied group the order is the ``(p, q, r)``
+        triad tuple from ``static_triads_list``, which is stable across platforms
+        even when the per-triad eigenvalues themselves are not.
+        """
+        order: list[int] = []
+        for group in canonical_tie_groups(lambdas[valid_idx]):
+            group_original = valid_idx[group]
+            tie_key = sorted(
+                range(len(group_original)),
+                key=lambda k: self.static_triads_list[int(group_original[k])],
+            )
+            order.extend(int(group_original[k]) for k in tie_key)
+        return order
+
     def plot_modes(
         self, triad_indices: Sequence[int] | NDArray[np.integer] | None = None, plot_n_modes: Optional[int] = 10
     ) -> None:
@@ -911,10 +932,9 @@ class BSMDAnalyzer(BaseAnalyzer):
         if triad_indices is None:
             lambdas = np.abs(self.eigenvalues)
             valid = ~np.isnan(lambdas)
-            triad_indices = list(np.argsort(lambdas[valid])[::-1])
             # Map back to original indices (skip NaN triads)
             valid_idx = np.where(valid)[0]
-            triad_indices = [int(valid_idx[k]) for k in triad_indices]
+            triad_indices = self._triad_plot_order(lambdas, valid_idx)
         if plot_n_modes is not None:
             triad_indices = triad_indices[:plot_n_modes]
 
@@ -1039,9 +1059,8 @@ class BSMDAnalyzer(BaseAnalyzer):
         if triad_indices is None:
             lambdas = np.abs(self.eigenvalues)
             valid = ~np.isnan(lambdas)
-            triad_indices = list(np.argsort(lambdas[valid])[::-1])
             valid_idx = np.where(valid)[0]
-            triad_indices = [int(valid_idx[k]) for k in triad_indices]
+            triad_indices = self._triad_plot_order(lambdas, valid_idx)
         if plot_n_modes is not None:
             triad_indices = triad_indices[:plot_n_modes]
         x_coords = self.data.get("x")

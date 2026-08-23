@@ -54,6 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `np.reshape(np.outer(Wx, Wy), (-1, 1))` built the old way — any
   difference beyond round-off means your polar eigenvalues change with
   this release.
+- BSMD triad plots picked their order with a plain `argsort` on the
+  per-triad dominant eigenvalue magnitude, so triads tied to machine
+  precision (a common case: eigenvalues come from independent `eig` calls
+  that can round differently on different platforms) could swap places
+  near the plot cutoff and change which modes made the figure. Tied triads
+  now sort by their `(p, q, r)` triad tuple, giving the same figure on
+  every platform.
 
 ### Breaking
 

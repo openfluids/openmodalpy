@@ -201,6 +201,39 @@ def compute_reduced_svd(
 CANONICAL_TIE_RTOL = 1e-12
 
 
+def canonical_tie_groups(magnitudes: ArrayLike) -> list[np.ndarray]:
+    """Split indices into |value|-descending runs that tie under ``CANONICAL_TIE_RTOL``.
+
+    A group is every run of the descending order whose magnitude agrees with
+    the group's first (largest) member within ``CANONICAL_TIE_RTOL``, never
+    merely with its neighbour. Each returned array holds the original indices
+    of one group, in magnitude-descending order; groups are returned in
+    descending order too. Empty input yields an empty list.
+    """
+    mag = np.abs(np.asarray(magnitudes)).astype(float, copy=False).reshape(-1)
+    n = int(mag.size)
+    if n == 0:
+        return []
+
+    # Stable so exact-tie group membership does not depend on the platform sort.
+    order = np.argsort(-mag, kind="stable")
+    groups: list[np.ndarray] = []
+    i = 0
+    while i < n:
+        j = i + 1
+        peak = float(mag[int(order[i])])
+        while j < n:
+            other = float(mag[int(order[j])])
+            scale = max(abs(peak), abs(other))
+            if scale == 0.0 or abs(peak - other) <= CANONICAL_TIE_RTOL * scale:
+                j += 1
+            else:
+                break
+        groups.append(order[i:j])
+        i = j
+    return groups
+
+
 def canonical_eigenvalue_order(eigvals: ArrayLike) -> np.ndarray:
     """Permutation that puts ``eigvals`` in canonical DMD spectrum order.
 
@@ -219,24 +252,12 @@ def canonical_eigenvalue_order(eigvals: ArrayLike) -> np.ndarray:
     if n == 0:
         return np.array([], dtype=int)
 
-    mag = np.abs(eigvals).astype(float, copy=False)
-    # Stable so exact-tie group membership does not depend on the platform sort.
-    order = np.argsort(-mag, kind="stable")
     out = np.empty(n, dtype=int)
     i = 0
-    while i < n:
-        j = i + 1
-        peak = float(mag[int(order[i])])
-        while j < n:
-            other = float(mag[int(order[j])])
-            scale = max(abs(peak), abs(other))
-            if scale == 0.0 or abs(peak - other) <= CANONICAL_TIE_RTOL * scale:
-                j += 1
-            else:
-                break
-        group = order[i:j]
+    for group in canonical_tie_groups(eigvals):
         group_eigs = eigvals[group]
         tie_key = np.lexsort((np.imag(group_eigs), np.real(group_eigs)))
+        j = i + group.size
         out[i:j] = group[tie_key]
         i = j
     return out

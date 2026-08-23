@@ -1021,3 +1021,117 @@ def test_qhat_disk_state_consistent_when_write_mode_probe_raises(tmp_path, monke
     assert disk._qhat_file is None
     assert disk._qhat_dataset is None
     assert disk._qhat_on_disk is False
+
+
+class _FakeTriadHolder:
+    """Stand-in exposing only what ``_triad_plot_order`` reads: the triad list."""
+
+    def __init__(self, triads):
+        self.static_triads_list = triads
+
+
+def _triad_order(triads, lambdas):
+    """Call the bound method against a minimal object, no analyzer setup needed."""
+    holder = _FakeTriadHolder(triads)
+    valid_idx = np.arange(len(triads))
+    return BSMDAnalyzer._triad_plot_order(holder, np.asarray(lambdas, dtype=float), valid_idx)
+
+
+def test_triad_plot_order_exact_tie_independent_of_listing_order(tmp_path):
+    """Two triads tied at the same |lambda|: plot order does not depend on listing order.
+
+    Whether the triads are computed/listed as A,B or B,A, the tie is broken by
+    the triad tuple, not by position, so both listings pick the same triad first.
+    """
+    triad_a = (0, 0, 0)
+    triad_b = (1, 1, 1)
+
+    order_ab = _triad_order([triad_a, triad_b], [1.0, 1.0])
+    order_ba = _triad_order([triad_b, triad_a], [1.0, 1.0])
+
+    picked_ab = [[triad_a, triad_b][i] for i in order_ab]
+    picked_ba = [[triad_b, triad_a][i] for i in order_ba]
+    assert picked_ab == picked_ba == [triad_a, triad_b]
+
+
+def test_triad_plot_order_end_to_end_through_plot_modes(tmp_path):
+    """Same exact-tie invariant, exercised through ``plot_modes`` itself."""
+    from matplotlib.figure import Figure
+
+    triad_a = (0, 0, 0)
+    triad_b = (1, 1, 2)
+    orig_suptitle = Figure.suptitle
+
+    def _titles_for(listing):
+        analyzer = _make_analyzer(tmp_path, triads=list(listing), nfft=8, Ns=24, Nspace=4)
+        analyzer._perform_static_bsmd_core()
+        analyzer.eigenvalues[:] = 1.0 + 0.0j  # force an exact tie regardless of the real computation
+
+        captured = []
+
+        def spy_suptitle(self, text, **kwargs):
+            captured.append(text)
+            return orig_suptitle(self, text, **kwargs)
+
+        Figure.suptitle = spy_suptitle
+        try:
+            analyzer.plot_modes()
+        finally:
+            Figure.suptitle = orig_suptitle
+            import matplotlib.pyplot as plt
+
+            plt.close("all")
+        return captured
+
+    titles_ab = _titles_for([triad_a, triad_b])
+    titles_ba = _titles_for([triad_b, triad_a])
+    assert titles_ab == titles_ba
+
+
+def test_triad_plot_order_near_tie_subset_at_cutoff_matches(tmp_path):
+    """A near-tie (relative gap 1e-13, inside the band) at the cutoff: same subset either way.
+
+    Two triads inside the tie band compete for the last plotted slot; the
+    triad tuple, not listing order, decides which one wins, so the selected
+    subset is identical whichever order the triads were computed in.
+    """
+    leader = (0, 0, 0)
+    near_a = (3, 3, 3)
+    near_b = (1, -1, 0)  # smaller tuple than near_a, so it wins the tie
+
+    lam_leader = 1.0
+    lam_near = 0.5
+    lam_near_tied = lam_near * (1 + 1e-13)  # inside CANONICAL_TIE_RTOL band
+
+    triads_1 = [leader, near_a, near_b]
+    lambdas_1 = [lam_leader, lam_near, lam_near_tied]
+    triads_2 = [leader, near_b, near_a]
+    lambdas_2 = [lam_leader, lam_near_tied, lam_near]
+
+    order_1 = _triad_order(triads_1, lambdas_1)
+    order_2 = _triad_order(triads_2, lambdas_2)
+
+    picked_1 = {triads_1[i] for i in order_1[:2]}
+    picked_2 = {triads_2[i] for i in order_2[:2]}
+    assert picked_1 == picked_2 == {leader, near_b}
+
+
+def test_triad_plot_order_gap_outside_band_keeps_magnitude_order(tmp_path):
+    """A pair with relative gap 1e-11 (outside the tie band) keeps magnitude order both ways."""
+    small_tuple_triad = (0, 0, 0)  # would win a tie by tuple, but the gap is too large to tie
+    big_lambda_triad = (9, 9, 9)
+
+    lam_big = 1.0
+    lam_small = lam_big * (1 - 1e-11)  # outside CANONICAL_TIE_RTOL band
+
+    triads_1 = [small_tuple_triad, big_lambda_triad]
+    lambdas_1 = [lam_small, lam_big]
+    triads_2 = [big_lambda_triad, small_tuple_triad]
+    lambdas_2 = [lam_big, lam_small]
+
+    order_1 = _triad_order(triads_1, lambdas_1)
+    order_2 = _triad_order(triads_2, lambdas_2)
+
+    picked_1 = [triads_1[i] for i in order_1]
+    picked_2 = [triads_2[i] for i in order_2]
+    assert picked_1 == picked_2 == [big_lambda_triad, small_tuple_triad]
