@@ -6,6 +6,8 @@ import inspect
 import typing
 from pathlib import Path
 
+import numpy as np
+
 import openmodalpy as om
 from openmodalpy import cli
 from openmodalpy.commands import METHOD_REGISTRY
@@ -45,6 +47,68 @@ def test_all_public_return_types_are_exported() -> None:
             ):
                 unexported.append(f"{name} -> {part.__name__}")
     assert not unexported, f"public functions returning unexported types: {unexported}"
+
+
+def test_example_generators_are_exported_and_callable() -> None:
+    """The three synthetic-dataset generators and the dispatcher are public and callable."""
+    dg = om.generate_double_gyre(Nx=8, Ny=6, Nt=10)
+    assert dg["q"].shape == (10, 8 * 6)
+
+    tg = om.generate_taylor_green(Nx=8, Ny=6, Nt=10)
+    assert tg["q"].shape == (10, 8 * 6)
+
+    cw = om.generate_cylinder_wake(Nx=8, Ny=6, Nt=10)
+    assert cw["q"].shape == (10, 8 * 6)
+
+    via_dispatch = om.generate_example_dataset("double_gyre", {"Nx": 8, "Ny": 6, "Nt": 10})
+    assert via_dispatch["q"].shape == (10, 8 * 6)
+
+
+def test_example_payload_accessors_are_exported_and_callable() -> None:
+    """``get_example_info``/``load_example_payload`` are public and resolve a real config."""
+    discovered = om.discover_examples()
+    assert discovered, "no example configs discovered"
+    name = discovered[0].name
+
+    info = om.get_example_info(name)
+    assert info.name == name
+
+    payload = om.load_example_payload(name)
+    assert payload == info.payload
+
+
+def test_end_to_end_pod_from_generator_using_public_api_only(tmp_path) -> None:
+    """A user touching only ``import openmodalpy`` names can go generator -> POD -> saved file."""
+    data = om.generate_double_gyre(Nx=8, Ny=6, Nt=10)
+    analyzer = om.PODAnalyzer(data=data, results_dir=tmp_path, figures_dir=tmp_path)
+    analyzer.load_and_preprocess()
+    analyzer.perform_pod()
+    analyzer.save_results("pod_from_generator.hdf5")
+
+    saved_path = tmp_path / "pod_from_generator.hdf5"
+    assert saved_path.exists()
+
+    results = om.read_results(saved_path)
+    eigenvalues = results.eigenvalues
+    assert eigenvalues is not None
+    assert eigenvalues.size > 0
+    assert np.all(np.isfinite(eigenvalues))
+    assert bool((eigenvalues[:-1] >= eigenvalues[1:]).all())
+
+
+def test_all_public_names_include_examples_and_resolve() -> None:
+    """The six new example-generator/accessor names are exported and resolve via getattr."""
+    required = {
+        "generate_double_gyre",
+        "generate_taylor_green",
+        "generate_cylinder_wake",
+        "generate_example_dataset",
+        "get_example_info",
+        "load_example_payload",
+    }
+    assert required <= set(om.__all__)
+    for name in om.__all__:
+        assert hasattr(om, name), f"{name} in __all__ but not resolvable via getattr"
 
 
 def test_cli_analyze_help_matches_method_registry(monkeypatch) -> None:

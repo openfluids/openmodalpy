@@ -735,6 +735,23 @@ for i in range(d):
 | `taylor_green` | `generate_taylor_green()` | Nx, Ny, Nt, nu, U0, L | Exact decay: λ = e^{-2νΔt}, rank-1 |
 | `cylinder_wake` | `generate_cylinder_wake()` | Nx, Ny, Nt, Re, D, U_inf, seed | Known St = 0.212(1 - 21.2/Re) |
 
+All three generators, plus `generate_example_dataset` and the discovered-example
+accessors `get_example_info`/`load_example_payload`, are exported from the top-level
+`openmodalpy` package. Each generator returns its ground truth in `metadata` (keys like
+`expected_freq`, `St`, `f_shed`, `dmd_eigenvalue`, `decay_rate`), so a user can check the
+package against its own stated truth without any file on disk:
+
+```python
+from openmodalpy import PODAnalyzer, generate_double_gyre
+
+data = generate_double_gyre(Nx=80, Ny=40, Nt=200)
+pod = PODAnalyzer(data=data, n_modes_save=5)
+pod.run_analysis(plots=False)
+
+fractions = pod.eigenvalues / pod.total_energy
+print(fractions)  # leading mode energy fractions
+```
+
 ### Reproducibility
 
 **What an external user can reproduce from the wheel alone.** The four

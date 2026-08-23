@@ -42,6 +42,27 @@ Optional extras:
 
 ## Quick Start
 
+Nothing to download: the built-in generators produce a synthetic dataset in memory, and
+their returned metadata carries the analytic ground truth (keys like `expected_freq`, `St`,
+`f_shed`, `dmd_eigenvalue`, `decay_rate`), so you can check the package's output against its
+own stated truth.
+
+```python
+from openmodalpy import PODAnalyzer, generate_double_gyre
+
+data = generate_double_gyre(Nx=80, Ny=40, Nt=200)
+pod = PODAnalyzer(data=data, n_modes_save=5)
+pod.run_analysis(plots=False)
+
+fractions = pod.eigenvalues / pod.total_energy
+print(fractions)  # leading mode energy fractions
+```
+
+`run_analysis` writes the mode file into `results/` (and, unless `plots=False`, the figures
+into `figures/`) under the current directory.
+
+With your own data on disk:
+
 ```python
 from openmodalpy import PODAnalyzer, SPODAnalyzer, DMDAnalyzer
 

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `generate_double_gyre`, `generate_taylor_green`, `generate_cylinder_wake`,
+  `generate_example_dataset`, `get_example_info`, and `load_example_payload`
+  are now exported from the top-level `openmodalpy` package.
 - The provenance block written to every result file now also records which
   BLAS/LAPACK library actually ran (`prov_blas`), the OS platform and machine
   architecture (`prov_platform`, `prov_machine`), and the HDF5 C library
