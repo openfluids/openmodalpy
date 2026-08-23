@@ -39,10 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `spatial_weight_type="polar"` on a grid flattened the 2-D (x, r) weights
-  x-major instead of the contract's y-major order, so every column of `q`
-  was paired with the weight of the transposed cell. Every polar-grid result
-  changes, square grids included; only the total measure was unaffected.
+- **Numerical change: polar grid weights.** `spatial_weight_type="polar"`
+  on a grid flattened the 2-D (x, r) weights x-major (`index = ix*Ny + iy`)
+  while the snapshot contract is y-major (`index = iy*Nx + ix`), so every
+  column of `q` was paired with the weight of the transposed cell. Affected:
+  every grid result computed with `spatial_weight_type="polar"` (POD, SPOD,
+  mPOD, ST-POD, PSD-POD eigenvalues, energies and modes), square grids
+  included; scattered points and `"uniform"`/`"prescribed"` are not. Measured
+  size: on a 3 x 4 grid the energy of a smooth field was under-weighted by
+  12 %; on a 5 x 5 grid single weights differed by up to a factor 3.7; the
+  total measure (sum of all weights) was unchanged. To see whether your
+  result moved, compare the old and new weight vectors for your grid:
+  `W_new = calculate_polar_weights(x, r, use_parallel=False)` against
+  `np.reshape(np.outer(Wx, Wy), (-1, 1))` built the old way — any
+  difference beyond round-off means your polar eigenvalues change with
+  this release.
 
 ### Breaking
 
