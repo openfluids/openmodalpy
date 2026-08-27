@@ -1713,6 +1713,61 @@ def spod_function(
     return spod_single_frequency(qhat, nblocks, dst, w, return_psi=return_psi)
 
 
+def _fill_contract_counts(data: dict[str, Any], *, source: str) -> None:
+    """Check the required contract keys, then fill the derived counts.
+
+    This is the one rule for both ways a caller supplies data: a dict given to
+    ``data=``, and the dict a ``data_loader=`` callable returns. Both must
+    behave the same, because DOC.md documents them as the same plug-in point.
+
+    ``q``, ``x`` and ``y`` are required, because the shapes come from them.
+    ``dt`` is not checked here: ``_require_dt`` owns it, and says which dataset
+    is short of one. ``Nx``, ``Ny``, ``Nz`` and ``Ns`` come from the array
+    shapes when they are absent. A dict that already states a count keeps it.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        The dataset. This function adds the missing counts to it.
+    source : str
+        Where the dict came from. Used for the error text only.
+
+    Raises
+    ------
+    ValueError
+        If a required key is absent. The message names every missing key.
+    """
+    required = ("q", "x", "y")
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise ValueError(
+            f"data is missing required key(s): {', '.join(missing)}. "
+            f"Required: q, x, y, dt. Derived when absent: Nx, Ny, Nz, Ns."
+        )
+    derived_keys = ("Nx", "Ny", "Nz", "Ns")
+    if all(key in data for key in derived_keys):
+        # Nothing to derive. Do not inspect the shapes: the checks in
+        # load_and_preprocess own every mismatch message, and they say more
+        # than this function can, naming the product and q.shape[1].
+        return
+
+    # Derive from the shapes alone: pass no stated counts. A count the caller
+    # already stated stays untouched below.
+    z_raw = data.get("z")
+    nx, ny, nz, ns = derive_grid_and_snapshot_counts(
+        np.asarray(data["q"]),
+        np.asarray(data["x"]),
+        np.asarray(data["y"]),
+        np.asarray(z_raw) if z_raw is not None else None,
+        {},
+        source=source,
+    )
+    data.setdefault("Nx", nx)
+    data.setdefault("Ny", ny)
+    data.setdefault("Nz", nz)
+    data.setdefault("Ns", ns)
+
+
 class BaseAnalyzer:
     """Base class for modal decomposition analyzers."""
 
@@ -1777,28 +1832,7 @@ class BaseAnalyzer:
                     "data must be a non-empty dict following the data contract "
                     "(q, x, y, dt required; Nx, Ny, Nz, Ns derived when absent; see DOC.md)."
                 )
-            required = ("q", "x", "y", "dt")
-            missing = [key for key in required if key not in data]
-            if missing:
-                raise ValueError(
-                    f"data is missing required key(s): {', '.join(missing)}. "
-                    f"Required: {', '.join(required)}. Derived when absent: Nx, Ny, Nz, Ns."
-                )
-            # Nx/Ny/Nz/Ns follow the same shape rule as the generic file reader,
-            # so a hand-built dict and one read from a file behave the same way.
-            z_raw = data.get("z")
-            nx, ny, nz, ns = derive_grid_and_snapshot_counts(
-                np.asarray(data["q"]),
-                np.asarray(data["x"]),
-                np.asarray(data["y"]),
-                np.asarray(z_raw) if z_raw is not None else None,
-                data,
-                source="data",
-            )
-            data.setdefault("Nx", nx)
-            data.setdefault("Ny", ny)
-            data.setdefault("Nz", nz)
-            data.setdefault("Ns", ns)
+            _fill_contract_counts(data, source="data")
         elif file_path is None:
             raise ValueError("No input source: pass file_path (path to a data file) or data (the loaded dict).")
         # Dummy Welch stamp for the six methods that never form FFT blocks:
@@ -1883,6 +1917,11 @@ class BaseAnalyzer:
             if self.file_path is None:
                 raise ValueError("no file_path and no data were given")
             self.data = self.data_loader(self.file_path)
+            # A custom (path) -> dict loader is the documented plug-in point,
+            # so it must give the same result as a dict passed to data=.
+            # Without this, a loader that returns only q, x, y and dt failed
+            # later with a bare KeyError on Ns.
+            _fill_contract_counts(self.data, source="data_loader")
 
         # data_loader is any (str) -> dict. If the dataset reports a grid, its
         # product must be the snapshot width. Skip when there is no claim

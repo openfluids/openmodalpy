@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A custom `data_loader=` callable did not get the derived counts, so a loader
+  that returned only `q`, `x`, `y` and `dt` still failed with a bare
+  `KeyError: 'Ns'`. DOC.md documents `data_loader=` and `data=` as the same
+  plug-in point, so both now fill the counts through one rule. A dict that
+  already states every count is left alone.
 - An analyzer given an already-loaded dict through `data=` raised a bare
   `KeyError: 'Ns'` deep inside the Welch block setup. The same dict read from a
   file worked, because the file reader derives `Nx`, `Ny`, `Nz` and `Ns` from
