@@ -645,7 +645,6 @@ def test_mpod_figures_are_named_mpod(tmp_path):
         spatial_weight_type="uniform",
         n_modes_save=2,
         band_edges=[0.0, 5.0],
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.perform_mpod()
@@ -678,7 +677,6 @@ def test_pod_figure_names_are_unchanged(tmp_path):
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
         n_modes_save=2,
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.perform_pod()

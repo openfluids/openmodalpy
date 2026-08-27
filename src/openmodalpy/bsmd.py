@@ -235,16 +235,20 @@ class BSMDAnalyzer(BaseAnalyzer):
         """
         super().__init__(
             file_path=file_path,
-            nfft=nfft,
-            overlap=overlap,
             results_dir=results_dir,
             figures_dir=figures_dir,
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )
+        # BSMD is one of the three methods that form FFT blocks, so it keeps
+        # its own nfft/overlap rather than the base's dummy stamp. It is also
+        # the one analyzer whose use_parallel does real work (ThreadPoolExecutor
+        # over triads), so it keeps that too.
+        self.nfft = nfft
+        self.overlap = overlap
+        self.use_parallel = use_parallel
         self.use_static_triads = use_static_triads
         # Provenance is fixed at construction: comparing the list to ALL_TRIADS
         # later would misclassify a user who legitimately passes that same list.
@@ -403,9 +407,11 @@ class BSMDAnalyzer(BaseAnalyzer):
         This method orchestrates:
         1. Loading data via `_load_data()`.
         2. Determining and applying spatial weights via `_calculate_spatial_weights()`.
-        3. Computing the STFT of the data via `compute_fft_blocks()`.
 
-        Sets attributes like `self.data`, `self.W`, `self.qhat`, `self.fs`, `self.freq`.
+        The STFT (`self.qhat`) and `self.freq` are formed lazily, by
+        `perform_bsmd()` calling `compute_fft_blocks()` on first use.
+
+        Sets attributes like `self.data`, `self.W`, `self.fs`.
         """
         super().load_and_preprocess()  # Leverages BaseAnalyzer's core logic
 
@@ -430,8 +436,12 @@ class BSMDAnalyzer(BaseAnalyzer):
         - If True, it calls `_perform_static_bsmd_core` to analyze predefined triads.
         - If False (or for future dynamic triad selection), it would call `perform_dynamic_bsmd`.
 
-        Ensures data is loaded and preprocessed (STFT computed) before proceeding.
+        Forms the FFT blocks itself, via ``compute_fft_blocks()``, on first
+        use — no separate call is needed between ``load_and_preprocess()``
+        and this method.
         """
+        if self.qhat.size == 0 and not self._qhat_on_disk:
+            self.compute_fft_blocks()
         if self.qhat.size == 0 and not self._qhat_on_disk:
             raise ValueError("STFT data (qhat) not found. Call load_and_preprocess() first.")
         start_time = time.time()

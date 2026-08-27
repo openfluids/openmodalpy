@@ -89,7 +89,6 @@ class STPODAnalyzer(BaseAnalyzer):
         figures_dir: str = FIGURES_DIR_STPOD,
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
-        use_parallel: bool = True,
         spatial_weights: np.ndarray | None = None,
         data: dict[str, Any] | None = None,
     ):
@@ -104,21 +103,19 @@ class STPODAnalyzer(BaseAnalyzer):
             data_loader: Custom function to load data.
             spatial_weight_type: Type of spatial weights
                 (None → 'uniform', or 'uniform', 'polar', 'prescribed').
-            use_parallel: Whether to use parallel computation where available.
             spatial_weights: Optional array of spatial integration weights. When given,
                 the type becomes 'prescribed'.
             data: Already-loaded dataset following the data contract (see
                 DOC.md). Given instead of ``file_path``.
         """
+        # ST-POD forms no FFT blocks, so it takes no nfft/overlap;
+        # BaseAnalyzer sets its own dummy stamp.
         super().__init__(
             file_path=file_path,
-            nfft=1,  # Not used by ST-POD
-            overlap=0,  # Not used by ST-POD
             results_dir=results_dir,
             figures_dir=figures_dir,
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )

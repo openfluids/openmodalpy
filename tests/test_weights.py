@@ -224,7 +224,6 @@ def test_analyzer_spatial_weights_nondiagonal_square_raises(tmp_path):
         file_path="dummy",
         data_loader=lambda _: field,
         spatial_weights=bad,
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -495,7 +494,12 @@ _SURVIVAL_WEIGHTS = np.linspace(0.5, 1.5, _SURVIVAL_NSPACE)
         (MPODAnalyzer, {"n_modes_save": 2}, "perform_mpod", False),
         (DMDAnalyzer, {"rank": 2}, "perform_dmd", False),
         (SPODAnalyzer, {"nfft": 8, "overlap": 0.5}, "perform_spod", True),
-        (BSMDAnalyzer, {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}, "perform_bsmd", True),
+        (
+            BSMDAnalyzer,
+            {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)], "use_parallel": False},
+            "perform_bsmd",
+            True,
+        ),
         (PSDPODAnalyzer, {"nfft": 8, "overlap": 0.5, "n_modes_save": 2}, "perform_psd_pod", True),
     ],
     ids=["POD", "ST-POD", "mPOD", "DMD", "SPOD", "BSMD", "PSD-POD"],
@@ -514,7 +518,6 @@ def test_prescribed_weights_survive_decomposition(analyzer_cls, extra_kwargs, me
         file_path="dummy",
         data_loader=lambda _: _SURVIVAL_GRID,
         spatial_weights=_SURVIVAL_WEIGHTS,
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
         **extra_kwargs,
@@ -554,7 +557,6 @@ def _analyzer_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp_pa
         file_path="dummy",
         data_loader=lambda _: _copy_survival_grid(),
         spatial_weights=weights,
-        use_parallel=False,
         results_dir=str(tmp_path / tag / "results"),
         figures_dir=str(tmp_path / tag / "figures"),
         **extra_kwargs,
@@ -573,7 +575,13 @@ def _analyzer_for(analyzer_cls, extra_kwargs, method, needs_fft, weights, tmp_pa
         (STPODAnalyzer, {"n_modes_save": 2, "embedding_dim": 2}, "perform_stpod", False, True),
         (MPODAnalyzer, {"n_modes_save": 2}, "perform_mpod", False, True),
         (SPODAnalyzer, {"nfft": 8, "overlap": 0.5}, "perform_spod", True, True),
-        (BSMDAnalyzer, {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}, "perform_bsmd", True, True),
+        (
+            BSMDAnalyzer,
+            {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)], "use_parallel": False},
+            "perform_bsmd",
+            True,
+            True,
+        ),
         (PSDPODAnalyzer, {"nfft": 8, "overlap": 0.5, "n_modes_save": 2}, "perform_psd_pod", True, True),
         (DMDAnalyzer, {"rank": 2}, "perform_dmd", False, False),
     ],
@@ -643,7 +651,6 @@ def test_pod_perform_pod_square_diagonal_matches_column_form(tmp_path):
         file_path="dummy",
         data_loader=lambda _: field,
         spatial_weights=np.diag(_SQUARE_DIAG_W),
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -664,7 +671,6 @@ def test_pod_perform_pod_nondiagonal_square_raises(tmp_path):
         file_path="dummy",
         data_loader=lambda _: field,
         spatial_weights=np.diag(_SQUARE_DIAG_W),
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -681,7 +687,6 @@ def test_pod_orthogonality_check_square_diagonal_matches_column_form(tmp_path):
         file_path="dummy",
         data_loader=lambda _: field,
         spatial_weights=np.diag(_SQUARE_DIAG_W),
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -702,7 +707,6 @@ def test_pod_orthogonality_check_nondiagonal_square_raises(tmp_path):
         file_path="dummy",
         data_loader=lambda _: field,
         spatial_weights=np.diag(_SQUARE_DIAG_W),
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -718,7 +722,6 @@ def test_stpod_get_weight_vector_square_diagonal_matches_column_form(tmp_path):
     analyzer = STPODAnalyzer(
         file_path="dummy",
         data_loader=lambda _: {},
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -732,7 +735,6 @@ def test_stpod_get_weight_vector_nondiagonal_square_raises(tmp_path):
     analyzer = STPODAnalyzer(
         file_path="dummy",
         data_loader=lambda _: {},
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )
@@ -797,7 +799,6 @@ def test_polar_weights_scattered_end_to_end_npz(tmp_path):
     pod = PODAnalyzer(
         file_path=str(path),
         spatial_weight_type="polar",
-        use_parallel=False,
         n_modes_save=2,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
@@ -832,7 +833,6 @@ def test_polar_weights_3d_grid_metric_length(tmp_path):
     pod = PODAnalyzer(
         data=d,
         spatial_weight_type="polar",
-        use_parallel=False,
         results_dir=str(tmp_path / "results"),
         figures_dir=str(tmp_path / "figures"),
     )

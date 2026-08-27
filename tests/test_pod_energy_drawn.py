@@ -42,7 +42,6 @@ def _make_truncated_pod(tmp_path, data: dict, *, n_modes_save: int = 3) -> PODAn
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
         n_modes_save=n_modes_save,
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.perform_pod()

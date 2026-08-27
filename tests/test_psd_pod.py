@@ -50,6 +50,34 @@ def test_psdpod_analyzer_runs_from_library_api(tmp_path: Path) -> None:
     np.testing.assert_array_equal(np.asarray(res.eigenvalues), analyzer.eigenvalues)
 
 
+def test_psdpod_forms_fft_blocks_on_first_use(tmp_path: Path) -> None:
+    """perform_psd_pod works with no prior compute_fft_blocks() call.
+
+    Previously this raised, forcing a separate hidden step between
+    load_and_preprocess() and perform_psd_pod(). It now forms the FFT
+    blocks itself, on first use.
+    """
+    data = generate_example_dataset("double_gyre", {"Nx": 8, "Ny": 4, "Nt": 24})
+
+    analyzer = PSDPODAnalyzer(
+        file_path="double_gyre",
+        results_dir=str(tmp_path / "results"),
+        figures_dir=str(tmp_path / "figures"),
+        data_loader=lambda _: data,
+        spatial_weight_type="uniform",
+        nfft=8,
+        overlap=0.5,
+        n_modes_save=3,
+    )
+    analyzer.load_and_preprocess()
+    assert analyzer.qhat is None or analyzer.qhat.size == 0
+
+    analyzer.perform_psd_pod()
+
+    assert analyzer.qhat.size > 0
+    assert analyzer.eigenvalues.size > 0
+
+
 def test_psdpod_config_and_api_agree(tmp_path: Path) -> None:
     """A config run and a direct API run on the same case produce identical arrays."""
     params = {"Nx": 10, "Ny": 6, "Nt": 40}
@@ -132,7 +160,6 @@ def test_psdpod_save_results_records_prescribed_metric(tmp_path: Path) -> None:
         nfft=8,
         overlap=0.5,
         n_modes_save=3,
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.compute_fft_blocks()

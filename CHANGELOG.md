@@ -54,6 +54,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `nfft` and `overlap` are no longer accepted by `PODAnalyzer`,
+  `MPODAnalyzer`, `DMDAnalyzer`, or `STPODAnalyzer`. They never used these
+  Welch block-size settings; passing either now raises `TypeError`. Only
+  `SPODAnalyzer`, `PSDPODAnalyzer`, and `BSMDAnalyzer` form FFT blocks, and
+  keep `nfft`/`overlap` as their own constructor keywords.
+- **Breaking:** `use_parallel` is no longer accepted by `PODAnalyzer`,
+  `MPODAnalyzer`, `DMDAnalyzer`, `STPODAnalyzer`, `SPODAnalyzer`, or
+  `PSDPODAnalyzer`; it never changed their result. `BSMDAnalyzer` keeps
+  `use_parallel`, since it really runs its triad loop in a thread pool.
+- Result files written by `MPODAnalyzer`, `DMDAnalyzer` and `STPODAnalyzer`
+  now record `nfft=1` and `overlap=0.0`, in place of the former default
+  `nfft=128` and `overlap=0.5`. These methods never form an FFT block, so the
+  old numbers named a block size that was never used. The value is a stamp for
+  the shared filename and metadata helpers, not a setting.
+- `SPODAnalyzer.perform_spod()`, `PSDPODAnalyzer.perform_psd_pod()`, and
+  `BSMDAnalyzer.perform_bsmd()` now form their own FFT blocks on first use.
+  Calling `compute_fft_blocks()` before them is no longer needed: right after
+  `load_and_preprocess()`, the `perform_*` call works on its own.
 - CI: mypy now runs on macOS and Windows as well as Linux; a weekly
   unpinned-resolution run is informational only and does not gate merges.
 - The sqrt(W) weighting of a samples x features matrix now lives in one

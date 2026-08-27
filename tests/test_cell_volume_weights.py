@@ -363,7 +363,6 @@ def test_polar_weights_untouched(tmp_path):
     pod = PODAnalyzer(
         data=d,
         spatial_weight_type="polar",
-        use_parallel=False,
         results_dir=tmp_path,
         figures_dir=tmp_path,
     )

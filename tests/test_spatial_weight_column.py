@@ -49,7 +49,12 @@ _ANALYZERS = [
     ("POD", PODAnalyzer, "perform_pod", {}),
     ("ST-POD", STPODAnalyzer, "perform_stpod", {"embedding_dim": 3}),
     ("SPOD", SPODAnalyzer, "perform_spod", {"nfft": 8, "overlap": 0.5}),
-    ("BSMD", BSMDAnalyzer, "perform_bsmd", {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)]}),
+    (
+        "BSMD",
+        BSMDAnalyzer,
+        "perform_bsmd",
+        {"nfft": 8, "overlap": 0.5, "static_triads": [(0, 0, 0)], "use_parallel": False},
+    ),
 ]
 _WEIGHTS = ["uniform", "polar", "prescribed"]
 
@@ -66,7 +71,6 @@ def _build(cls, extra, wtype, tmp_path, tag):
         data_loader=lambda _: _make_data(),
         results_dir=str(tmp_path / tag / "results"),
         figures_dir=str(tmp_path / tag / "figures"),
-        use_parallel=False,
         **kwargs,
     )
 

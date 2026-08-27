@@ -148,7 +148,6 @@ def _run_spod(
         # oracle keeps pinning the spectral-energy convention, not whatever
         # metric 'uniform' derives from the coordinates.
         spatial_weights=np.ones((N_SPACE, 1)),
-        use_parallel=False,
         characteristic_length=characteristic_length,
         characteristic_velocity=characteristic_velocity,
     )

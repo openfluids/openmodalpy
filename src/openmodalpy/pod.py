@@ -84,8 +84,8 @@ class PODAnalyzer(BaseAnalyzer):
 
     Inherits from:
         BaseAnalyzer: Provides common functionalities for data loading and preprocessing.
-                      Note: `nfft` and `overlap` from `BaseAnalyzer` are not directly used by POD
-                      but are initialized with dummy values.
+                      POD forms no FFT blocks, so it takes no `nfft`/`overlap`;
+                      passing either raises `TypeError`.
     """
 
     _METHOD_NAME = "pod"
@@ -98,7 +98,6 @@ class PODAnalyzer(BaseAnalyzer):
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         n_modes_save: int = 10,
-        use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
@@ -126,17 +125,14 @@ class PODAnalyzer(BaseAnalyzer):
             data (dict | None): Already-loaded dataset following the data
                 contract (see DOC.md). Given instead of ``file_path``.
         """
-        # Call BaseAnalyzer's __init__.
-        # nfft and overlap are not directly used by POD but are part of BaseAnalyzer.
+        # Call BaseAnalyzer's __init__. POD forms no FFT blocks, so it takes
+        # no nfft/overlap/use_parallel; BaseAnalyzer sets its own dummy stamp.
         super().__init__(
             file_path=file_path,
-            nfft=1,  # Not used by POD, can be a dummy value
-            overlap=0,  # Not used by POD, can be a dummy value
             results_dir=results_dir,
             figures_dir=figures_dir,
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )

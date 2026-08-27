@@ -243,7 +243,6 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
         n_modes_save=2,
         nfft=8,
         overlap=0.0,
-        use_parallel=False,
         **common,
     )
     psd.load_and_preprocess()
@@ -517,7 +516,6 @@ def test_legacy_capitalised_file_loads_through_pod(tmp_path: Path) -> None:
     analyzer = PODAnalyzer(
         file_path="legacy_pod",
         n_modes_save=2,
-        use_parallel=False,
         **_analyzer_ctor_kwargs(results_dir),
     )
 

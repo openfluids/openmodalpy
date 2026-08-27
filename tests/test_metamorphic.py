@@ -353,7 +353,6 @@ def test_scaling_spod_eigenvalues_quadratic(alpha, tmp_path):
             figures_dir=tmp_path,
             data_loader=lambda _: _make_data(field),
             spatial_weight_type="uniform",
-            use_parallel=False,
         )
         a.load_and_preprocess()
         a.compute_fft_blocks()

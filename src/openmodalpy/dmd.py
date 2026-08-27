@@ -231,19 +231,15 @@ class DMDAnalyzer(BaseAnalyzer):
         n_modes_save: int = 10,
         rank: int | np.integer | Literal["svht", "energy"] | None = None,  # required: positive int | "svht" | "energy"
         energy_fraction: float = 0.999,
-        use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             file_path=file_path,
-            nfft=1,
-            overlap=0.0,
             results_dir=results_dir,
             figures_dir=figures_dir,
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )

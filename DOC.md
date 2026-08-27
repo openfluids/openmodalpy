@@ -758,7 +758,9 @@ modes = X2 @ (v_r / s_r) @ w              # same trick for mode recovery
 
 SPOD caches blockwise FFT results in the HDF5 output file under the
 `FFTBlocks` dataset. Subsequent SPOD runs on the same data with the same
-`nfft`/`overlap` skip the FFT computation.
+`nfft`/`overlap` skip the FFT computation. `perform_spod()` forms the blocks
+itself on first use; PSD-POD and BSMD do the same, so no separate
+`compute_fft_blocks()` call is needed after `load_and_preprocess()`.
 
 ### Delay embedding
 
@@ -883,8 +885,10 @@ res = read_results("path/to/result.hdf5")
 | `x`, `y`, `z`, `W`, `temporal_mean`, `energy_map` | when available (already uniform) |
 | `FFTBlocks` | SPOD/BSMD FFT cache (name unchanged on purpose) |
 
-**Attributes** (unchanged): `analysis_type`, `nfft`, `overlap`, `dt`, `Ns`,
-`Nx`, `Ny`, `spatial_weight_type`, method-specific metadata.
+**Attributes**: `analysis_type`, `nfft`, `overlap`, `dt`, `Ns`,
+`Nx`, `Ny`, `spatial_weight_type`, method-specific metadata. For POD, mPOD,
+DMD and ST-POD, `nfft` is 1 and `overlap` is 0.0: those methods never form an
+FFT block, so the pair is a stamp, not a setting.
 
 DMD also records `dmd_variant`, `dmd_method`, `dmd_delays`, `dmd_named_variant`.
 

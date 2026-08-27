@@ -178,7 +178,6 @@ def test_pod_spatial_regime_keeps_full_spatial_rank(tmp_path):
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
         n_modes_save=n_modes_save,
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.perform_pod(solver="eigh")
@@ -359,7 +358,6 @@ def _make_pod_analyzer(data, tmp_path, n_modes_save=3, spatial_weights=None):
         spatial_weight_type="uniform" if spatial_weights is None else "prescribed",
         spatial_weights=spatial_weights,
         n_modes_save=n_modes_save,
-        use_parallel=False,
     )
 
 
@@ -618,7 +616,6 @@ def test_mpod_energy_label_says_retained_only(tmp_path):
         spatial_weight_type="uniform",
         n_modes_save=2,
         band_edges=[0.0, 2.0, 5.0],
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.perform_mpod()
@@ -766,7 +763,6 @@ def test_pod_uniform_metric_moves_eigenvalues(monkeypatch, tmp_path):
         data_loader=lambda _: field,
         spatial_weight_type="uniform",
         n_modes_save=4,
-        use_parallel=False,
     )
     plain = PODAnalyzer(
         results_dir=str(tmp_path / "plain"),

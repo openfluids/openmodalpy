@@ -187,7 +187,6 @@ def test_scattered_pod_stpod_eigenvalues_unchanged(tmp_path):
         kwargs = {
             "file_path": "dummy",
             "data_loader": lambda _: field,
-            "use_parallel": False,
             "results_dir": str(tmp_path / tag / "results"),
             "figures_dir": str(tmp_path / tag / "figures"),
             **extra,
@@ -228,7 +227,6 @@ def test_spod_bsmd_accept_scattered_points(tmp_path):
         },
         nfft=8,
         overlap=0.5,
-        use_parallel=False,
         results_dir=str(tmp_path / "spod" / "results"),
         figures_dir=str(tmp_path / "spod" / "figures"),
     )

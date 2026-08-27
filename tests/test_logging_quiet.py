@@ -36,13 +36,10 @@ def _make_base(tmp_path, data: dict) -> BaseAnalyzer:
     """BaseAnalyzer only — no analyzer-module prints (those are phase 2)."""
     return BaseAnalyzer(
         file_path="dummy.h5",
-        nfft=8,
-        overlap=0.0,
         results_dir=str(tmp_path),
         figures_dir=str(tmp_path),
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
-        use_parallel=False,
     )
 
 
@@ -117,11 +114,12 @@ def test_mat_loader_is_quiet_on_stdout(tmp_path, capsys):
     assert data["Ns"] == 2
 
 
-def test_perform_spod_raises_when_qhat_not_computed(tmp_path):
-    """Calling perform_spod before FFT blocks exist raises RuntimeError.
+def test_perform_spod_forms_fft_blocks_on_first_use(tmp_path):
+    """Calling perform_spod with no prior compute_fft_blocks() call still works.
 
-    Previously this path printed one line and returned None, so the caller
-    continued as if an analysis had run.
+    Previously this raised RuntimeError, forcing a separate hidden step
+    between load_and_preprocess() and perform_spod(). perform_spod() now
+    forms the FFT blocks itself, on first use.
     """
     data = _synthetic_data()
     analyzer = SPODAnalyzer(
@@ -136,8 +134,10 @@ def test_perform_spod_raises_when_qhat_not_computed(tmp_path):
     analyzer.load_and_preprocess()
     assert analyzer.qhat is None or analyzer.qhat.size == 0
 
-    with pytest.raises(RuntimeError, match=r"qhat not computed|compute_fft_blocks|run\(compute_fft"):
-        analyzer.perform_spod()
+    analyzer.perform_spod()
+
+    assert analyzer.qhat.size > 0
+    assert analyzer.eigenvalues.size > 0
 
 
 def _make_pod(tmp_path, data: dict) -> PODAnalyzer:
@@ -149,7 +149,6 @@ def _make_pod(tmp_path, data: dict) -> PODAnalyzer:
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
         n_modes_save=4,
-        use_parallel=False,
     )
 
 
@@ -194,7 +193,6 @@ def _make_spod(tmp_path, data: dict) -> SPODAnalyzer:
         figures_dir=str(tmp_path),
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
-        use_parallel=False,
     )
 
 
@@ -241,7 +239,6 @@ def _make_stpod(tmp_path, data: dict) -> STPODAnalyzer:
         figures_dir=str(tmp_path),
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
-        use_parallel=False,
     )
 
 
@@ -382,7 +379,6 @@ def _make_mpod(tmp_path, data: dict, **kw) -> MPODAnalyzer:
         spatial_weight_type="uniform",
         n_modes_save=4,
         band_edges=[0.0, 0.5],
-        use_parallel=False,
     )
     opts.update(kw)
     return MPODAnalyzer(**opts)

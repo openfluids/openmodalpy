@@ -98,7 +98,6 @@ class SPODAnalyzer(BaseAnalyzer):
         window_type: str = WINDOW_TYPE,
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
-        use_parallel: bool = True,
         characteristic_length: float | None = None,
         characteristic_velocity: float | None = None,
         spatial_weights: ArrayLike | None = None,
@@ -143,16 +142,18 @@ class SPODAnalyzer(BaseAnalyzer):
         """
         super().__init__(
             file_path=file_path,
-            nfft=nfft,
-            overlap=overlap,
             results_dir=results_dir,
             figures_dir=figures_dir,
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )
+        # SPOD is one of the three methods that form FFT blocks, so it keeps
+        # its own nfft/overlap rather than the base's dummy stamp.
+        self.nfft = nfft
+        self.overlap = overlap
+        self.novlap = int(overlap * nfft)
 
         self._validate_inputs()
         # SPOD specific attributes
@@ -255,18 +256,19 @@ class SPODAnalyzer(BaseAnalyzer):
 
         The actual computation is delegated to the `spod_function` imported from `utils.py`.
 
-        Raises:
-            RuntimeError: If FFT blocks have not been computed yet. Call
-                ``compute_fft_blocks()`` or ``run(compute_fft=True)`` first.
+        Forms the FFT blocks itself, via ``compute_fft_blocks()``, on first
+        use — no separate call is needed between ``load_and_preprocess()``
+        and this method.
 
         Attributes set:
             eigenvalues (np.ndarray): SPOD eigenvalues.
             modes (np.ndarray): SPOD spatial modes.
             time_coefficients (np.ndarray): SPOD time coefficients.
         """
-        # Make sure qhat has been computed
+        # Form the FFT blocks on first use, so callers never need a separate
+        # compute_fft_blocks() step between load_and_preprocess() and this call.
         if self.qhat is None or self.qhat.size == 0:
-            raise RuntimeError("qhat not computed. Call compute_fft_blocks() or run(compute_fft=True) first.")
+            self.compute_fft_blocks()
 
         start_time = time.time()
 
@@ -309,7 +311,6 @@ class SPODAnalyzer(BaseAnalyzer):
                 self.dst,
                 weights,
                 return_psi=True,
-                use_parallel=self.use_parallel,
             )
             if not psi_rest:
                 raise RuntimeError("spod_function(return_psi=True) did not return psi")

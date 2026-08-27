@@ -48,8 +48,10 @@ logger = logging.getLogger(__name__)
 class PSDPODAnalyzer(BaseAnalyzer):
     """POD on the ensemble of blockwise Fourier realizations.
 
-    Lifecycle: ``load_and_preprocess`` → ``compute_fft_blocks`` →
-    ``perform_psd_pod`` → ``save_results``. ``run_analysis`` runs that sequence.
+    Lifecycle: ``load_and_preprocess`` → ``perform_psd_pod`` →
+    ``save_results``. ``perform_psd_pod`` forms the FFT blocks itself, via
+    ``compute_fft_blocks()``, on first use. ``run_analysis`` runs the full
+    sequence.
 
     Key attributes after a successful run:
         modes: spatial modes, shape (Nspace, n_modes_save), complex
@@ -74,7 +76,6 @@ class PSDPODAnalyzer(BaseAnalyzer):
         blockwise_mean: bool = False,
         window_norm: str = WINDOW_NORM,
         window_type: str = WINDOW_TYPE,
-        use_parallel: bool = True,
         characteristic_length: float | None = None,
         characteristic_velocity: float | None = None,
         spatial_weights: np.ndarray | None = None,
@@ -82,16 +83,18 @@ class PSDPODAnalyzer(BaseAnalyzer):
     ):
         super().__init__(
             file_path=file_path,
-            nfft=nfft,
-            overlap=overlap,
             results_dir=results_dir,
             figures_dir=figures_dir,
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )
+        # PSD-POD is one of the three methods that form FFT blocks, so it
+        # keeps its own nfft/overlap rather than the base's dummy stamp.
+        self.nfft = nfft
+        self.overlap = overlap
+        self.novlap = int(overlap * nfft)
         if not (0 <= self.overlap < 1):
             raise ValueError("Overlap must be between 0 (inclusive) and 1 (exclusive).")
         if self.nfft <= 0:
@@ -147,6 +150,10 @@ class PSDPODAnalyzer(BaseAnalyzer):
         do not "fix" it by inserting an extra ``/ sqrt(w)`` or by swapping
         ``E`` for ``E_w`` in the recovery formula.
         """
+        # Form the FFT blocks on first use, so callers never need a separate
+        # compute_fft_blocks() step between load_and_preprocess() and this call.
+        if self.qhat is None or self.qhat.size == 0:
+            self.compute_fft_blocks()
         qhat = self.qhat
         if qhat is None or qhat.size == 0:
             raise ValueError("FFT blocks were not computed; PSD-POD cannot proceed.")

@@ -257,8 +257,8 @@ def test_apply_snapshot_limit_uses_floor_nblocks():
     assert out.shape[2] == expect
 
 
-def test_load_and_preprocess_nblocks_uses_floor(tmp_path):
-    """BaseAnalyzer.load_and_preprocess must use floor nblocks, not ceil.
+def test_compute_fft_blocks_nblocks_uses_floor(tmp_path):
+    """BaseAnalyzer.compute_fft_blocks must use floor nblocks, not ceil.
 
     Slice-1 tests call blocksfft with a precomputed nblocks, so the analyzer's
     own formula was untested. Ns=400, nfft=128, overlap=0.5 → floor 5, ceil 6.
@@ -291,10 +291,11 @@ def test_load_and_preprocess_nblocks_uses_floor(tmp_path):
         spatial_weight_type="uniform",
     )
     analyzer.load_and_preprocess()
+    analyzer.compute_fft_blocks()
     assert analyzer.nblocks == expect_floor
 
 
-def test_load_and_preprocess_short_record_raises(tmp_path):
+def test_compute_fft_blocks_short_record_raises(tmp_path):
     """Truncated-to-shorter-than-nfft record must raise a clear ValueError."""
     from openmodalpy import SPODAnalyzer
 
@@ -318,8 +319,9 @@ def test_load_and_preprocess_short_record_raises(tmp_path):
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
     )
+    analyzer.load_and_preprocess()
     with pytest.raises(ValueError) as ei:
-        analyzer.load_and_preprocess()
+        analyzer.compute_fft_blocks()
     msg = str(ei.value)
     assert str(Ns) in msg and str(nfft) in msg
 

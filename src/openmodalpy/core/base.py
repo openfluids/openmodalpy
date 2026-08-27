@@ -1726,23 +1726,27 @@ class BaseAnalyzer:
     def __init__(
         self,
         file_path: str | None = None,
-        nfft: int = 128,
-        overlap: float = 0.5,
         results_dir: str = "./preprocess",
         figures_dir: str = "./figs",
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
-        use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the analyzer.
 
+        Welch block parameters (``nfft``, ``overlap``) and ``use_parallel``
+        are not generic: only SPOD, PSD-POD and BSMD form FFT blocks, and
+        only BSMD runs work in parallel threads. Each of those three sets
+        its own ``nfft``/``overlap`` attributes after calling this
+        constructor; BSMD also keeps its own ``use_parallel`` attribute.
+        Every other analyzer gets the dummy values below, which keep the
+        shared filename and metadata helpers working without claiming a
+        block size that was never used.
+
         Args:
             file_path (str | None): Path to data file. Optional when ``data``
                 carries the loaded dataset instead.
-            nfft (int): Number of snapshots per FFT block.
-            overlap (float): Overlap fraction between blocks.
             results_dir (str): Directory to save results.
             figures_dir (str): Directory to save figures.
             data_loader (callable): Function to load data.
@@ -1797,14 +1801,16 @@ class BaseAnalyzer:
             data.setdefault("Ns", ns)
         elif file_path is None:
             raise ValueError("No input source: pass file_path (path to a data file) or data (the loaded dict).")
-        self.nfft = nfft
-        self.overlap = overlap
+        # Dummy Welch stamp for the six methods that never form FFT blocks:
+        # SPOD, PSD-POD and BSMD overwrite these with their own nfft/overlap
+        # right after this constructor returns.
+        self.nfft = 1
+        self.overlap = 0.0
         self.results_dir = results_dir
         self.figures_dir = figures_dir
 
         # Set default data loader based on file type
         self.data_loader = data_loader or load_data
-        self.use_parallel = use_parallel
 
         # Weight type / prescribed vector — one validation site for all analyzers.
         # None means "not specified" and resolves to uniform (same numeric default
@@ -1836,7 +1842,7 @@ class BaseAnalyzer:
             self._prescribed_spatial_weights = None
 
         # Calculated later
-        self.novlap = int(overlap * nfft)
+        self.novlap = 0
         self.data: dict[str, Any] = data if data is not None else {}
         self.W = np.array([])
         self.nblocks = 0
@@ -1910,7 +1916,9 @@ class BaseAnalyzer:
                     self.data["x"],
                     self.data["y"],
                     z=self.data.get("z"),
-                    use_parallel=self.use_parallel,
+                    # Weight computation is not the parallel path this bead
+                    # touches (BSMD's use_parallel); keep the old default.
+                    use_parallel=True,
                     n_space=n_space,
                 )
             )
@@ -1953,21 +1961,9 @@ class BaseAnalyzer:
                 f"only (x, r) — they ignore z."
             )
 
-        # Welch floor partitioning (scipy.signal.welch): drop the remainder so
-        # every block is an independent ensemble member. Ceil + end-clamp re-uses
-        # samples in the last block and biases SPOD/BSMD eigenvalues.
-        # Shared helper with commands._apply_snapshot_limit (welch_nblocks).
-        Ns = int(self.data["Ns"])
-        self.nblocks = welch_nblocks(Ns, self.nfft, self.novlap)
-        if Ns < self.nfft or self.nblocks < 1:
-            raise ValueError(
-                f"Cannot form Welch blocks: Ns={Ns}, nfft={self.nfft} "
-                f"(overlap={self.overlap}, novlap={self.novlap}) yield "
-                f"nblocks={self.nblocks}"
-            )
-        # Divide by the validated local, not the dict entry: a float32 or 0-d
-        # array dt would otherwise give a slightly different fs than the value
-        # just checked. self.data["dt"] is deliberately left as the loader set it.
+        # fs is generic (every method may report a sampling rate); Welch block
+        # counting is not — only SPOD, PSD-POD and BSMD form FFT blocks, and
+        # each does so lazily in its own compute_fft_blocks() call.
         self.fs = 1 / self._require_dt()
 
         logger.info(
@@ -1976,14 +1972,6 @@ class BaseAnalyzer:
             self.data.get("Nx"),
             self.data.get("Ny"),
         )
-        if self.nfft > 1:
-            logger.info(
-                "FFT parameters: %s points, %s%% overlap, %s blocks [backend: %s]",
-                self.nfft,
-                self.overlap * 100,
-                self.nblocks,
-                FFT_BACKEND,
-            )
 
     def _require_dt(self) -> float:
         """Return a validated positive finite timestep from ``self.data``.
@@ -2176,6 +2164,19 @@ class BaseAnalyzer:
         """
         if "q" not in self.data:
             raise ValueError("Data not loaded. Call load_and_preprocess() first.")
+
+        # Welch floor partitioning (scipy.signal.welch): drop the remainder so
+        # every block is an independent ensemble member. Ceil + end-clamp re-uses
+        # samples in the last block and biases SPOD/BSMD eigenvalues.
+        # Shared helper with commands._apply_snapshot_limit (welch_nblocks).
+        Ns = int(self.data["Ns"])
+        self.nblocks = welch_nblocks(Ns, self.nfft, self.novlap)
+        if Ns < self.nfft or self.nblocks < 1:
+            raise ValueError(
+                f"Cannot form Welch blocks: Ns={Ns}, nfft={self.nfft} "
+                f"(overlap={self.overlap}, novlap={self.novlap}) yield "
+                f"nblocks={self.nblocks}"
+            )
 
         self.qhat_cached = False
         cache_path = self._fft_block_cache_path()

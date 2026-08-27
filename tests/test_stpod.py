@@ -457,7 +457,6 @@ def test_check_mode_orthogonality_true_and_false(small_stpod_field, tmp_path):
         figures_dir=tmp_path,
         data_loader=lambda _: small_stpod_field,
         spatial_weight_type="uniform",
-        use_parallel=False,
     )
     analyzer.load_and_preprocess()
     analyzer.perform_stpod()
@@ -477,7 +476,6 @@ def test_check_mode_orthogonality_empty(small_stpod_field, tmp_path):
         figures_dir=tmp_path,
         data_loader=lambda _: small_stpod_field,
         spatial_weight_type="uniform",
-        use_parallel=False,
     )
     assert not analyzer.check_mode_orthogonality()
 
@@ -1015,7 +1013,6 @@ def test_stpod_uniform_metric_moves_eigenvalues_and_matches_saved_file(monkeypat
         data_loader=lambda _: field,
         embedding_dim=3,
         n_modes_save=4,
-        use_parallel=False,
     )
     plain = STPODAnalyzer(
         spatial_weight_type="uniform",

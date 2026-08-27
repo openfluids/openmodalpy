@@ -89,7 +89,6 @@ class MPODAnalyzer(PODAnalyzer):
         band_edges: Iterable[float] | None = None,
         band_scale: str = "hz",
         filter_kind: str = "rectangular",
-        use_parallel: bool = True,
         spatial_weights: ArrayLike | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
@@ -108,7 +107,6 @@ class MPODAnalyzer(PODAnalyzer):
             data_loader=data_loader,
             spatial_weight_type=spatial_weight_type,
             n_modes_save=n_modes_save,
-            use_parallel=use_parallel,
             spatial_weights=spatial_weights,
             data=data,
         )

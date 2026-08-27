@@ -103,7 +103,6 @@ def test_provenance_all_analyzers(tmp_path: Path) -> None:
         file_path="prov_spod",
         nfft=8,
         overlap=0.5,
-        use_parallel=False,
         **common,
     )
     spod.load_and_preprocess()
@@ -135,7 +134,6 @@ def test_provenance_all_analyzers(tmp_path: Path) -> None:
         file_path="prov_stpod",
         embedding_dim=3,
         n_modes_save=3,
-        use_parallel=False,
         **common,
     )
     stpod.load_and_preprocess()

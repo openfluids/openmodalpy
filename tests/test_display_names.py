@@ -63,7 +63,6 @@ def _make_mpod(tmp_path, data: dict) -> MPODAnalyzer:
         spatial_weight_type="uniform",
         n_modes_save=4,
         band_edges=[0.0, 0.5],
-        use_parallel=False,
     )
 
 
@@ -75,7 +74,6 @@ def _make_pod(tmp_path, data: dict) -> PODAnalyzer:
         data_loader=lambda _: data,
         spatial_weight_type="uniform",
         n_modes_save=4,
-        use_parallel=False,
     )
 
 

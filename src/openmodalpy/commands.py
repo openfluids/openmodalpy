@@ -441,7 +441,6 @@ def _run_psd_pod(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
         figures_dir=str(figures_dir),
         data_loader=data_loader,
         spatial_weight_type=spec.case.spatial_weight_type,
-        use_parallel=spec.case.use_parallel,
         blockwise_mean=blockwise_mean,
         n_modes_save=spec.case.n_modes_save,
     )
@@ -482,7 +481,6 @@ def _run_pod_like(
         "figures_dir": str(figures_dir),
         "data_loader": data_loader,
         "spatial_weight_type": spec.case.spatial_weight_type,
-        "use_parallel": spec.case.use_parallel,
     }
     analyzer = analyzer_cls(**common_kwargs, **(extra_kwargs or {}))
     analyzer.run_analysis(
@@ -524,7 +522,6 @@ def _run_dmd(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
         "spatial_weight_type": spec.case.spatial_weight_type,
         "n_modes_save": int(spec.params.get("n_modes_save", spec.case.n_modes_save)),
         "rank": _coerce_rank(spec.params.get("rank", spec.case.rank)),
-        "use_parallel": spec.case.use_parallel,
     }
     # None on the case means leave the analyzer default alone (one source of truth).
     energy_fraction = _coerce_energy_fraction(spec.params.get("energy_fraction", spec.case.energy_fraction))
@@ -575,7 +572,6 @@ def _run_spod(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
         figures_dir=str(figures_dir),
         data_loader=data_loader,
         spatial_weight_type=spec.case.spatial_weight_type,
-        use_parallel=spec.case.use_parallel,
     )
     analyzer.run_analysis(
         plots=spec.case.generate_plots,

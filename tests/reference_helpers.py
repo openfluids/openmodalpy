@@ -204,7 +204,6 @@ def compute_reference_spectra(
             n_modes_save=n_modes,
             results_dir=tmp,
             figures_dir=tmp,
-            use_parallel=False,
         )
         pod.load_and_preprocess()
         pod.perform_pod()
@@ -220,7 +219,6 @@ def compute_reference_spectra(
             results_dir=tmp,
             figures_dir=tmp,
             rank=n_modes,
-            use_parallel=False,
         )
         dmd.load_and_preprocess()
         with warnings.catch_warnings():

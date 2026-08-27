@@ -142,10 +142,10 @@ def _make_analyzer(tmp_path, q, triads, window_type="boxcar", tag="dummy"):
     # manufactured tones sit exactly on FFT bins with zero spectral leakage.
     analyzer.window_type = window_type
     analyzer.load_and_preprocess()
+    analyzer.compute_fft_blocks()
     assert analyzer.nblocks == NBLOCKS, (
         f"Expected {NBLOCKS} blocks from Ns={NS}, nfft={NFFT}, novlap=0; got {analyzer.nblocks}"
     )
-    analyzer.compute_fft_blocks()
     return analyzer
 
 

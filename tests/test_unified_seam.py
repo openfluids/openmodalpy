@@ -79,7 +79,6 @@ def test_library_and_cli_produce_same_files(method: str, nfft: int, tmp_path: Pa
         "figures_dir": str(lib_figures),
         "data_loader": data_loader,
         "spatial_weight_type": spec.case.spatial_weight_type,
-        "use_parallel": False,
     }
     if analyzer_cls is not SPODAnalyzer:
         common["n_modes_save"] = spec.case.n_modes_save

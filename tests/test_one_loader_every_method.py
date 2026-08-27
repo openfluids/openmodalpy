@@ -204,8 +204,8 @@ def test_one_loader_round_trip(row: MethodRow, taylor_green_npz: str, tmp_path: 
     }
     analyzer = row.cls(taylor_green_npz, **row.ctor, **common)
     analyzer.load_and_preprocess()
-    if row.needs_fft_blocks:
-        analyzer.compute_fft_blocks()
+    # No compute_fft_blocks() step here: SPOD, BSMD and PSD-POD form their
+    # own FFT blocks, on first use, inside their perform_* method.
     getattr(analyzer, row.perform)(**row.perform_kwargs)
 
     n_space = int(np.asarray(analyzer.data["q"]).shape[1])
@@ -241,8 +241,8 @@ def test_load_once_loop_over_methods(taylor_green_npz: str, tmp_path: Path) -> N
         )
         assert analyzer.file_path is None
         analyzer.load_and_preprocess()
-        if row.needs_fft_blocks:
-            analyzer.compute_fft_blocks()
+        # No compute_fft_blocks() step here: SPOD, BSMD and PSD-POD form their
+        # own FFT blocks, on first use, inside their perform_* method.
         getattr(analyzer, row.perform)(**row.perform_kwargs)
 
         n_space = int(np.asarray(analyzer.data["q"]).shape[1])

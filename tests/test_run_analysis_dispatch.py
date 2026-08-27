@@ -38,7 +38,6 @@ def _common(tmp_path: Path, payload) -> dict:
         spatial_weight_type="uniform",
         results_dir=str(results),
         figures_dir=str(figures),
-        use_parallel=False,
     )
 
 
@@ -108,6 +107,7 @@ def _wrap_on_mro(cls, name: str, called: list, monkeypatch) -> None:
                 overlap=0.0,
                 use_static_triads=True,
                 static_triads=[(0, 0, 0)],
+                use_parallel=False,
                 **c,
             ),
             {},

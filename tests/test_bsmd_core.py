@@ -821,16 +821,21 @@ def test_empty_qhat_message_says_no_bins_loaded_default_triads(tmp_path):
     assert "no frequency bins" in warn_text.lower()
 
 
-def test_perform_bsmd_raises_on_empty_qhat(tmp_path, caplog):
-    """perform_bsmd refuses empty qhat before logging Starting BSMD analysis."""
+def test_perform_bsmd_forms_fft_blocks_on_first_use(tmp_path, caplog):
+    """perform_bsmd forms its own FFT blocks when qhat is still empty.
+
+    Previously this raised ValueError, forcing a separate hidden
+    compute_fft_blocks() call between load_and_preprocess() and
+    perform_bsmd(). perform_bsmd() now forms the FFT blocks itself.
+    """
     analyzer = _make_analyzer_without_fft(tmp_path, triads=[(1, 1, 2)])
     assert analyzer.qhat.size == 0
     with caplog.at_level(logging.INFO, logger="openmodalpy.bsmd"):
-        with pytest.raises(ValueError) as excinfo:
-            analyzer.perform_bsmd()
+        analyzer.perform_bsmd()
     msgs = [r.getMessage() for r in caplog.records if r.name == "openmodalpy.bsmd"]
-    assert not any("Starting BSMD analysis" in m for m in msgs)
-    assert "load_and_preprocess" in str(excinfo.value) or "qhat" in str(excinfo.value).lower()
+    assert any("Starting BSMD analysis" in m for m in msgs)
+    assert analyzer.qhat.size > 0
+    assert analyzer.eigenvalues.size > 0
 
 
 def test_compute_single_triad_nan_in_qhat_returns_nan(tmp_path):
