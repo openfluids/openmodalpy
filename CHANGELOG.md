@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BLAS/LAPACK library actually ran (`prov_blas`), the OS platform and machine
   architecture (`prov_platform`, `prov_machine`), and the HDF5 C library
   version (`prov_hdf5_version`).
+- `scripts/mutation.sh` runs mutation testing over the numerical core
+  (`core/decomposition.py` and `core/welch.py`). It reports how many mutants
+  the test suite killed and how many survived. Coverage says which lines the
+  tests run; this says whether the tests fail when the numbers are wrong. The
+  run takes approximately an hour, so it stays off the per-push path: the
+  `mutation` workflow runs it on demand and on the first day of each month.
+  The first recorded run killed 699 of 812 mutants (86%); 109 survived and 4
+  timed out. The survivors group in the solver routing and the tolerance
+  helpers. DOC.md, "Mutation testing", holds the baseline table to compare
+  later runs against.
 
 ### Changed
 

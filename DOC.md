@@ -899,6 +899,69 @@ Run all: `uv run pytest tests/ -q`
 
 To count them: `uv run pytest -q --collect-only`
 
+### Mutation testing
+
+Coverage says which lines the tests run. It does not say whether the tests
+FAIL when the numbers are wrong. Mutation testing answers that question. It
+changes one operator or constant in the source, then runs the suite. A mutant
+is "killed" if the suite goes red. A mutant that "survived" is a change to the
+numerical core that no test detects.
+
+The scope is deliberately narrow. `pyproject.toml` (`[tool.mutmut]`) mutates
+`core/decomposition.py` and `core/welch.py` only. Plotting, CLI and IO code is
+not mutated, because surviving mutants there are expected and hide the signal.
+
+Run it by hand:
+
+```bash
+scripts/mutation.sh mutation-report.txt
+```
+
+The run takes approximately an hour, because it runs the full suite once per
+mutant. Do not put it on the per-push path. The `mutation` workflow runs it on
+demand (`workflow_dispatch`) and on the first day of each month. On a shared
+machine, take the heavy-run lock in the caller:
+
+```bash
+timeout 5400 flock -w 900 ~/.heavy.lock scripts/mutation.sh mutation-report.txt
+```
+
+mutmut forks one test process per mutant, up to `--max-children`. The default
+is the CPU count, which saturates a shared box. The script caps it at 4. Set
+`MUTMUT_MAX_CHILDREN` to change the cap.
+
+#### Recorded baseline
+
+Run of 2026-08-27, on the two scoped files, 812 mutants:
+
+| Status | Count |
+|--------|------|
+| killed | 699 |
+| survived | 109 |
+| timeout | 4 |
+
+The kill rate is 86%. The 109 survivors are a measured result, not a clean
+result. They group in the solver routing and the tolerance helpers:
+
+| Function | Survivors |
+|----------|----------|
+| `_solve_eigh_complex` | 13 |
+| `_solve_eigh` | 11 |
+| `_solve_svd` | 10 |
+| `_significant_singular_value_mask` | 9 |
+| `_significant_eigenvalue_mask` | 9 |
+| `BandFilteredLift.mask` | 7 |
+| `windowed_block_fft` (welch) | 6 |
+| `spod_single_frequency` | 6 |
+| `_working_eps` | 6 |
+
+Two causes are expected, and one is not. A mutant in a solver route can
+survive because a different route gives the same answer to the stated
+tolerance. A mutant in a threshold constant can survive because no test sits
+close enough to the threshold to see the change. The second cause is a real
+gap in the suite. Treat this table as the number to improve, and compare a
+later run against it.
+
 ---
 
 ## Dependencies

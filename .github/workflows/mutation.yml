@@ -22,7 +22,11 @@ jobs:
       - name: Mutation run
         run: bash scripts/mutation.sh mutation-report.txt
 
+      # Upload even when the run above fails: a partial report says more about
+      # where it stopped than an empty artifact list does.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
           name: mutation-report
           path: mutation-report.txt
+          if-no-files-found: warn

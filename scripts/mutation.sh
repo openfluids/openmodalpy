@@ -23,10 +23,21 @@ uv run --group mutation mutmut run --max-children "${max_children}"
 
 uv run --group mutation mutmut results --all true > "$report_path"
 
-killed=$(grep -c ': killed$' "$report_path" || true)
-survived=$(grep -c ': survived$' "$report_path" || true)
-timeout=$(grep -c ': timeout$' "$report_path" || true)
-suspicious=$(grep -c ': suspicious$' "$report_path" || true)
+# `mutmut results` prints one "    <mutant>: <status>" line per mutant. Count
+# every status it can emit, not only the four interesting ones: a mutant that
+# lands in "no tests" is a mutated line the suite never reaches, which is the
+# signal this scoped run exists to find. The status strings contain spaces
+# ("no tests", "not checked"); they are not underscored.
+count_status() { grep -c ": $1\$" "$report_path" || true; }
+
+killed=$(count_status killed)
+survived=$(count_status survived)
+timeout=$(count_status timeout)
+suspicious=$(count_status suspicious)
+no_tests=$(count_status "no tests")
+skipped=$(count_status skipped)
+not_checked=$(count_status "not checked")
 
 echo "killed=${killed} survived=${survived} timeout=${timeout} suspicious=${suspicious}"
+echo "no_tests=${no_tests} skipped=${skipped} not_checked=${not_checked}"
 echo "full report: ${report_path}"
