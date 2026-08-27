@@ -262,15 +262,29 @@ def test_new_prov_keys_present_pod_and_dmd(tmp_path: Path) -> None:
 
 
 def test_prov_blas_matches_expected_format(tmp_path: Path) -> None:
-    """`prov_blas` has at least one entry shaped like a threadpoolctl record."""
+    """Every `prov_blas` entry is a threadpoolctl record, or the text is "unknown".
+
+    `_blas_identity` returns the sentinel "unknown" when threadpoolctl reports
+    no bound threadpool. That is a supported result, not a failure: the
+    provenance block must never raise, and macOS wheels that link Accelerate
+    report no pool. So accept the sentinel, but only as the whole text.
+
+    Every other entry must match the record shape. The check is on ALL
+    entries, not on any one of them, so a malformed entry cannot hide behind
+    a well-formed sibling.
+    """
     data = {"modes": np.arange(6.0).reshape(3, 2)}
     write_results(tmp_path / "blas.h5", data, attrs={"analysis_type": "pod"})
     with h5py.File(tmp_path / "blas.h5", "r") as handle:
         raw = handle.attrs["prov_blas"]
     text = raw.decode() if isinstance(raw, bytes) else str(raw)
+    if text == "unknown":
+        return
     entries = text.split("; ")
-    pattern = re.compile(r"^\w+ \S+ threads=\d+ \(\w+\)")
-    assert any(pattern.match(entry) for entry in entries), text
+    pattern = re.compile(r"^\w+ \S+ threads=\d+ \(\w+\)$")
+    assert entries, text
+    for entry in entries:
+        assert pattern.match(entry), f"malformed entry {entry!r} in {text!r}"
 
 
 # Pinned at HEAD before the prov_blas/prov_platform/prov_machine/prov_hdf5_version

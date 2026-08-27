@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   helpers. DOC.md, "Mutation testing", holds the baseline table to compare
   later runs against.
 
+### Fixed
+
+- The `prov_blas` format test failed on macOS. `_blas_identity` returns the
+  sentinel "unknown" when threadpoolctl reports no bound threadpool, which is
+  what a macOS wheel linked against Accelerate does, but the test did not
+  accept that value. The test now accepts the sentinel as the whole text, and
+  checks the record shape of every other entry instead of only one of them, so
+  a malformed entry can no longer hide behind a well-formed one.
+
 ### Changed
 
 - CI: mypy now runs on macOS and Windows as well as Linux; a weekly
