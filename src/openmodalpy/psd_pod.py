@@ -66,7 +66,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         file_path: str | None = None,
         results_dir: str = RESULTS_DIR,
         figures_dir: str = FIGURES_DIR,
-        data_loader: Callable[[str], dict] | None = None,
+        data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         nfft: int = 128,
         overlap: float = 0.5,

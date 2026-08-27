@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, cast
@@ -1105,26 +1106,53 @@ def _looks_like_generic_npz(file_path: str) -> bool:
     return not any(key in keys for key in DEFAULT_DNAMI_SCHEMA["snapshot"]["field_candidates"])
 
 
-def _assemble_contract_data(
-    datasets: dict[str, np.ndarray],
+def derive_grid_and_snapshot_counts(
+    q: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray | None,
+    stated: Mapping[str, Any],
     *,
-    file_path: str,
-    preview_ns: int | None,
-    resample_time: bool,
-) -> Dict[str, Any]:
-    """Build the data contract dict from named generic-reader datasets."""
-    missing = [key for key in ("q", "x", "y") if key not in datasets]
-    if missing:
-        raise KeyError(f"Missing required dataset(s) {missing} in {file_path}. Available keys: {sorted(datasets)}")
+    source: str,
+) -> tuple[int, int, int, int]:
+    """Derive Nx, Ny, Nz and Ns from array shapes.
 
-    q = np.asarray(datasets["q"])
-    x = np.asarray(datasets["x"])
-    y = np.asarray(datasets["y"])
-    z = np.asarray(datasets["z"]) if "z" in datasets else None
-    t = np.asarray(datasets["t"]).reshape(-1) if "t" in datasets else None
+    This is the one rule for turning ``q``, ``x``, ``y`` and ``z`` into grid
+    counts. The generic file reader and the ``data=`` constructor path both
+    call it, so a dict built by hand and a dict read from a file follow the
+    same logic.
 
+    Parameters
+    ----------
+    q : np.ndarray
+        Snapshot array. Shape is ``(Ns, Nspace)`` or ``(Ns, Ny, Nx[, Nz])``.
+    x : np.ndarray
+        X-coordinate array.
+    y : np.ndarray
+        Y-coordinate array.
+    z : np.ndarray | None
+        Z-coordinate array, or ``None`` for a 2-D field.
+    stated : Mapping[str, Any]
+        Any ``Nx``/``Ny``/``Nz``/``Ns`` values the caller already gave. A
+        value present here is checked against the derived one, not
+        overridden by it.
+    source : str
+        Short text naming where ``q`` came from, used in error messages.
+
+    Returns
+    -------
+    tuple[int, int, int, int]
+        ``(Nx, Ny, Nz, Ns)``.
+
+    Raises
+    ------
+    ValueError
+        If ``q`` has fewer than two axes, if no grid count is consistent
+        with ``q``'s spatial width, or if a stated count disagrees with the
+        derived one.
+    """
     if q.ndim < 2:
-        raise ValueError(f"'q' in {file_path} must be (Ns, Nspace) or (Ns, Ny, Nx[, Nz]); got shape {q.shape}.")
+        raise ValueError(f"'q' in {source} must be (Ns, Nspace) or (Ns, Ny, Nx[, Nz]); got shape {q.shape}.")
 
     ns = int(q.shape[0])
     nspace = int(np.prod(q.shape[1:]))
@@ -1133,10 +1161,10 @@ def _assemble_contract_data(
         nx = len(x)
         ny = len(y)
         nz = len(z) if z is not None else 1
-        if nx * ny * nz != nspace and all(name in datasets for name in ("Nx", "Ny")):
-            stated_nx = int(np.asarray(datasets["Nx"]).reshape(-1)[0])
-            stated_ny = int(np.asarray(datasets["Ny"]).reshape(-1)[0])
-            stated_nz = int(np.asarray(datasets["Nz"]).reshape(-1)[0]) if "Nz" in datasets else 1
+        if nx * ny * nz != nspace and all(name in stated for name in ("Nx", "Ny")):
+            stated_nx = int(np.asarray(stated["Nx"]).reshape(-1)[0])
+            stated_ny = int(np.asarray(stated["Ny"]).reshape(-1)[0])
+            stated_nz = int(np.asarray(stated["Nz"]).reshape(-1)[0]) if "Nz" in stated else 1
             if stated_nx * stated_ny * stated_nz == nspace:
                 nx, ny, nz = stated_nx, stated_ny, stated_nz
         if (
@@ -1157,15 +1185,39 @@ def _assemble_contract_data(
     if nx * ny * nz != nspace:
         raise ValueError(
             f"Grid counts x={nx}, y={ny}, z={nz} give {nx * ny * nz} points but 'q' in "
-            f"{file_path} holds {nspace} per snapshot. Supply consistent coordinates: "
+            f"{source} holds {nspace} per snapshot. Supply consistent coordinates: "
             f"state Nx/Ny[/Nz], or give 1-D x and y of length Nspace for scattered points."
         )
 
     for name, derived in (("Nx", nx), ("Ny", ny), ("Nz", nz), ("Ns", ns)):
-        if name in datasets:
-            stated = int(np.asarray(datasets[name]).reshape(-1)[0])
-            if stated != derived:
-                raise ValueError(f"{name}={stated} in {file_path} disagrees with derived value {derived}.")
+        if name in stated:
+            stated_val = int(np.asarray(stated[name]).reshape(-1)[0])
+            if stated_val != derived:
+                raise ValueError(f"{name}={stated_val} in {source} disagrees with derived value {derived}.")
+
+    return nx, ny, nz, ns
+
+
+def _assemble_contract_data(
+    datasets: dict[str, np.ndarray],
+    *,
+    file_path: str,
+    preview_ns: int | None,
+    resample_time: bool,
+) -> Dict[str, Any]:
+    """Build the data contract dict from named generic-reader datasets."""
+    missing = [key for key in ("q", "x", "y") if key not in datasets]
+    if missing:
+        raise KeyError(f"Missing required dataset(s) {missing} in {file_path}. Available keys: {sorted(datasets)}")
+
+    q = np.asarray(datasets["q"])
+    x = np.asarray(datasets["x"])
+    y = np.asarray(datasets["y"])
+    z = np.asarray(datasets["z"]) if "z" in datasets else None
+    t = np.asarray(datasets["t"]).reshape(-1) if "t" in datasets else None
+
+    nx, ny, nz, ns = derive_grid_and_snapshot_counts(q, x, y, z, datasets, source=file_path)
+    nspace = int(np.prod(q.shape[1:]))
 
     if preview_ns is not None:
         q = q[:preview_ns]

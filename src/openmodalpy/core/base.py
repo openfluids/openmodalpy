@@ -31,6 +31,7 @@ from openmodalpy.core.config import (
     CMAP_DIV,
     FFT_BACKEND,
 )
+from openmodalpy.core.io import derive_grid_and_snapshot_counts
 from openmodalpy.core.io import load_data as di_load_data
 from openmodalpy.core.io import load_jetles_data as di_load_jetles_data
 from openmodalpy.core.io import load_mat_data as di_load_mat_data
@@ -1752,10 +1753,13 @@ class BaseAnalyzer:
                 When given, the weight type becomes ``"prescribed"`` and the
                 vector is checked against the grid in ``load_and_preprocess``.
             data (dict | None): Already-loaded dataset following the data
-                contract (``q``, ``x``, ``y``, ``dt``, ``Nx``, ``Ny``, ``Ns``;
-                see DOC.md). Given instead of ``file_path`` — exactly one of
-                the two is required. The dict is stored by reference, so one
-                load can feed several analyzers.
+                contract (``q``, ``x``, ``y``, ``dt`` required; ``Nx``,
+                ``Ny``, ``Nz``, ``Ns`` derived when absent; see DOC.md).
+                Given instead of ``file_path`` — exactly one of the two is
+                required. The dict is stored by reference, so one load can
+                feed several analyzers. The derived counts are written back
+                into the given dict, so a second analyzer re-uses them
+                instead of deriving them again.
         """
         self.file_path = file_path
 
@@ -1766,8 +1770,31 @@ class BaseAnalyzer:
                 raise ValueError("Pass file_path or data, not both: an analyzer takes exactly one input source.")
             if not isinstance(data, dict) or not data:
                 raise ValueError(
-                    "data must be a non-empty dict following the data contract (q, x, y, dt, Nx, Ny, Ns; see DOC.md)."
+                    "data must be a non-empty dict following the data contract "
+                    "(q, x, y, dt required; Nx, Ny, Nz, Ns derived when absent; see DOC.md)."
                 )
+            required = ("q", "x", "y", "dt")
+            missing = [key for key in required if key not in data]
+            if missing:
+                raise ValueError(
+                    f"data is missing required key(s): {', '.join(missing)}. "
+                    f"Required: {', '.join(required)}. Derived when absent: Nx, Ny, Nz, Ns."
+                )
+            # Nx/Ny/Nz/Ns follow the same shape rule as the generic file reader,
+            # so a hand-built dict and one read from a file behave the same way.
+            z_raw = data.get("z")
+            nx, ny, nz, ns = derive_grid_and_snapshot_counts(
+                np.asarray(data["q"]),
+                np.asarray(data["x"]),
+                np.asarray(data["y"]),
+                np.asarray(z_raw) if z_raw is not None else None,
+                data,
+                source="data",
+            )
+            data.setdefault("Nx", nx)
+            data.setdefault("Ny", ny)
+            data.setdefault("Nz", nz)
+            data.setdefault("Ns", ns)
         elif file_path is None:
             raise ValueError("No input source: pass file_path (path to a data file) or data (the loaded dict).")
         self.nfft = nfft

@@ -139,12 +139,31 @@ Every analyzer expects a Python dict with these keys:
 | `y` | `ndarray` | yes | y-coordinates (1D or 2D mesh) |
 | `z` | `ndarray` or `None` | no | z-coordinates for 3D data |
 | `dt` | `float` | yes | time step between snapshots |
-| `Nx` | `int` | yes | grid points in x |
-| `Ny` | `int` | yes | grid points in y |
-| `Nz` | `int` | no | grid points in z (default 1) |
-| `Ns` | `int` | yes | number of snapshots |
+| `Nx` | `int` | no | grid points in x (derived from the shapes of `q`, `x`, `y` when absent) |
+| `Ny` | `int` | no | grid points in y (derived from the shapes of `q`, `x`, `y` when absent) |
+| `Nz` | `int` | no | grid points in z (derived when absent; default 1) |
+| `Ns` | `int` | no | number of snapshots (derived from `q.shape[0]` when absent) |
 | `t` | `ndarray` | no | time vector |
 | `metadata` | `dict` | no | format info, var_name, plot_style, etc. |
+
+`q`, `x`, `y` and `dt` are the only keys a caller must supply; a dict missing
+one of them raises `ValueError` at construction, naming the missing key(s).
+`Nx`, `Ny`, `Nz` and `Ns` are derived from the array shapes, using the same
+rule for a hand-built dict (`data=`) and for a file read from disk — see
+"Load once, loop over methods" below.
+
+### The plug-in point for your own data
+
+There is one documented way to hand openmodalpy your own data: a plain
+callable `(path: str) -> dict` that returns a dict following the contract
+table above, given either as `data_loader=` (called once per `file_path`) or
+called yourself and handed straight in as `data=`. See "Your own format"
+below for a worked template.
+
+The `DataLoader` abstract base class and `DataInterfaceManager`
+(`core/io.py`) are internal — they are how the shipped readers (`.mat`,
+`.npz`, `.h5`/`.hdf5`, dNami) are written, not a path a user is expected to
+subclass.
 
 ### Supported input formats
 
@@ -153,7 +172,9 @@ Every analyzer expects a Python dict with these keys:
   consolidated/split layouts via `DNamiDataLoader` (auto-detected by key signature;
   an explicit `schema=` forces the dNami loader)
 - **HDF5 `.h5` / `.hdf5`** — plain contract layout via `GenericDataLoader`
-- **Custom loader** — any callable `(file_path: str) -> dict`
+- **directory** of dNami-family split NPZ files — via `DNamiDataLoader`
+- **Custom loader** — any callable `(file_path: str) -> dict`, see "Your own
+  format" below
 
 The generic reader takes named datasets: `q` (as `(Ns, Nspace)` or `(Ns, Ny, Nx[, Nz])`,
 flattened C-order), `x`/`y` (required, passed through unchanged), optional `z`/`t`/`dt`,
@@ -193,6 +214,30 @@ for cls, perform in ((PODAnalyzer, "perform_pod"),
     getattr(analyzer, perform)()
 ```
 
+### Your own format
+
+Copy `examples/my_data_template.py`, edit `load_my_data` to read your own
+files, and pass its result through `data=`:
+
+```python
+from openmodalpy import PODAnalyzer
+from my_data_template import load_my_data  # your copy, renamed
+
+data = load_my_data("path/to/your/dataset")
+pod = PODAnalyzer(data=data)
+pod.load_and_preprocess()
+pod.perform_pod()
+```
+
+The template fills every contract key with a comment on what it is, which
+keys are required, and how `q` must be flattened. It is exercised by
+`tests/test_data_contract_derive_then_validate.py`, so it cannot silently
+rot.
+
+For a worked example of a shipped reader written against the internal
+`DataLoader` plug-in point instead — the pattern to follow only if you are
+contributing a reader to openmodalpy itself, not for everyday use — see
+`DNamiDataLoader` in `core/io.py`.
 
 ### Spatial weights
 

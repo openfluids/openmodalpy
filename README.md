@@ -149,25 +149,30 @@ The BSMD implementation follows Schmidt (2020) and was inspired by the reference
 
 ```python
 {
-    "q": np.ndarray,   # (Ns, Nspace) — snapshots × spatial points
-    "dt": float,       # time step
-    "Nx": int,         # grid points in x
-    "Ny": int,         # grid points in y
-    "x": np.ndarray,   # x-coordinates
-    "y": np.ndarray,   # y-coordinates
+    "q": np.ndarray,   # (Ns, Nspace) — snapshots × spatial points, required
+    "dt": float,       # time step, required
+    "x": np.ndarray,   # x-coordinates, required
+    "y": np.ndarray,   # y-coordinates, required
+    # "Nx": int,       # grid points in x — derived from q, x, y when absent
+    # "Ny": int,       # grid points in y — derived from q, x, y when absent
 }
 ```
 
-Anything else can be read with a custom loader returning the same dictionary:
+Anything else can be read with a custom loader returning the same dictionary.
+Copy `examples/my_data_template.py` for a fully commented starting point, or
+write the dict by hand:
 
 ```python
 def my_loader(path):
-    return {"q": data, "dt": 0.01, "Nx": 100, "Ny": 50, "x": x, "y": y}
+    return {"q": data, "dt": 0.01, "x": x, "y": y}
 
 d = my_loader("run_001")        # one load — or build the dict yourself
 
 pod = PODAnalyzer(data=d)       # hand loaded data straight in; no fake path
 ```
+
+See `DOC.md`, "Your own format", for the full contract and the plug-in point
+this uses.
 
 ## FFT Backend
 

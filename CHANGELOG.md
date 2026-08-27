@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `examples/my_data_template.py` is a template for your own data format. It
+  names every contract key, says which are required, and states how `q` must be
+  flattened. A test runs it, so it cannot go stale. DOC.md, "Your own format",
+  explains the three steps.
+- DOC.md now states one plug-in point for your own reader: a plain callable
+  `(path) -> dict`, given as `data_loader=` or called yourself and passed as
+  `data=`. The `DataLoader` base class and `DataInterfaceManager` are named as
+  internal, which is how the shipped readers are written.
 - `generate_double_gyre`, `generate_taylor_green`, `generate_cylinder_wake`,
   `generate_example_dataset`, `get_example_info`, and `load_example_payload`
   are now exported from the top-level `openmodalpy` package.
@@ -29,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An analyzer given an already-loaded dict through `data=` raised a bare
+  `KeyError: 'Ns'` deep inside the Welch block setup. The same dict read from a
+  file worked, because the file reader derives `Nx`, `Ny`, `Nz` and `Ns` from
+  the array shapes. Both paths now use one derivation rule, so a dict built by
+  hand behaves like a dict read from disk. Only `q`, `x`, `y` and `dt` are
+  required; a dict that misses one of them now raises `ValueError` at
+  construction and names the missing keys. The example printed in README.md ran
+  into this and now runs as printed.
 - The `prov_blas` format test failed on macOS. `_blas_identity` returns the
   sentinel "unknown" when threadpoolctl reports no bound threadpool, which is
   what a macOS wheel linked against Accelerate does, but the test did not
