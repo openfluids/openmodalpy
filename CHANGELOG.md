@@ -35,39 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   helpers. DOC.md, "Mutation testing", holds the baseline table to compare
   later runs against.
 
-### Fixed
-
-- A custom `data_loader=` callable did not get the derived counts, so a loader
-  that returned only `q`, `x`, `y` and `dt` still failed with a bare
-  `KeyError: 'Ns'`. DOC.md documents `data_loader=` and `data=` as the same
-  plug-in point, so both now fill the counts through one rule. A dict that
-  already states every count is left alone.
-- An analyzer given an already-loaded dict through `data=` raised a bare
-  `KeyError: 'Ns'` deep inside the Welch block setup. The same dict read from a
-  file worked, because the file reader derives `Nx`, `Ny`, `Nz` and `Ns` from
-  the array shapes. Both paths now use one derivation rule, so a dict built by
-  hand behaves like a dict read from disk. Only `q`, `x`, `y` and `dt` are
-  required; a dict that misses one of them now raises `ValueError` at
-  construction and names the missing keys. The example printed in README.md ran
-  into this and now runs as printed.
-- The `prov_blas` format test failed on macOS. `_blas_identity` returns the
-  sentinel "unknown" when threadpoolctl reports no bound threadpool, which is
-  what a macOS wheel linked against Accelerate does, but the test did not
-  accept that value. The test now accepts the sentinel as the whole text, and
-  checks the record shape of every other entry instead of only one of them, so
-  a malformed entry can no longer hide behind a well-formed one.
-
 ### Changed
 
-- **Breaking:** `nfft` and `overlap` are no longer accepted by `PODAnalyzer`,
-  `MPODAnalyzer`, `DMDAnalyzer`, or `STPODAnalyzer`. They never used these
-  Welch block-size settings; passing either now raises `TypeError`. Only
-  `SPODAnalyzer`, `PSDPODAnalyzer`, and `BSMDAnalyzer` form FFT blocks, and
-  keep `nfft`/`overlap` as their own constructor keywords.
-- **Breaking:** `use_parallel` is no longer accepted by `PODAnalyzer`,
-  `MPODAnalyzer`, `DMDAnalyzer`, `STPODAnalyzer`, `SPODAnalyzer`, or
-  `PSDPODAnalyzer`; it never changed their result. `BSMDAnalyzer` keeps
-  `use_parallel`, since it really runs its triad loop in a thread pool.
 - Result files written by `MPODAnalyzer`, `DMDAnalyzer` and `STPODAnalyzer`
   now record `nfft=1` and `overlap=0.0`, in place of the former default
   `nfft=128` and `overlap=0.5`. These methods never form an FFT block, so the
@@ -94,7 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The generic loader now infers scattered points from 1-D `x`/`y` of length
   `Nspace` whose product does not match `Nspace`, without needing `Nx`/`Ny`
   stated in the file.
-
 - The test-suite coverage floor moved from a nominal 50% (24 points under the
   measured value, so real regressions stayed invisible) to a 72% ratchet read
   from `pyproject.toml` by both local runs and CI. The ratchet policy — when
@@ -109,6 +77,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A custom `data_loader=` callable did not get the derived counts, so a loader
+  that returned only `q`, `x`, `y` and `dt` still failed with a bare
+  `KeyError: 'Ns'`. DOC.md documents `data_loader=` and `data=` as the same
+  plug-in point, so both now fill the counts through one rule. A dict that
+  already states every count is left alone.
+- An analyzer given an already-loaded dict through `data=` raised a bare
+  `KeyError: 'Ns'` deep inside the Welch block setup. The same dict read from a
+  file worked, because the file reader derives `Nx`, `Ny`, `Nz` and `Ns` from
+  the array shapes. Both paths now use one derivation rule, so a dict built by
+  hand behaves like a dict read from disk. Only `q`, `x`, `y` and `dt` are
+  required. A dict that misses `q`, `x` or `y` raises `ValueError` and names
+  the missing keys. A dict that misses `dt` raises when the analyzer loads,
+  with the message that names the data source and asks for a positive finite
+  scalar. The example printed in README.md ran into this and now runs as
+  printed.
+- The `prov_blas` format test failed on macOS. `_blas_identity` returns the
+  sentinel "unknown" when threadpoolctl reports no bound threadpool, which is
+  what a macOS wheel linked against Accelerate does, but the test did not
+  accept that value. The test now accepts the sentinel as the whole text, and
+  checks the record shape of every other entry instead of only one of them, so
+  a malformed entry can no longer hide behind a well-formed one.
 - `run_analysis` with `plots=False` no longer reports that plotting completed.
 - **Numerical change: polar grid weights.** `spatial_weight_type="polar"`
   on a grid flattened the 2-D (x, r) weights x-major (`index = ix*Ny + iy`)
@@ -121,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   12 %; on a 5 x 5 grid single weights differed by up to a factor 3.7; the
   total measure (sum of all weights) was unchanged. To see whether your
   result moved, compare the old and new weight vectors for your grid:
-  `W_new = calculate_polar_weights(x, r, use_parallel=False)` against
+  `W_new = calculate_polar_weights(x, r, use_parallel=False)` (import it with
+  `from openmodalpy.core.base import calculate_polar_weights`) against
   `np.reshape(np.outer(Wx, Wy), (-1, 1))` built the old way — any
   difference beyond round-off means your polar eigenvalues change with
   this release.
@@ -135,6 +125,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- `nfft` and `overlap` are no longer accepted by `PODAnalyzer`,
+  `MPODAnalyzer`, `DMDAnalyzer`, or `STPODAnalyzer`. They never used these
+  Welch block-size settings; passing either now raises `TypeError`. Only
+  `SPODAnalyzer`, `PSDPODAnalyzer`, and `BSMDAnalyzer` form FFT blocks, and
+  keep `nfft`/`overlap` as their own constructor keywords.
+- `use_parallel` is no longer accepted by `PODAnalyzer`,
+  `MPODAnalyzer`, `DMDAnalyzer`, `STPODAnalyzer`, `SPODAnalyzer`, or
+  `PSDPODAnalyzer`; it never changed their result. `BSMDAnalyzer` keeps
+  `use_parallel`, since it really runs its triad loop in a thread pool.
 - `DMDAnalyzer.run_analysis()` and `BSMDAnalyzer.run_analysis()` now produce
   figures by default; their docstrings previously promised no default plots.
 - `PSDPODAnalyzer.run_analysis()` now produces its standard figure set
