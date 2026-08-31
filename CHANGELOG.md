@@ -94,6 +94,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The documentation called TLS-DMD "de-biased for noisy data" and set no bound
+  on it. That advantage holds at `delays=1` and decays as `delays` grows,
+  because delay embedding repeats the same noise across the Hankel rows while
+  TLS assumes the two snapshot matrices carry independent errors. Measured over
+  200 seeds, TLS beat LS in 177/200 runs at `delays=1` and in 95/200 at
+  `delays=5`, where LS is better on average. README.md, DOC.md and the
+  `perform_dmd` docstring now say so. No solver changed.
 - The `BSMDAnalyzer` class docstring said BSMD "keeps one mode per triad, so
   the mode count follows from the triad count, not a chosen number". Keeping one
   mode per triad is the approximation this analyzer makes, not a property of the

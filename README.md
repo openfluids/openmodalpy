@@ -138,7 +138,9 @@ takes in a config file.
 | `bsmd` | triadic interaction | nonlinear triad structures | [Schmidt (2020)](https://doi.org/10.1007/s11071-020-06037-z) |
 
 `dmd` accepts `method: "ls"` (least squares) or `method: "tls"` (total least squares,
-de-biased for noisy data).
+de-biased for noisy data). The TLS advantage on noisy data is a `delays=1`
+property. It decays as `delays` grows, and by `delays=5` plain LS is closer on
+average. Do not choose `tls` and deep delays together to fight noise.
 
 The BSMD implementation follows Schmidt (2020) and was inspired by the reference
 [MATLAB implementation](https://github.com/olivertschmidt/bmd).
