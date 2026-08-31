@@ -178,9 +178,14 @@ class BSMDAnalyzer(BaseAnalyzer):
 
     Inherits from:
         BaseAnalyzer: Provides common functionalities for data loading, STFT computation,
-                      and preprocessing. BSMD takes no ``n_modes_save``: it
-                      keeps one mode per triad, so the mode count follows
-                      from the triad count, not a chosen number.
+                      and preprocessing. BSMD takes no ``n_modes_save``. It keeps
+                      the dominant eigenpair of each triad. That is the
+                      approximation this analyzer makes, not a property of the
+                      operator: ``C`` is ``(n_blocks, n_blocks)`` and has
+                      ``n_blocks`` eigenpairs, of which
+                      ``np.argmax(np.abs(eigvals))`` selects one. The number of
+                      results therefore follows the triad list you pass as
+                      ``static_triads``, and does not follow the block count.
     """
 
     _METHOD_NAME = "bsmd"

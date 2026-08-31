@@ -426,6 +426,26 @@ def test_dynamic_triad_selection_raises(tmp_path):
         analyzer.perform_bsmd()
 
 
+def test_result_count_follows_the_triads_not_the_blocks(tmp_path):
+    """One result per triad, whatever the block count.
+
+    BSMD assembles a ``(n_blocks, n_blocks)`` matrix per triad and keeps only
+    the dominant eigenpair, so the number of results tracks the triad list and
+    not the record length. SPOD does the opposite: its mode count IS the block
+    count. This check keeps the class docstring honest about the difference.
+    """
+    triads = [(1, 1, 2), (1, -1, 0)]
+    few = _make_analyzer(tmp_path / "few", triads=triads, nfft=8, Ns=24, Nspace=4)
+    many = _make_analyzer(tmp_path / "many", triads=triads, nfft=8, Ns=96, Nspace=4)
+    few.perform_bsmd()
+    many.perform_bsmd()
+
+    assert many.nblocks > few.nblocks, "the two runs must differ in block count"
+    assert few.eigenvalues.shape == (len(triads),)
+    assert many.eigenvalues.shape == (len(triads),)
+    assert few.modes1.shape == many.modes1.shape
+
+
 def test_perform_bsmd_static_path_shapes_and_nontrivial(tmp_path):
     """Public perform_bsmd() static-triad path yields shaped, non-trivial results."""
     triads = [(0, 0, 0), (1, -1, 0), (1, 1, 2)]

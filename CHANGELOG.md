@@ -94,6 +94,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `BSMDAnalyzer` class docstring said BSMD "keeps one mode per triad, so
+  the mode count follows from the triad count, not a chosen number". Keeping one
+  mode per triad is the approximation this analyzer makes, not a property of the
+  operator: the assembled matrix is `(n_blocks, n_blocks)` and has `n_blocks`
+  eigenpairs, of which the dominant one is selected. The triad count is also a
+  chosen number, because the caller passes `static_triads`. The docstring now
+  says both, and a test pins that the result count follows the triad list and
+  not the block count.
 - `SPODAnalyzer.perform_spod` said the computation is "delegated to the
   `spod_function` imported from `utils.py`". There is no `utils.py` in this
   package, so a reader following that sentence reached nothing.
