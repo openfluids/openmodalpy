@@ -64,10 +64,13 @@ class SPODAnalyzer(BaseAnalyzer):
 
     Key Attributes:
         eigenvalues (np.ndarray): SPOD eigenvalues (energy) for each mode and frequency.
-                                  Shape: (n_freq_bins, n_modes_saved_per_freq).
-        modes (np.ndarray): SPOD spatial modes. Shape: (n_freq_bins, n_spatial_points, n_modes_saved_per_freq).
+                                  Shape: (n_freq_bins, n_blocks). Always the full
+                                  block count, even when ``n_modes_save`` cuts the modes.
+        modes (np.ndarray): SPOD spatial modes. Shape: (n_freq_bins, n_spatial_points, n_modes_kept),
+                            where n_modes_kept is ``n_modes_save`` or n_blocks when it is not set.
         time_coefficients (np.ndarray): SPOD temporal coefficients (reconstructed from modes and qhat).
-                                        Shape: (n_freq_bins, n_modes_saved_per_freq, n_blocks).
+                                        Shape: (n_freq_bins, n_blocks, n_modes_kept). The block axis
+                                        comes before the mode axis, which the eigenproblem sets.
         freq (np.ndarray): Array of frequencies corresponding to FFT bins.
         St (np.ndarray): Array of Strouhal numbers corresponding to `freq`.
         dst (float): Strouhal number step, used for integral weights in `spod_function`.
@@ -79,9 +82,9 @@ class SPODAnalyzer(BaseAnalyzer):
 
     Inherits from:
         BaseAnalyzer: Provides common functionalities for data loading, preprocessing, and FFT computation.
-                      SPOD takes no ``n_modes_save``: it keeps every mode of
-                      every frequency block, so the mode count follows from
-                      the block count, not a chosen number.
+                      SPOD makes one mode per Welch block at each frequency, so
+                      the block count is the ceiling on ``n_modes_save``. Leave
+                      ``n_modes_save`` unset to keep every block.
     """
 
     ############################################################
@@ -95,6 +98,7 @@ class SPODAnalyzer(BaseAnalyzer):
         *,
         nfft: int = 128,
         overlap: float = 0.5,
+        n_modes_save: int | None = None,
         results_dir: str = RESULTS_DIR_SPOD,
         figures_dir: str = FIGURES_DIR_SPOD,
         blockwise_mean: bool = False,
@@ -117,6 +121,14 @@ class SPODAnalyzer(BaseAnalyzer):
             nfft (int, optional): Number of points per FFT block. Defaults to 128.
             overlap (float, optional): Overlap fraction between FFT blocks (0 to <1).
                                      Defaults to 0.5 (50% overlap).
+            n_modes_save (int | None, optional): Number of leading modes to keep at
+                each frequency. SPOD computes one mode per Welch block, so the
+                default None keeps every block and ``modes`` is
+                ``(n_freq, n_space, n_blocks)``. Set this to cut the size of
+                ``modes`` and ``time_coefficients`` on a long record. A value
+                above the block count keeps every block and reports a
+                ``RuntimeWarning``. Eigenvalues always keep every block, because
+                the spectrum plot draws one line per block.
             results_dir (str, optional): Directory to save analysis results (HDF5 files).
                                          Defaults to `RESULTS_DIR_SPOD` from `configs.py`.
             figures_dir (str, optional): Directory to save generated plots.
@@ -159,6 +171,12 @@ class SPODAnalyzer(BaseAnalyzer):
         self.nfft = nfft
         self.overlap = overlap
         self.novlap = int(overlap * nfft)
+        # The request may be None ("keep every block"), which the shared
+        # `n_modes_save` int cannot hold. perform_spod resolves it against the
+        # block count and publishes the effective number, as ST-POD does.
+        self._n_modes_save_request = n_modes_save
+        if n_modes_save is not None:
+            self.n_modes_save = n_modes_save
 
         self._validate_inputs()
         # SPOD specific attributes
@@ -187,9 +205,42 @@ class SPODAnalyzer(BaseAnalyzer):
         Ensures that `overlap` is within the range [0, 1) and `nfft` is positive.
 
         Raises:
-            ValueError: If `overlap` is not in [0, 1) or `nfft` is not positive.
+            ValueError: If `overlap` is not in [0, 1) or `nfft` is not positive,
+                or if `n_modes_save` is below one.
         """
         validate_nfft_overlap(self.nfft, self.overlap)
+        # The block count needs the record length, which arrives later, so the
+        # upper bound is checked in perform_spod. Only the sign is known here.
+        request = self._n_modes_save_request
+        if request is not None and request < 1:
+            raise ValueError(f"n_modes_save must be >= 1, got {request}")
+
+    def _modes_to_keep(self) -> int:
+        """Number of leading modes to keep per frequency, against the block count.
+
+        SPOD makes one mode per Welch block, so the block count is the ceiling.
+        A request above it keeps every block and reports both numbers. POD caps
+        the same request without a message; that silence is what this avoids.
+        """
+        request = self._n_modes_save_request
+        if request is None:
+            self.n_modes_save = int(self.nblocks)
+            return self.n_modes_save
+        if request > self.nblocks:
+            # RuntimeWarning, not UserWarning: the ceiling comes from the record
+            # length and the block settings, so asking for more is a property of
+            # the data, not misuse of the API. Same category as the DMD rank
+            # notice.
+            warnings.warn(
+                f"n_modes_save={request} exceeds the {self.nblocks} "
+                f"Welch blocks; keeping all {self.nblocks} modes per frequency.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self.n_modes_save = int(self.nblocks)
+            return self.n_modes_save
+        self.n_modes_save = int(request)
+        return self.n_modes_save
 
     def _get_algorithm_metadata(self) -> dict:
         """Describe the current SPOD contract."""
@@ -293,12 +344,15 @@ class SPODAnalyzer(BaseAnalyzer):
             self.St = self.freq * L / U
             logger.info("Realigned self.freq to %d elements and self.St.", len(self.freq))
 
-        # Initialize result arrays using num_freq_bins
+        n_keep = self._modes_to_keep()
+
+        # Initialize result arrays using num_freq_bins. Eigenvalues keep every
+        # block; modes and time coefficients keep the leading n_keep of them.
         self.eigenvalues = np.zeros((num_freq_bins, self.nblocks))
-        self.modes = np.zeros((num_freq_bins, num_space_points, self.nblocks), dtype=complex)  # Spatial modes
+        self.modes = np.zeros((num_freq_bins, num_space_points, n_keep), dtype=complex)  # Spatial modes
         self.time_coefficients = np.zeros(
-            (num_freq_bins, self.nblocks, self.nblocks), dtype=complex
-        )  # Temporal coefficients
+            (num_freq_bins, self.nblocks, n_keep), dtype=complex
+        )  # Temporal coefficients, (block, mode) at each frequency
 
         logger.info("Performing SPOD for each frequency...")
 
@@ -317,9 +371,11 @@ class SPODAnalyzer(BaseAnalyzer):
             if not psi_rest:
                 raise RuntimeError("spod_function(return_psi=True) did not return psi")
             psi_freq = psi_rest[0]
-            self.modes[i, :, :] = phi_freq
+            # phi is (space, mode) and psi is (block, mode), so both truncate on
+            # their last axis. Eigenvalues are kept whole.
+            self.modes[i, :, :] = phi_freq[:, :n_keep]
             self.eigenvalues[i, :] = lambda_freq
-            self.time_coefficients[i, :, :] = psi_freq
+            self.time_coefficients[i, :, :] = psi_freq[:, :n_keep]
         logger.info("SPOD eigenvalue decomposition completed in %.2f seconds", time.time() - start_time)
 
     ############################################################
@@ -421,7 +477,7 @@ class SPODAnalyzer(BaseAnalyzer):
         if res.FFTBlocks is not None:
             self.qhat = res.FFTBlocks
         if res.W is not None:
-            # Modes are (n_freq, n_space, nblocks). Any other rank means the
+            # Modes are (n_freq, n_space, n_modes_kept). Any other rank means the
             # file carries no usable size, so leave the length unchecked.
             n_space = int(res.modes.shape[1]) if res.modes is not None and res.modes.ndim == 3 else None
             self.W = _as_spatial_weight_column(res.W, n_space)

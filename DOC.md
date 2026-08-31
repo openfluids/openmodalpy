@@ -423,10 +423,11 @@ from openmodalpy import SPODAnalyzer
 
 spod = SPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5)
 spod.run_analysis()
-# spod.eigenvalues — (n_freq, n_blocks)
-# spod.modes       — (n_freq, Nspace, n_blocks)
-# spod.St          — Strouhal number array
-# spod.freq        — frequency array (Hz)
+# spod.eigenvalues       — (n_freq, n_blocks)
+# spod.modes             — (n_freq, Nspace, n_modes_kept)
+# spod.time_coefficients — (n_freq, n_blocks, n_modes_kept)
+# spod.St                — Strouhal number array
+# spod.freq              — frequency array (Hz)
 ```
 
 **Key facts:**
@@ -435,6 +436,33 @@ spod.run_analysis()
 - Caches FFT blocks in HDF5 for reuse
 - Strouhal normalization via `characteristic_length` and `characteristic_velocity` params
 - Reference: Towne, Schmidt & Colonius (2018), JFM 847
+
+**Mode count and `n_modes_save`.** SPOD solves one eigenproblem per frequency
+over the Welch blocks, so it makes exactly `n_blocks` modes at each frequency.
+Without `n_modes_save` it keeps all of them, and `modes` is the largest array
+SPOD makes: `n_freq × Nspace × n_blocks` complex numbers.
+
+```python
+spod = SPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5, n_modes_save=5)
+```
+
+`n_modes_save` keeps the leading modes at each frequency and cuts `modes` and
+`time_coefficients` on their last axis. Eigenvalues keep every block, because
+the spectrum figure draws one line per block and they cost a few kilobytes. A
+value above the block count keeps every block and reports a `RuntimeWarning`
+naming both numbers; the block count is not known until the record is loaded,
+so that check runs in `perform_spod`, not in the constructor.
+
+Note the axis order of `time_coefficients`: the block axis comes **before** the
+mode axis, because the per-frequency eigenproblem is solved in block space.
+Both axes have length `n_blocks` when nothing is truncated, so code that
+assumed the other order kept working until `n_modes_save` made them differ.
+
+`n_modes_save` is a library option only. The CLI and the JSONC config do not
+pass it to SPOD, so `--n-modes` has no effect on an SPOD run. The config field
+defaults to 10, and there is no way to tell that default from a value the user
+chose, so feeding it through would truncate every existing SPOD run to 10 modes
+without being asked.
 
 **Limitation — `dst` is a Strouhal step, not a frequency step.** After the
 block FFT, SPOD normalizes by `sqrt(nblocks * dst)` where

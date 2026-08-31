@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `SPODAnalyzer` accepts `n_modes_save`. SPOD makes one mode per Welch block at
+  each frequency, and `modes` is the largest array it writes. `n_modes_save`
+  keeps the leading modes and cuts `modes` and `time_coefficients` on their last
+  axis. Eigenvalues keep every block, because the spectrum figure draws one line
+  per block. The default keeps every mode, so results do not change unless you
+  set it. A value above the block count keeps every block and reports a
+  `RuntimeWarning` naming both numbers.
 - `examples/compare_pod_spod.py` is the worked example for the package's
   core promise: build one dataset from the shipped double-gyre generator,
   hand it to `PODAnalyzer` and `SPODAnalyzer` through `data=`, and plot
@@ -81,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `SPODAnalyzer` class docstring gave the wrong axis order for
+  `time_coefficients`. It said `(n_freq, n_modes, n_blocks)`; the array is
+  `(n_freq, n_blocks, n_modes)`, because the per-frequency eigenproblem is
+  solved in block space. Both axes have the same length when nothing is
+  truncated, so the error was invisible until `n_modes_save` made them differ.
+- The `SPODAnalyzer` class docstring said SPOD takes no `n_modes_save` and that
+  its mode count cannot be chosen. It now describes the option and states that
+  the Welch block count is the ceiling.
 - A custom `data_loader=` callable did not get the derived counts, so a loader
   that returned only `q`, `x`, `y` and `dt` still failed with a bare
   `KeyError: 'Ns'`. DOC.md documents `data_loader=` and `data=` as the same

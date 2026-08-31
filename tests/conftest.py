@@ -151,6 +151,7 @@ CHARACTERISATION_REGISTRY: dict[str, set[str]] = {
         "test_default_args_match_original",
     },
     "test_welch_analytical.py": {"test_param_surface_matches_blockwise_definition"},
+    "test_spod_n_modes_save.py": {"test_kept_modes_are_the_leading_ones"},
 }
 
 
