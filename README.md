@@ -143,6 +143,10 @@ de-biased for noisy data).
 The BSMD implementation follows Schmidt (2020) and was inspired by the reference
 [MATLAB implementation](https://github.com/olivertschmidt/bmd).
 
+To compare two methods on one dataset through the Python API, see
+`examples/compare_pod_spod.py`: it loads one dataset once, runs POD and SPOD
+on it, and plots both.
+
 ## Data Format
 
 `.mat` and `.npz` files are auto-detected and must provide:

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `examples/compare_pod_spod.py` is the worked example for the package's
+  core promise: build one dataset from the shipped double-gyre generator,
+  hand it to `PODAnalyzer` and `SPODAnalyzer` through `data=`, and plot
+  both. A test runs it, so it cannot go stale.
 - `examples/my_data_template.py` is a template for your own data format. It
   names every contract key, says which are required, and states how `q` must be
   flattened. A test runs it, so it cannot go stale. DOC.md, "Your own format",
