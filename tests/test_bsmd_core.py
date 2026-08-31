@@ -1140,3 +1140,44 @@ def test_triad_plot_order_gap_outside_band_keeps_magnitude_order(tmp_path):
     picked_1 = [triads_1[i] for i in order_1]
     picked_2 = [triads_2[i] for i in order_2]
     assert picked_1 == picked_2 == [big_lambda_triad, small_tuple_triad]
+
+
+@pytest.mark.parametrize("overlap", [10, -0.1])
+def test_bsmd_rejects_invalid_overlap(tmp_path, overlap):
+    """BSMD rejects an overlap outside [0, 1), matching SPOD's own check."""
+    with pytest.raises(ValueError, match="Overlap must be between 0 .inclusive. and 1 .exclusive."):
+        BSMDAnalyzer(
+            file_path="dummy.h5",
+            nfft=8,
+            overlap=overlap,
+            results_dir=tmp_path,
+            figures_dir=tmp_path,
+            spatial_weight_type="uniform",
+            static_triads=[(0, 0, 0)],
+            use_parallel=False,
+        )
+
+
+@pytest.mark.parametrize("overlap", [0.0, 0.5])
+def test_bsmd_accepts_valid_overlap(tmp_path, overlap):
+    """BSMD still accepts the boundary-inclusive 0.0 and a normal 0.5 overlap."""
+    analyzer = BSMDAnalyzer(
+        file_path="dummy.h5",
+        nfft=8,
+        overlap=overlap,
+        results_dir=tmp_path,
+        figures_dir=tmp_path,
+        data_loader=lambda _: {
+            "q": np.random.default_rng(1).standard_normal((10, 4)),
+            "x": np.linspace(0, 1, 2),
+            "y": np.linspace(0, 1, 2),
+            "dt": 1.0,
+            "Nx": 2,
+            "Ny": 2,
+            "Ns": 10,
+        },
+        spatial_weight_type="uniform",
+        static_triads=[(0, 0, 0)],
+        use_parallel=False,
+    )
+    assert analyzer.overlap == overlap

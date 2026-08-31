@@ -375,6 +375,25 @@ def parallel_map(func: Callable[[T], R], iterable: Iterable[T], threads: int | N
     return results
 
 
+def validate_nfft_overlap(nfft: int, overlap: float) -> None:
+    """Check that ``nfft`` is positive and ``overlap`` is in [0, 1).
+
+    Shared by every analyzer that forms Welch FFT blocks (SPOD, BSMD),
+    so the same input raises the same message everywhere.
+
+    Args:
+        nfft (int): Number of points per FFT block.
+        overlap (float): Overlap fraction between blocks.
+
+    Raises:
+        ValueError: If ``overlap`` is not in [0, 1) or ``nfft`` is not positive.
+    """
+    if not (0 <= overlap < 1):
+        raise ValueError("Overlap must be between 0 (inclusive) and 1 (exclusive).")
+    if nfft <= 0:
+        raise ValueError("NFFT must be positive.")
+
+
 def make_result_filename(root: str, nfft: int, overlap: float, Ns: int, analysis: str) -> str:
     """
     Generate a harmonized result filename for analysis outputs.
@@ -1781,6 +1800,7 @@ class BaseAnalyzer:
     def __init__(
         self,
         file_path: str | None = None,
+        *,
         results_dir: str = "./preprocess",
         figures_dir: str = "./figs",
         data_loader: Callable[..., dict[str, Any]] | None = None,

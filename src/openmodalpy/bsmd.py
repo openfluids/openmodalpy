@@ -59,6 +59,7 @@ from openmodalpy.core.base import (
     reshape_mode_to_volume,
     resolve_volume_layout,
     style_spatial_axes,
+    validate_nfft_overlap,
 )
 from openmodalpy.core.config import (
     CMAP_DIV,
@@ -177,7 +178,9 @@ class BSMDAnalyzer(BaseAnalyzer):
 
     Inherits from:
         BaseAnalyzer: Provides common functionalities for data loading, STFT computation,
-                      and preprocessing.
+                      and preprocessing. BSMD takes no ``n_modes_save``: it
+                      keeps one mode per triad, so the mode count follows
+                      from the triad count, not a chosen number.
     """
 
     _METHOD_NAME = "bsmd"
@@ -185,6 +188,7 @@ class BSMDAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         file_path: str | None = None,
+        *,
         nfft: int = 128,
         overlap: float = 0.5,
         results_dir: str = RESULTS_DIR_BSMD,
@@ -248,6 +252,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         # over triads), so it keeps that too.
         self.nfft = nfft
         self.overlap = overlap
+        validate_nfft_overlap(self.nfft, self.overlap)
         self.use_parallel = use_parallel
         self.use_static_triads = use_static_triads
         # Provenance is fixed at construction: comparing the list to ALL_TRIADS

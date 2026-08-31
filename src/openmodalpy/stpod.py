@@ -83,6 +83,7 @@ class STPODAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         file_path: str | None = None,
+        *,
         embedding_dim: int = 10,
         n_modes_save: int = 10,
         results_dir: str = RESULTS_DIR_STPOD,

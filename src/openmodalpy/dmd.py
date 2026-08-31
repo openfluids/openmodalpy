@@ -224,6 +224,7 @@ class DMDAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         file_path: str | None = None,
+        *,
         results_dir: str = RESULTS_DIR_DMD,
         figures_dir: str = FIGURES_DIR_DMD,
         data_loader: Callable[..., dict[str, Any]] | None = None,

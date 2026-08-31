@@ -30,6 +30,7 @@ from openmodalpy.core.base import (
     resolve_volume_layout,
     spod_function,
     style_spatial_axes,
+    validate_nfft_overlap,
 )
 from openmodalpy.core.config import (
     CMAP_DIV,
@@ -78,6 +79,9 @@ class SPODAnalyzer(BaseAnalyzer):
 
     Inherits from:
         BaseAnalyzer: Provides common functionalities for data loading, preprocessing, and FFT computation.
+                      SPOD takes no ``n_modes_save``: it keeps every mode of
+                      every frequency block, so the mode count follows from
+                      the block count, not a chosen number.
     """
 
     ############################################################
@@ -88,6 +92,7 @@ class SPODAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         file_path: str | None = None,
+        *,
         nfft: int = 128,
         overlap: float = 0.5,
         results_dir: str = RESULTS_DIR_SPOD,
@@ -184,10 +189,7 @@ class SPODAnalyzer(BaseAnalyzer):
         Raises:
             ValueError: If `overlap` is not in [0, 1) or `nfft` is not positive.
         """
-        if not (0 <= self.overlap < 1):
-            raise ValueError("Overlap must be between 0 (inclusive) and 1 (exclusive).")
-        if self.nfft <= 0:
-            raise ValueError("NFFT must be positive.")
+        validate_nfft_overlap(self.nfft, self.overlap)
 
     def _get_algorithm_metadata(self) -> dict:
         """Describe the current SPOD contract."""

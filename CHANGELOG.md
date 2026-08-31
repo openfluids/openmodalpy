@@ -122,6 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   near the plot cutoff and change which modes made the figure. Tied triads
   now sort by their `(p, q, r)` triad tuple, giving the same figure on
   every platform.
+- `BSMDAnalyzer` did not check `overlap`. `overlap=10` silently set
+  `novlap=80` against `nfft=8`, an overlap bigger than the block itself.
+  It now raises `ValueError: Overlap must be between 0 (inclusive) and 1
+  (exclusive).`, the same check and message `SPODAnalyzer` already used.
 
 ### Breaking
 
@@ -147,6 +151,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call; the old per-plot keyword parameters (`plot_n_modes_spatial`,
   `plot_modes_options`, `check_orthogonality`, ...) are gone. Pass plotting
   choices through the plot methods themselves.
+- Every analyzer constructor now takes only `file_path` positionally; every
+  other parameter is keyword-only. The old positional slots meant different
+  things per class — `Analyzer(path, 256, 0.5)` bound to `nfft, overlap` on
+  `SPODAnalyzer` and `BSMDAnalyzer`, but to `results_dir, figures_dir` on
+  `PSDPODAnalyzer`, and a call like `Analyzer(path, 8, 10)` bound to
+  `embedding_dim, n_modes_save` on `STPODAnalyzer` but to `nfft, overlap` on
+  `BSMDAnalyzer`, with no error either way. A positional call past
+  `file_path` now raises `TypeError` immediately instead of silently
+  binding to the wrong parameter. `n_modes_save` stays absent from
+  `SPODAnalyzer` and `BSMDAnalyzer`: their mode count comes from the block
+  count and the triad count, not a chosen number.
+
+  Each row translates the same call. Read the old slot order from your own
+  code: the second positional argument was NOT the same parameter in every
+  class, which is the reason for this change.
+
+  | Class | Old positional call | New keyword call |
+  | --- | --- | --- |
+  | POD | `PODAnalyzer(path, rdir, fdir, loader, wtype, 10)` | `PODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10)` |
+  | mPOD | `MPODAnalyzer(path, rdir, fdir, loader, wtype, 10)` | `MPODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10)` |
+  | DMD | `DMDAnalyzer(path, rdir, fdir, loader, wtype, 10, 4)` | `DMDAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10, rank=4)` |
+  | ST-POD | `STPODAnalyzer(path, 8, 10)` | `STPODAnalyzer(path, embedding_dim=8, n_modes_save=10)` |
+  | SPOD | `SPODAnalyzer(path, 256, 0.5)` | `SPODAnalyzer(path, nfft=256, overlap=0.5)` |
+  | BSMD | `BSMDAnalyzer(path, 256, 0.5)` | `BSMDAnalyzer(path, nfft=256, overlap=0.5)` |
+  | PSD-POD | `PSDPODAnalyzer(path, rdir, fdir, loader, wtype, 256, 0.5)` | `PSDPODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, nfft=256, overlap=0.5)` |
+
+  Note the PSD-POD row. `PSDPODAnalyzer(path, 256, 0.5)` did NOT set `nfft`
+  and `overlap`: slots 2 and 3 were `results_dir` and `figures_dir`, so that
+  call set a directory named "256". If you wrote it, you had a defect. Give
+  `nfft` and `overlap` by keyword, and check which directories you meant.
 
 ## [0.5.0] - 2026-08-18
 

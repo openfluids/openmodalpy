@@ -279,6 +279,11 @@ the two cases apart from coordinates alone, so the user chooses.
 
 ---
 
+Every analyzer constructor below takes `file_path` positionally and every
+other parameter by keyword only; a positional call past `file_path` raises
+`TypeError`. Upgrading from an older positional call: see the table under
+"Breaking" for the `[Unreleased]` entry in CHANGELOG.md.
+
 ## Supported Methods
 
 ### 1. POD — Proper Orthogonal Decomposition
