@@ -82,7 +82,7 @@ def test_oracle_tests_do_not_import_the_library_sign_rule():
 VERIFIED_MODULE_REGISTRY: dict[str, str] = {
     "test_psd_pod_numerics.py": "openmodalpy.psd_pod",
     "test_bsmd_core.py": "openmodalpy.bsmd",
-    "test_spod_function.py": "openmodalpy.spod",
+    "test_spod_single_frequency.py": "openmodalpy.spod",
     "test_dmd.py": "openmodalpy.dmd",
     "test_welch_analytical.py": "openmodalpy.core.welch",
 }

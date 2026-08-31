@@ -1,3 +1,20 @@
+"""Spectral Proper Orthogonal Decomposition.
+
+SPOD splits a record into overlapping Welch blocks, Fourier transforms each
+block, and then solves one energy eigenproblem per frequency over the block
+ensemble. At frequency f the cross-spectral density is estimated from the
+blocks and its eigenvectors are the SPOD modes:
+
+    (1/n_blocks) X_f^H W X_f  psi = lambda psi,   phi = X_f psi / sqrt(lambda)
+
+where ``X_f`` holds one Fourier coefficient column per block and ``W`` is the
+spatial integration metric. Towne, Schmidt & Colonius (2018), JFM 847.
+
+That eigenproblem lives in ``openmodalpy.core.decomposition``, in
+``spod_single_frequency``. This module builds the blocks, runs the frequency
+loop, and stores, saves and plots the result.
+"""
+
 from __future__ import annotations
 
 # Standard library imports
@@ -28,7 +45,6 @@ from openmodalpy.core.base import (
     plot_modes_3d,
     reshape_mode_to_volume,
     resolve_volume_layout,
-    spod_function,
     style_spatial_axes,
     validate_nfft_overlap,
 )
@@ -41,6 +57,7 @@ from openmodalpy.core.config import (
     WINDOW_NORM,
     WINDOW_TYPE,
 )
+from openmodalpy.core.decomposition import spod_single_frequency
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +90,7 @@ class SPODAnalyzer(BaseAnalyzer):
                                         comes before the mode axis, which the eigenproblem sets.
         freq (np.ndarray): Array of frequencies corresponding to FFT bins.
         St (np.ndarray): Array of Strouhal numbers corresponding to `freq`.
-        dst (float): Strouhal number step, used for integral weights in `spod_function`.
+        dst (float): Strouhal number step, used for integral weights in the eigenproblem.
         qhat_cached (bool): Flag indicating if FFT blocks (q_hat) were loaded from cache.
         W (np.ndarray): Spatial weighting matrix (diagonal).
         fs (float): Sampling frequency of the data.
@@ -195,7 +212,7 @@ class SPODAnalyzer(BaseAnalyzer):
         self.time_coefficients = np.array([])  # SPOD temporal coefficients (Psi)
         self.freq = np.array([])  # Frequencies (from rfft)
         self.St = np.array([])  # Strouhal numbers
-        self.dst = 0.0  # Strouhal step (for spod_function integral weight)
+        self.dst = 0.0  # Strouhal step (integral weight in the eigenproblem)
         self.qhat_cached = False  # Flag whether FFT blocks were loaded from cache
 
     def _validate_inputs(self) -> None:
@@ -307,7 +324,8 @@ class SPODAnalyzer(BaseAnalyzer):
         at each frequency bin. The CSD matrix is constructed from the
         Fourier-transformed data blocks (`self.qhat`).
 
-        The actual computation is delegated to the `spod_function` imported from `utils.py`.
+        The eigenproblem itself is `spod_single_frequency`, in
+        `openmodalpy.core.decomposition`.
 
         Forms the FFT blocks itself, via ``compute_fft_blocks()``, on first
         use — no separate call is needed between ``load_and_preprocess()``
@@ -360,8 +378,8 @@ class SPODAnalyzer(BaseAnalyzer):
         for i in tqdm(range(num_freq_bins), desc="SPOD Computation", unit="freq"):
             qhat_freq = self.qhat[i, :, :]
             # return_psi=True always yields the 3-tuple; unpack via star so the
-            # 2-tuple overload of spod_function does not block annotation.
-            phi_freq, lambda_freq, *psi_rest = spod_function(
+            # 2-tuple overload of the eigenproblem does not block annotation.
+            phi_freq, lambda_freq, *psi_rest = spod_single_frequency(
                 qhat_freq,
                 self.nblocks,
                 self.dst,
@@ -369,7 +387,7 @@ class SPODAnalyzer(BaseAnalyzer):
                 return_psi=True,
             )
             if not psi_rest:
-                raise RuntimeError("spod_function(return_psi=True) did not return psi")
+                raise RuntimeError("spod_single_frequency(return_psi=True) did not return psi")
             psi_freq = psi_rest[0]
             # phi is (space, mode) and psi is (block, mode), so both truncate on
             # their last axis. Eigenvalues are kept whole.

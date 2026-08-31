@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The SPOD eigenproblem is now one hop from `spod.py`. `spod.py` imports
+  `spod_single_frequency` from `openmodalpy.core.decomposition` and calls it
+  directly. It used to call `spod_function` in `openmodalpy.core.base`, a file
+  that holds no SPOD mathematics, which then called one of two entry points
+  that ran the same body. `spod.py` also gains a module docstring that states
+  the eigenproblem and says which module holds it.
 - Result files written by `MPODAnalyzer`, `DMDAnalyzer` and `STPODAnalyzer`
   now record `nfft=1` and `overlap=0.0`, in place of the former default
   `nfft=128` and `overlap=0.5`. These methods never form an FFT block, so the
@@ -88,6 +94,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `SPODAnalyzer.perform_spod` said the computation is "delegated to the
+  `spod_function` imported from `utils.py`". There is no `utils.py` in this
+  package, so a reader following that sentence reached nothing.
 - The `SPODAnalyzer` class docstring gave the wrong axis order for
   `time_coefficients`. It said `(n_freq, n_modes, n_blocks)`; the array is
   `(n_freq, n_blocks, n_modes)`, because the per-frequency eigenproblem is
@@ -148,6 +157,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- `openmodalpy.core.base.spod_function` and
+  `openmodalpy.core.parallel.spod_single_frequency_optimized` are removed. Call
+  `openmodalpy.core.decomposition.spod_single_frequency` instead; the argument
+  order `(qhat, nblocks, dst, w)` and the results are unchanged, so a call that
+  passed `use_parallel=True` (the default) only drops that argument.
+  `spod_function` chose between two routes that reached the same body, and
+  `spod_single_frequency_optimized` forwarded its arguments and did nothing
+  else, so neither route ever gave a different answer. Measured: SPOD
+  eigenvalues, modes, time coefficients and frequencies on the shipped
+  cylinder-wake case are byte-identical before and after.
 - `nfft` and `overlap` are no longer accepted by `PODAnalyzer`,
   `MPODAnalyzer`, `DMDAnalyzer`, or `STPODAnalyzer`. They never used these
   Welch block-size settings; passing either now raises `TypeError`. Only

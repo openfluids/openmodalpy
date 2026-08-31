@@ -3,7 +3,8 @@ import inspect
 import numpy as np
 import pytest
 
-from openmodalpy.core.base import blocksfft, spod_function
+from openmodalpy.core.base import blocksfft
+from openmodalpy.core.decomposition import spod_single_frequency
 from openmodalpy.core.parallel import blocksfft_optimized
 from openmodalpy.core.welch import windowed_block_fft
 
@@ -332,7 +333,7 @@ def test_white_noise_spod_eigenvalue_matches_analytic():
     Derivation (single spatial point, W=1, boxcar, dt=1 so fs=1, dst=df=1/nfft):
     blocksfft stores q_hat = FFT(x)/nfft. For unit-variance white noise,
     E[|X[k]/nfft|^2] = 1/nfft at each one-sided bin (numpy unnormalized FFT).
-    spod_function forms λ = mean_b |q_hat_b|^2 / dst = mean |q_hat|^2 * nfft,
+    spod_single_frequency forms λ = mean_b |q_hat_b|^2 / dst = mean |q_hat|^2 * nfft,
     so E[λ(f)] = 1 at every interior frequency.
 
     This pins the FFT → SPOD normalization chain (window, 1/nfft, dst), not
@@ -356,7 +357,7 @@ def test_white_noise_spod_eigenvalue_matches_analytic():
     w = np.ones((1, 1))
     lams = []
     for ifreq in range(1, qhat.shape[0] - 1):  # skip DC and Nyquist
-        _, lam = spod_function(qhat[ifreq], nblocks=nb, dst=dst, w=w, use_parallel=False)
+        _, lam = spod_single_frequency(qhat[ifreq], nblocks=nb, dst=dst, w=w)
         lams.append(lam[0])
     mean_lam = float(np.mean(lams))
     tol = 4.0 / np.sqrt(nb)

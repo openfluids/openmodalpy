@@ -198,32 +198,6 @@ def blocksfft_optimized(
     )
 
 
-def spod_single_frequency_optimized(
-    qhat: np.ndarray,
-    w: np.ndarray,
-    nblocks: int,
-    dst: float,
-    num_modes: int | None = None,
-    return_psi: bool = False,
-) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Single-frequency SPOD via the shared eigenproblem body.
-
-    Thin wrapper around ``decomposition.spod_single_frequency``. Threading /
-    BLAS setup for this path (if any) stays here; the algorithm does not.
-    """
-    # Late import avoids a parallel → decomposition → base cycle at module load.
-    from openmodalpy.core.decomposition import spod_single_frequency
-
-    return spod_single_frequency(
-        qhat,
-        nblocks,
-        dst,
-        w,
-        num_modes=num_modes,
-        return_psi=return_psi,
-    )
-
-
 def get_threadpool_summary() -> str:
     """Return a short description of active thread pools."""
     try:

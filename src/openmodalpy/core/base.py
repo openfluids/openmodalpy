@@ -48,7 +48,6 @@ try:
         PARALLEL_AVAILABLE,
         calculate_polar_weights_optimized,
         get_threadpool_summary,
-        spod_single_frequency_optimized,
     )
 except ImportError:
     PARALLEL_AVAILABLE = False
@@ -1479,7 +1478,8 @@ def blocksfft(
     - This function assumes the FFT backend (numpy, scipy, pyfftw, etc.) does NOT normalize the FFT by default (which is true for standard backends).
     - If you use a backend or option that applies normalization (e.g., norm='ortho'), REMOVE the
       division by nfft in ``welch.windowed_block_fft`` to avoid double normalization.
-    - SPOD callers pass ``dst`` into ``spod_function`` as a spectral weight. In this
+    - SPOD callers pass ``dst`` into ``decomposition.spod_single_frequency`` as a
+      spectral weight. In this
       codebase ``dst`` is the Strouhal step (``St[1] - St[0] = df * L / U``), not
       the raw frequency resolution ``df = fs / nfft``. Reported SPOD eigenvalues
       therefore scale with ``U/L``; with the default L = U = 1 the two coincide.
@@ -1690,46 +1690,6 @@ def _reported_grid(data: Mapping[str, Any]) -> tuple[int, int, int] | None:
     if grid == (1, 1, 1):
         return None
     return grid
-
-
-def spod_function(
-    qhat: np.ndarray,
-    nblocks: int,
-    dst: float,
-    w: np.ndarray,
-    return_psi: bool = False,
-    use_parallel: bool = True,
-) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Compute SPOD modes and eigenvalues for a single frequency.
-    Args:
-        qhat (np.ndarray): FFT coefficients for this frequency [space, block].
-        nblocks (int): Number of blocks.
-        dst (float): Spectral weight used as ``1/sqrt(nblocks * dst)``. Callers in
-            this package pass the Strouhal step (not necessarily ``df = fs/nfft``).
-        w (np.ndarray): Spatial integration weights [space, 1].
-        return_psi (bool): If True, also return psi (time coefficients).
-    Returns:
-        tuple: (phi, lambda_tilde[, psi])
-            phi (np.ndarray): Spatial SPOD modes for this frequency [space, mode].
-            lambda_tilde (np.ndarray): SPOD eigenvalues (energy) for this frequency [mode].
-            psi (np.ndarray, optional): Time coefficients for this frequency [block, mode].
-    """
-    if use_parallel and PARALLEL_AVAILABLE:
-        # Pass w through unchanged — same as the serial branch. The shared body
-        # coerces and validates once; a pre-flatten here was a second check.
-        return spod_single_frequency_optimized(
-            qhat,
-            w,
-            nblocks,
-            dst,
-            return_psi=return_psi,
-        )
-
-    # Same eigenproblem as the parallel entry; body lives in decomposition.py.
-    from openmodalpy.core.decomposition import spod_single_frequency
-
-    return spod_single_frequency(qhat, nblocks, dst, w, return_psi=return_psi)
 
 
 def _fill_contract_counts(data: dict[str, Any], *, source: str) -> None:

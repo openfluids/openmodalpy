@@ -5,32 +5,29 @@ import pytest
 from openmodalpy import SPODAnalyzer
 from openmodalpy.core.base import (
     _QHAT_STAMP_ATTR_PREFIX,
-    PARALLEL_AVAILABLE,
     _qhat_cache_stamp,
     make_result_filename,
-    spod_function,
 )
 from openmodalpy.core.decomposition import spod_single_frequency
-from openmodalpy.core.parallel import spod_single_frequency_optimized
 from tests.reference_helpers import reference_pivot_index
 
 
-def test_spod_function_simple():
+def test_spod_single_frequency_simple():
     qhat = np.array([[1.0], [0.0]], dtype=complex)
     w = np.ones((2, 1))
-    phi, lam, psi = spod_function(qhat, nblocks=1, dst=1.0, w=w, return_psi=True)
+    phi, lam, psi = spod_single_frequency(qhat, nblocks=1, dst=1.0, w=w, return_psi=True)
     assert phi.shape == (2, 1)
     assert psi.shape == (1, 1)
     assert np.allclose(lam, 1.0)
     assert np.allclose(phi[:, 0], [1.0, 0.0])
 
 
-def test_spod_function_per_component_weights():
+def test_spod_single_frequency_per_component_weights():
     qhat = np.array([[1.0], [2.0]], dtype=complex)
     w = np.zeros((1, 1, 2))
     w[0, 0, 0] = 1.0
     w[0, 0, 1] = 2.0
-    phi, lam, psi = spod_function(qhat, nblocks=1, dst=1.0, w=w, return_psi=True)
+    phi, lam, psi = spod_single_frequency(qhat, nblocks=1, dst=1.0, w=w, return_psi=True)
     assert phi.shape == (2, 1)
     assert psi.shape == (1, 1)
     assert np.allclose(lam, 9.0)
@@ -81,11 +78,6 @@ def test_spod_modes_deterministic_and_canonical():
     np.testing.assert_allclose(phi_a, phi_no_psi, rtol=0, atol=0)
     assert psi is not None
 
-    if PARALLEL_AVAILABLE:
-        phi_opt, lam_opt = spod_single_frequency_optimized(qhat, w.reshape(-1, 1), nblocks, dst)
-        np.testing.assert_allclose(phi_a, phi_opt, rtol=0, atol=0)
-        np.testing.assert_allclose(lam_a, lam_opt, rtol=0, atol=0)
-
     # Spectrum from the CSD matrix alone — canonicalization must not move it.
     x = qhat / np.sqrt(nblocks * dst)
     m = (np.conj(x).T * w[np.newaxis, :]) @ x
@@ -104,8 +96,7 @@ def test_spod_modes_deterministic_and_canonical():
     )
 
 
-@pytest.mark.parametrize("use_parallel", [False, True])
-def test_spod_function_rejects_invalid_metric(use_parallel):
+def test_spod_single_frequency_rejects_invalid_metric():
     """Negative weights and a zero-measure metric raise; isolated zeros stay allowed.
 
     Both the serial and optimized routes must refuse the same invalid metrics.
@@ -113,8 +104,6 @@ def test_spod_function_rejects_invalid_metric(use_parallel):
     weights as they are, so that cell contributes nothing to the CSD. The 1e-12
     floor is the POD seam's, not this one's.
     """
-    if use_parallel and not PARALLEL_AVAILABLE:
-        pytest.skip("optimized SPOD route unavailable")
 
     rng = np.random.default_rng(11)
     n_space, nblocks = 6, 4
@@ -125,23 +114,20 @@ def test_spod_function_rejects_invalid_metric(use_parallel):
     w_ok = np.array([0.5, 1.0, 2.0, 0.25, 3.0, 1.5]).reshape(-1, 1)
 
     with pytest.raises(ValueError, match="negative weight"):
-        spod_function(qhat, nblocks, 0.1, w_neg, use_parallel=use_parallel)
+        spod_single_frequency(qhat, nblocks, 0.1, w_neg)
     with pytest.raises(ValueError, match="zero total measure"):
-        spod_function(qhat, nblocks, 0.1, w_zero, use_parallel=use_parallel)
+        spod_single_frequency(qhat, nblocks, 0.1, w_zero)
 
-    phi_iso, lam_iso = spod_function(qhat, nblocks, 0.1, w_iso, use_parallel=use_parallel)
-    phi_ok, lam_ok = spod_function(qhat, nblocks, 0.1, w_ok, use_parallel=use_parallel)
+    phi_iso, lam_iso = spod_single_frequency(qhat, nblocks, 0.1, w_iso)
+    phi_ok, lam_ok = spod_single_frequency(qhat, nblocks, 0.1, w_ok)
     assert phi_iso.shape[0] == n_space
     assert phi_ok.shape[0] == n_space
     assert np.all(np.isfinite(lam_iso))
     assert np.all(np.isfinite(lam_ok))
 
 
-@pytest.mark.parametrize("use_parallel", [False, True])
-def test_spod_function_rejects_nonfinite_metric(use_parallel):
+def test_spod_single_frequency_rejects_nonfinite_metric():
     """NaN and inf weights raise the same way on both SPOD routes."""
-    if use_parallel and not PARALLEL_AVAILABLE:
-        pytest.skip("optimized SPOD route unavailable")
 
     rng = np.random.default_rng(11)
     n_space, nblocks = 6, 4
@@ -150,30 +136,27 @@ def test_spod_function_rejects_nonfinite_metric(use_parallel):
     w_inf = np.array([1.0, np.inf, 2.0, 1.0, 1.0, 1.0]).reshape(-1, 1)
 
     with pytest.raises(ValueError, match="non-finite"):
-        spod_function(qhat, nblocks, 0.1, w_nan, use_parallel=use_parallel)
+        spod_single_frequency(qhat, nblocks, 0.1, w_nan)
     with pytest.raises(ValueError, match="non-finite"):
-        spod_function(qhat, nblocks, 0.1, w_inf, use_parallel=use_parallel)
+        spod_single_frequency(qhat, nblocks, 0.1, w_inf)
 
 
-def test_spod_single_frequency_optimized_rejects_invalid_metric():
+def test_spod_single_frequency_rejects_invalid_metric_direct():
     """Direct call refuses negative, zero-measure, and non-finite metrics.
 
-    Guards the path that already validates through the shared body so a future
-    edit cannot drop that check without this test failing first.
+    Guards the check inside the shared body so a future edit cannot drop it
+    without this test failing first.
     """
-    if not PARALLEL_AVAILABLE:
-        pytest.skip("optimized SPOD route unavailable")
-
     rng = np.random.default_rng(11)
     n_space, nblocks = 6, 4
     qhat = rng.standard_normal((n_space, nblocks)) + 1j * rng.standard_normal((n_space, nblocks))
 
     with pytest.raises(ValueError, match="negative weight"):
-        spod_single_frequency_optimized(qhat, np.array([1.0, -0.5, 2.0, 1.0, 1.0, 1.0]).reshape(-1, 1), nblocks, 0.1)
+        spod_single_frequency(qhat, nblocks, 0.1, np.array([1.0, -0.5, 2.0, 1.0, 1.0, 1.0]).reshape(-1, 1))
     with pytest.raises(ValueError, match="zero total measure"):
-        spod_single_frequency_optimized(qhat, np.zeros((n_space, 1)), nblocks, 0.1)
+        spod_single_frequency(qhat, nblocks, 0.1, np.zeros((n_space, 1)))
     with pytest.raises(ValueError, match="non-finite"):
-        spod_single_frequency_optimized(qhat, np.array([1.0, np.nan, 2.0, 1.0, 1.0, 1.0]).reshape(-1, 1), nblocks, 0.1)
+        spod_single_frequency(qhat, nblocks, 0.1, np.array([1.0, np.nan, 2.0, 1.0, 1.0, 1.0]).reshape(-1, 1))
 
 
 def test_spod_save_reapplies_the_fft_cache_stamp(tmp_path):

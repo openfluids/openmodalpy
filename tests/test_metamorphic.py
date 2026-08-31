@@ -18,7 +18,7 @@ from openmodalpy import (
     SPODAnalyzer,
     STPODAnalyzer,
 )
-from openmodalpy.core.base import PARALLEL_AVAILABLE, spod_function
+from openmodalpy.core.base import PARALLEL_AVAILABLE
 
 # Without optimized parallel routines, use_parallel=True falls through to the
 # serial path and serial-vs-parallel would compare serial to serial (vacuous green).
@@ -210,43 +210,8 @@ def test_stpod_d2_matches_independent_hankel_pod():
 
 
 # ---------------------------------------------------------------------------
-# serial == parallel for spod_function and BSMD
+# serial == parallel for BSMD
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "n_space,nblocks,dst",
-    [
-        (4, 2, 0.5),
-        (6, 3, 1.0),
-        (8, 4, 2.0),
-    ],
-)
-def test_spod_function_serial_parallel(n_space, nblocks, dst):
-    """spod_function default and optimized paths must agree.
-
-    WHAT THIS CAN AND CANNOT DETECT. It used to compare two independent
-    implementations of the eigenproblem, so drift meant one copy had been
-    maintained alone. Since they were merged into
-    decomposition.spod_single_frequency, both flags reach ONE body and this
-    test checks wiring only: that use_parallel routes to the right entry, that
-    the parallel branch's weight pre-flattening does not change the answer, and
-    that return_psi survives both routes. It can no longer detect a wrong
-    formula — the shared body is pinned instead by the pre-merge baseline in
-    .sc/fab3.spod.baseline.json and by the analytical benchmarks.
-    """
-    assert PARALLEL_AVAILABLE is True
-    rng = np.random.default_rng(10 + nblocks)
-    qhat = rng.standard_normal((n_space, nblocks)) + 1j * rng.standard_normal((n_space, nblocks))
-    w = np.ones((n_space, 1))
-
-    phi_s, lam_s, psi_s = spod_function(qhat, nblocks=nblocks, dst=dst, w=w, return_psi=True, use_parallel=False)
-    phi_p, lam_p, psi_p = spod_function(qhat, nblocks=nblocks, dst=dst, w=w, return_psi=True, use_parallel=True)
-
-    # Same floating-point arithmetic up to BLAS/library rounding; atol at ~1 ulp of O(1).
-    np.testing.assert_allclose(lam_p, lam_s, rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.abs(phi_p), np.abs(phi_s), rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.abs(psi_p), np.abs(psi_s), rtol=0, atol=1e-12)
 
 
 @pytest.mark.parametrize(

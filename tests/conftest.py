@@ -145,7 +145,7 @@ CHARACTERISATION_REGISTRY: dict[str, set[str]] = {
         "test_psd_pod_isolated_zero_weight_station",
     },
     "test_bsmd_core.py": {"test_static_bsmd_core_small"},
-    "test_spod_function.py": {"test_spod_modes_deterministic_and_canonical"},
+    "test_spod_single_frequency.py": {"test_spod_modes_deterministic_and_canonical"},
     "test_dmd.py": {
         "test_dmd_uses_raw_shifted_snapshots_without_weighting",
         "test_default_args_match_original",

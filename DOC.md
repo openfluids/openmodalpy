@@ -13,14 +13,15 @@ src/openmodalpy/
 ├── __init__.py          # public exports: analyzers + set/get/blas_threads policy
 ├── core/
 │   ├── base.py          # BaseAnalyzer, compute_reduced_svd, blocksfft,
-│   │                    #   spod_function, weight calculation, plot helpers
+│   │                    #   weight calculation, plot helpers
 │   ├── decomposition.py # lift / metric / weighted_second_order seam
-│   │                    #   (POD, mPOD, ST-POD, PSD-POD share this)
+│   │                    #   (POD, mPOD, ST-POD, PSD-POD share this) and
+│   │                    #   spod_single_frequency, the SPOD eigenproblem
 │   ├── io.py            # MATDataLoader, DNamiDataLoader, GenericDataLoader,
 │   │                    #   _slice_block_in_time
 │   ├── config.py        # FFT_BACKEND, FIG_DPI, directory defaults
 │   ├── threads.py       # process-wide BLAS thread policy (default 1)
-│   └── parallel.py      # thread-pool FFT + SPOD acceleration
+│   └── parallel.py      # polar weight and block-FFT entry points
 ├── pod.py               # PODAnalyzer (variance-optimal, identity lift)
 ├── mpod.py              # MPODAnalyzer (band-filtered POD)
 ├── psd_pod.py           # PSDPODAnalyzer (pooled Fourier-ensemble POD)
