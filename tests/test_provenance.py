@@ -279,7 +279,7 @@ def test_prov_blas_matches_expected_format(tmp_path: Path) -> None:
     if text == "unknown":
         return
     entries = text.split("; ")
-    pattern = re.compile(r"^\w+ \S+ threads=\d+ \(\w+\)$")
+    pattern = re.compile(r"^\w+ \S+ \(\w+\)$")
     assert entries, text
     for entry in entries:
         assert pattern.match(entry), f"malformed entry {entry!r} in {text!r}"

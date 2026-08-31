@@ -101,7 +101,10 @@ def _blas_identity() -> str:
     entry threadpoolctl reports is recorded, not just the first. The library
     filepath is deliberately omitted: it is a machine-local path that would
     leak a username or directory layout into a file meant to be shared, and
-    the internal_api/version pair already identifies the build.
+    the internal_api/version pair already identifies the build. Thread count
+    is deliberately omitted too: threadpoolctl reports the pool's resting
+    size, not the cap applied during a solve, so it belongs to
+    ``prov_blas_threads`` (see ``get_blas_threads``), not here.
     """
     pools = _threadpools()
     if not pools:
@@ -110,9 +113,8 @@ def _blas_identity() -> str:
     for pool in pools:
         api = pool.get("internal_api", "unknown")
         version = pool.get("version", "unknown")
-        threads = pool.get("num_threads", "unknown")
         user_api = pool.get("user_api", "unknown")
-        entries.append(f"{api} {version} threads={threads} ({user_api})")
+        entries.append(f"{api} {version} ({user_api})")
     return "; ".join(entries) if entries else "unknown"
 
 

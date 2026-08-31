@@ -94,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `prov_blas` used to report a thread count too, read from the idle pool at
+  collection time. That count could contradict `prov_blas_threads`, the
+  actual cap applied. `prov_blas` now names only the BLAS or LAPACK build
+  that ran.
 - The documentation called TLS-DMD "de-biased for noisy data" and set no bound
   on it. That advantage holds at `delays=1` and decays as `delays` grows,
   because delay embedding repeats the same noise across the Hankel rows while
