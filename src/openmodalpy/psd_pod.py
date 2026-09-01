@@ -20,6 +20,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from fftkit import rfftfreq
 
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.base import (
@@ -125,7 +126,7 @@ class PSDPODAnalyzer(BaseAnalyzer):
         self.U = self.U if self.U is not None else self.data.get("U0", 1.0)
         # Same axis construction as the previous command-path SPOD loader so
         # freq / st stay bit-identical with the pre-move baseline.
-        self.freq = np.fft.rfftfreq(self.nfft, d=self.data["dt"])
+        self.freq = rfftfreq(self.nfft, d=self.data["dt"])
         self.St = self.freq * self.L / self.U
 
     def _weight_vector(self, n_space: int) -> np.ndarray:

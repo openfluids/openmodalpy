@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 
 # Third-party imports
 import numpy as np
+from fftkit import rfftfreq
 from numpy.typing import ArrayLike
 from tqdm import tqdm
 
@@ -301,7 +302,7 @@ class SPODAnalyzer(BaseAnalyzer):
         # If super().run() calls compute_fft_blocks, self.freq should be populated.
         # For safety, we can calculate it here if not already done or to ensure consistency.
         if not hasattr(self, "freq") or self.freq.size == 0:
-            self.freq = np.fft.rfftfreq(self.nfft, d=self.data["dt"])
+            self.freq = rfftfreq(self.nfft, d=self.data["dt"])
 
         self.St = self.freq * self.L / self.U
 
@@ -354,7 +355,7 @@ class SPODAnalyzer(BaseAnalyzer):
                 num_freq_bins,
             )
             # Recalculate freq and St based on nfft and fs (from BaseAnalyzer)
-            self.freq = np.fft.rfftfreq(self.nfft, d=1.0 / self._require_fs())[:num_freq_bins]
+            self.freq = rfftfreq(self.nfft, d=1.0 / self._require_fs())[:num_freq_bins]
             L = self.L
             U = self.U
             if L is None or U is None:

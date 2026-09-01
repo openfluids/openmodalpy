@@ -10,7 +10,7 @@ that stack fails to load; this module does not import the parallel package.
 """
 
 import numpy as np
-from fftkit import get_fft_func
+from fftkit import rfft
 from scipy.signal import get_window
 
 
@@ -99,7 +99,6 @@ def windowed_block_fft(
     q_mean = np.mean(q, axis=0)
     window_broadcast = window[:, np.newaxis]
 
-    fft_func = get_fft_func()
     hop = nfft - novlap
     for iblk in range(nblocks):
         ts = iblk * hop
@@ -131,7 +130,6 @@ def windowed_block_fft(
             block_var[block_var < 4 * np.finfo(float).eps] = 1.0
             block_centered = block_centered / block_var
 
-        full_fft_result = fft_func(block_centered * window_broadcast, axis=0)
-        q_hat[:, :, iblk] = (cw / nfft) * full_fft_result[:n_freq_out, :]
+        q_hat[:, :, iblk] = (cw / nfft) * rfft(block_centered * window_broadcast, axis=0)
 
     return q_hat

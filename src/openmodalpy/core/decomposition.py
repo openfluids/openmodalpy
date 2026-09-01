@@ -32,6 +32,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 import scipy.linalg
+from fftkit import irfft, rfft, rfftfreq
 
 from openmodalpy.core.base import (
     _coerce_spatial_weights,
@@ -124,7 +125,7 @@ class BandFilteredLift:
         """
         if self.f_low is None or self.f_high is None or self.dt is None:
             raise ValueError("BandFilteredLift requires f_low, f_high and dt (pass them to the constructor).")
-        freq = np.fft.rfftfreq(int(n_snapshots), d=float(self.dt))
+        freq = rfftfreq(int(n_snapshots), d=float(self.dt))
         if self.is_last:
             return (freq >= self.f_low) & (freq <= self.f_high)
         return (freq >= self.f_low) & (freq < self.f_high)
@@ -133,10 +134,10 @@ class BandFilteredLift:
         data = np.asarray(data, dtype=float)
         n_snapshots = data.shape[0]
         mask = self.mask(n_snapshots)
-        qhat = np.fft.rfft(data, axis=0)
+        qhat = rfft(data, axis=0)
         qhat_band = np.zeros_like(qhat)
         qhat_band[mask, :] = qhat[mask, :]
-        return np.real(np.fft.irfft(qhat_band, n=n_snapshots, axis=0))
+        return np.real(irfft(qhat_band, n=n_snapshots, axis=0))
 
 
 class SpatialMetric:

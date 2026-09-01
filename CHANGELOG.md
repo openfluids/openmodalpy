@@ -79,6 +79,9 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- Every transform now goes through fftkit, and no module calls numpy FFT directly.
+  Welch asks for the one-sided transform instead of computing the full complex one
+  and discarding half of it. The results do not change.
 - DMD, HODMD and ST-POD now share the name `embedding_dim` for delay embedding depth. DMD default is 1 and does no lift. ST-POD still rejects 1.
 - The SPOD eigenproblem is now one hop from `spod.py`. `spod.py` imports
   `spod_single_frequency` from `openmodalpy.core.decomposition` and calls it

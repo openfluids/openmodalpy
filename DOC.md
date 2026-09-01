@@ -40,9 +40,17 @@ src/openmodalpy/
 ```
 
 FFT backend dispatch lives in the external [`fftkit`](https://github.com/openfluids/fftkit)
-package: `get_fft_func()` selects among scipy/numpy/mkl/cupy/accelerate, and
-`core.config.FFT_BACKEND` re-exports the backend fftkit resolved. Override it with the
-`FFTKIT_BACKEND` environment variable.
+package: openmodalpy calls `rfft`, `irfft` and `rfftfreq`, and fftkit picks the backend
+among scipy/numpy/mkl/cupy. `core.config.FFT_BACKEND` re-exports the backend fftkit
+resolved. Override it with the `FFTKIT_BACKEND` environment variable. fftkit also has an
+`accelerate` backend, but that one supplies no `rfft`, so `FFTKIT_BACKEND=accelerate`
+stops the Welch transform.
+
+## FFT batching
+
+Welch sends one block at a time to the transform. A batched call, which would send all
+blocks together, stays out until a measured case asks for it. `pyproject.toml` carries a
+`gpu` extra, but it only pulls fftkit's CUDA wheel. No code path sends work to a GPU.
 
 ## BLAS thread policy
 

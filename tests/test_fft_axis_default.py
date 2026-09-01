@@ -9,6 +9,7 @@ stale pyproject comment that once said "verified: 94 passed").
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 import numpy as np
 from fftkit import AxisDefaultWarning
@@ -55,3 +56,20 @@ def test_full_spod_fft_pipeline_raises_no_axis_default_warning(tmp_path):
     )
     assert analyzer.qhat is not None
     assert analyzer.qhat.size > 0
+
+
+def test_no_direct_numpy_fft_calls():
+    """No module calls a numpy transform directly; fftkit picks the backend.
+
+    The check reads the files, because ``grep`` is not on the path of every
+    machine that runs this suite. It matches the ``np.fft.`` prefix and not a
+    list of names, so a new numpy transform cannot enter unseen.
+    """
+    src_path = Path(__file__).parent.parent / "src" / "openmodalpy"
+    found = [
+        f"{path.relative_to(src_path)}:{number}: {line.strip()}"
+        for path in sorted(src_path.rglob("*.py"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if "np.fft." in line
+    ]
+    assert not found, "These lines call a numpy transform directly:\n" + "\n".join(found)

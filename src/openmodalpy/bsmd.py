@@ -42,6 +42,7 @@ import matplotlib.pyplot as plt
 
 # Third-party imports
 import numpy as np
+from fftkit import rfftfreq
 from numpy.typing import ArrayLike, NDArray
 from tqdm import tqdm
 
@@ -432,7 +433,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         only needs this post-step. ``_qhat_cache_path`` is set by the base
         path so ``save_results`` can still append onto the same file.
         """
-        freq = np.fft.rfftfreq(self.nfft, d=1.0 / self._require_fs())
+        freq = rfftfreq(self.nfft, d=1.0 / self._require_fs())
         self.freq = freq
         self.St = freq.copy()  # Default: Strouhal equals frequency if no scaling
         self._maybe_offload_qhat()
@@ -730,7 +731,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         if self.freq is None or self.St is None:
             n_freq = self._n_freq_bins
             if n_freq > 0:
-                freq = np.fft.rfftfreq(n_freq * 2 - 2, d=1.0 / self._require_fs())[:n_freq]
+                freq = rfftfreq(n_freq * 2 - 2, d=1.0 / self._require_fs())[:n_freq]
                 self.freq = freq
                 self.St = freq.copy()
 
