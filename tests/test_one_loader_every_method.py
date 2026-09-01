@@ -3,7 +3,7 @@
 The promise (Ricardo, 2026-08-15): you write one data loader for your
 discretization and every advertised method is reachable with it — you loop over
 the methods, then the next, then the next. This module hands a single
-file-backed loader to all nine advertised methods (seven analyzer classes plus
+file-backed loader to all ten methods (eight analyzer classes plus
 the two DMD delay variants) and, for each one in the loop table, runs
 load_and_preprocess -> perform -> save_results, reloads into a fresh instance
 with the same loader, and compares the reloaded arrays element-wise. If any
@@ -31,6 +31,7 @@ from openmodalpy import (
     STPODAnalyzer,
 )
 from openmodalpy.example_data import generate_taylor_green
+from tests.toy_analyzer import ToyAnalyzer
 
 NX, NY, NS = 8, 8, 64
 NFFT = 16  # Welch rows: Ns=64, overlap 0.5 -> 7 blocks, rfft bins 0..8
@@ -190,6 +191,15 @@ ROWS: tuple[MethodRow, ...] = (
         ("modes", "eigenvalues", "time_coefficients", "freq", "St", "W"),
         _check_modal,
     ),
+    MethodRow(
+        "toy",
+        ToyAnalyzer,
+        {"n_modes_save": 4},
+        "perform_toy",
+        False,
+        ("modes", "eigenvalues", "time_coefficients"),
+        _check_modal,
+    ),
 )
 
 
@@ -252,7 +262,7 @@ def test_load_once_loop_over_methods(taylor_green_npz: str, tmp_path: Path) -> N
         seen_classes.add(row.cls)
 
     # The nine table rows cover exactly the seven advertised classes.
-    assert len(seen_classes) == 7
+    assert len(seen_classes) == 8
 
 
 def test_side_channel_data_assignment_still_works(taylor_green_npz: str, tmp_path: Path) -> None:

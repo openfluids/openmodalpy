@@ -1132,3 +1132,75 @@ In all cases:
 - Add a `_run_*` function and a dispatch entry in `analyze_from_spec`
 - Add a JSONC example config
 - Add tests
+
+### Adding an Analyzer
+
+A new analyzer subclasses `BaseAnalyzer` and performs a modal decomposition
+on loaded data. The structure is:
+
+**Constructor**: Initialize via `super().__init__()`, then set `n_modes_save`,
+declare `modes`, `eigenvalues`, `time_coefficients` as empty arrays, and set
+`analysis_type` to a short string (used in filenames and logging). The base
+constructor accepts `file_path` or `data` (one only), plus `results_dir`,
+`figures_dir`, `data_loader`, `spatial_weight_type`, and `spatial_weights`. The
+base manages data loading and weight calculation. Pass those through to the base;
+do not override `load_and_preprocess` unless you have domain-specific logic.
+
+**Decomposition method**: Implement `perform_<method>()` and set
+`_perform_name = "perform_<method>"` as a class variable. This method reads
+`self.data["q"]` (the loaded snapshot matrix, time × space), populates
+`self.modes`, `self.eigenvalues`, and `self.time_coefficients`, then calls
+`self._resync_mode_count()` to truncate to `n_modes_save`. The base `run_analysis`
+method will call your `perform_<method>` after loading and before plotting.
+
+**Algorithm metadata**: Implement `_get_algorithm_metadata()` to return a dict
+describing the method for the provenance block (optional: describe the lift kind,
+normalization, or any tuning). The base uses this when writing results.
+
+**Results I/O**: Implement `save_results` and `load_results`. Write via
+`openmodalpy.core.results.write_results(path, data_dict, attrs=metadata_dict)`;
+the base provides the provenance block automatically. Store modes, eigenvalues,
+time_coefficients and any method-specific results (e.g., frequencies for SPOD).
+Read them back in `load_results` using `read_results(path)`, which returns a
+`ResultsData` namedtuple with all fields; pull out what you need and set `self.*`.
+
+**Plotting**: Implement `_plot_run(run_id)` to save figures. Plot the
+eigenvalues in log scale, the spatial modes (via `_maybe_plot_volumetric_modes`
+if the data is 3D, or `plot_modes` for 2D), and the time coefficients. Use
+`display_name_for(self.analysis_type)` for titles and axis labels. Save via
+`fig.savefig(path, dpi=100, bbox_inches="tight")` and close with `plt.close`.
+
+**Base provides**: `load_and_preprocess()` (load, compute spatial weights W),
+`run_analysis()` (orchestrate the full load–decompose–save–plot sequence),
+`_resync_mode_count()` (truncate to `n_modes_save`), and helpers like
+`_maybe_plot_volumetric_modes()`. The base also manages all I/O, logging, and
+the data dict contract (with automatic Nx, Ny, Nz, Ns derivation if absent).
+
+**Method registration** (for CLI access): Add an entry to `METHOD_REGISTRY` in
+`specs.py:107` with the method ID, display name, and help text. Note that
+`METHOD_REGISTRY` carries no analyzer class; it is a reference only for the CLI.
+Add a dispatch lambda in `analyze_from_spec` (commands.py:626) that instantiates
+your analyzer and calls `run_analysis`. For pod-like methods (identity lift,
+second-order), the generic `_run_pod_like(spec, AnalyzerCls, ...)` helper at
+commands.py:466 can drive the analysis; SPOD, PSD-POD, DMD, and BSMD each have
+their own runners because they need Welch blocks or special parameters.
+
+**What is clumsy here**: `METHOD_REGISTRY` holds no class reference, and the
+dispatch is a hand-written dict of lambdas keyed by method name. To reach the
+CLI you must edit shipped code in three places: an import in `commands.py`, an
+entry in `METHOD_REGISTRY`, and a lambda in the dispatch dict. Nothing keeps
+those three in step, so a method can be registered and still have no dispatch
+entry. Reaching the round-trip test in `tests/test_one_loader_every_method.py`
+needs none of this, because that test holds the analyzer class directly.
+
+**Testing**: Run the new analyzer through `load_and_preprocess()`, then
+`perform_<method>()`, then `save_results()`. Load the results into a fresh
+instance via `load_results()` and verify all arrays round-trip bit-exactly via
+`np.testing.assert_array_equal()`. This ensures the HDF5 I/O is lossless.
+Verify provenance via the `_assert_provenance_block` helper in
+`tests/test_provenance.py`.
+
+See `tests/toy_analyzer.py` for a complete minimal example: a toy decomposition
+that takes the first k snapshots as modes and their norms as eigenvalues. The
+class is 150 lines and the file is 174. Of those 150 lines, 55 are
+`save_results` and `load_results`, which every analyzer writes again.
