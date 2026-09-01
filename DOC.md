@@ -84,6 +84,27 @@ vs MKL vs Accelerate) are not promised and are generally not achievable. Record
 `prov_blas_threads` and the package versions in the provenance block when
 comparing machines.
 
+**What to set when you want speed instead.** Measured on a 24-core Ryzen with
+OpenBLAS, on an idle machine, best of several runs:
+
+| solve | 1 thread | 8 threads | 24 threads |
+|---|---|---|---|
+| `eigh` 400x400 | 9.5 ms | 6.9 ms | 11.1 ms |
+| `eigh` 1000x1000 | 93.5 ms | 47.7 ms | 94.7 ms |
+| `eigh` 2000x2000 | 642 ms | 239 ms | 454 ms |
+| dense `svd` 3000x800 | 255 ms | 160 ms | 321 ms |
+| dense `svd` 80000x397 | 2.33 s | 1.19 s | 1.09 s |
+| ARPACK `svds`, k=10, 80000x397 | 0.318 s | 0.312 s | 0.400 s |
+
+Two things follow. Eight threads is the best of these three at every size, and
+it is never slower than one, down to `eigh` on a 20x20 matrix. More than eight
+is worse than one for small work, because the threads cost more than they save.
+
+The truncated route does not gain. ARPACK spends its time in matrix-vector
+products, which do not divide across cores the way a dense factorisation does,
+so a rank-10 `svds` stays near 0.32 s whatever you set. DMD and any other
+method that takes the iterative route therefore runs at the same speed on one
+thread as on eight.
 
 ### Analyzer lifecycle
 
