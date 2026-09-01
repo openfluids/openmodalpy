@@ -182,6 +182,15 @@ def compute_reduced_svd(
         min_dim = min(X.shape)
         use_iter = use_iterative_svd(min_dim, rank) if method == "auto" else method == "iterative"
         if use_iter:
+            # ARPACK does one matrix-vector product per iteration, so it reads
+            # the whole matrix tens of times. A non-contiguous view makes every
+            # one of those reads stride through memory, and the caller usually
+            # hands one over: DMD passes X[:, :-1], which drops the last column
+            # and leaves a view. One copy costs far less than the strided reads.
+            # Measured on a delay-embedded double gyre, X[:, :-1] at
+            # (80000, 396), rank 10, 1 BLAS thread: 2.792 s as a view against
+            # 0.045 s to copy plus 0.338 s to solve.
+            X = np.ascontiguousarray(X)
             # Local deterministic start vector — never reseed the caller's global RNG.
             v0 = np.random.default_rng(v0_seed).standard_normal(min_dim)
             u, s, vh = svds(X, k=rank, v0=v0)

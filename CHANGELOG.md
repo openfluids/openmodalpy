@@ -79,6 +79,9 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- ARPACK now gets a contiguous matrix. It does one matrix-vector product per
+  iteration, and a sliced view made every one of them stride through memory.
+  DMD with `embedding_dim=4` on a 64 MB field fell from 2.559 s to 0.557 s.
 - Every transform now goes through fftkit, and no module calls numpy FFT directly.
   Welch asks for the one-sided transform instead of computing the full complex one
   and discarding half of it. The results do not change.
