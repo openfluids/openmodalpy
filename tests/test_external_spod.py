@@ -135,7 +135,19 @@ def _field_snapshots(fixture_doc: dict) -> np.ndarray:
     return np.asarray(fixture_doc["cases"]["manufactured"]["snapshots"], dtype=np.float64)
 
 
-def _openmodalpy_eigs(q: np.ndarray, fixture_doc: dict, tmp_path: Path) -> np.ndarray:
+def _openmodalpy_eigs(
+    q: np.ndarray,
+    fixture_doc: dict,
+    tmp_path: Path,
+    *,
+    window_norm: str | None = None,
+    characteristic_length: float | None = None,
+) -> np.ndarray:
+    """Build and run the analyzer from the fixture options.
+
+    ``window_norm`` and ``characteristic_length`` default to the fixture
+    values. Pass either to drive a wrong convention through the library.
+    """
     options = fixture_doc["solver_options"]["openmodalpy"]
     construction = fixture_doc["construction"]
     n_space = int(construction["n_space"])
@@ -148,12 +160,16 @@ def _openmodalpy_eigs(q: np.ndarray, fixture_doc: dict, tmp_path: Path) -> np.nd
         "Ny": 1,
         "Ns": int(q.shape[0]),
     }
+    if window_norm is None:
+        window_norm = str(options["window_norm"])
+    if characteristic_length is None:
+        characteristic_length = options["characteristic_length"]
     analyzer = SPODAnalyzer(
         file_path="external_spod",
         nfft=int(options["nfft"]),
         overlap=float(options["overlap"]),
         window_type=str(options["window_type"]),
-        window_norm=str(options["window_norm"]),
+        window_norm=window_norm,
         blockwise_mean=bool(options["blockwise_mean"]),
         results_dir=str(tmp_path),
         figures_dir=str(tmp_path),
@@ -163,7 +179,7 @@ def _openmodalpy_eigs(q: np.ndarray, fixture_doc: dict, tmp_path: Path) -> np.nd
         # spatial weights; prescribe ones so the comparison stays about the
         # spectral-energy convention rather than coordinate-derived volumes.
         spatial_weights=np.ones((n_space, 1)),
-        characteristic_length=options["characteristic_length"],
+        characteristic_length=characteristic_length,
         characteristic_velocity=options["characteristic_velocity"],
     )
     analyzer.load_and_preprocess()
@@ -287,27 +303,36 @@ def test_fixture_provenance_records_both_solvers_and_the_pinned_pyspod(fixture_d
     assert fixture_doc["mapping"]["formula"] == "lambda_openmodalpy = lambda_pyspod * nfft * dt / 2"
 
 
-def test_mapped_tolerance_discriminates_convention_errors(fixture_doc) -> None:
-    """The mapped bound must stay tighter than the two convention mistakes §4 measured.
+def test_mapped_tolerance_discriminates_convention_errors(fixture_doc, tmp_path: Path) -> None:
+    """Drive both wrong conventions through the library, not just through arithmetic.
 
-    Dropping the Strouhal division moves the answer by 8x; power instead of
-    amplitude scales it by 0.7337695. Either one must sit above 5e-3, or the
-    bound stops earning its keep.
+    One mistake skips the Strouhal division; the other normalises the window
+    by power instead of amplitude. Each must move the eigenvalue past the
+    5e-3 mapped tolerance, or that bound stops catching them.
     """
+    q = _field_snapshots(fixture_doc)
+    construction = fixture_doc["construction"]
+    bin_idx = int(construction["k_bin"])
     tol = _tol(fixture_doc, "mapped_vs_pyspod")
-    nfft = float(fixture_doc["construction"]["nfft"])
-    dt = float(fixture_doc["construction"]["dt"])
-    correct = nfft * dt / 2.0
-    no_strouhal = 2.0
-    dropped_strouhal = abs(correct - no_strouhal) / correct
-    power_factor = 0.54**2 / (0.54**2 + 0.5 * 0.46**2)
-    power_shift = abs(1.0 - power_factor)
-    assert dropped_strouhal > tol, (
-        f"dropping Strouhal division moves the answer by {dropped_strouhal:.3e}, "
-        f"which is not above mapped tol {tol:.3e}"
+
+    correct = float(_openmodalpy_eigs(q, fixture_doc, tmp_path)[bin_idx, 0])
+
+    # Setting L/U to nfft*dt makes the Strouhal step dst = 1.0, which is
+    # exactly what skipping the division does.
+    no_strouhal_length = float(construction["nfft"]) * float(construction["dt"])
+    no_strouhal = float(
+        _openmodalpy_eigs(q, fixture_doc, tmp_path, characteristic_length=no_strouhal_length)[bin_idx, 0]
     )
-    assert power_shift > tol, (
-        f"power vs amplitude moves the answer by {power_shift:.3e}, which is not above mapped tol {tol:.3e}"
+    err_no_strouhal = _rel_err(no_strouhal, correct)
+    assert err_no_strouhal > tol, (
+        f"dropping the Strouhal division moves the eigenvalue by {err_no_strouhal:.3e}, not above mapped tol {tol:.3e}"
+    )
+
+    power_norm = float(_openmodalpy_eigs(q, fixture_doc, tmp_path, window_norm="power")[bin_idx, 0])
+    err_power = _rel_err(power_norm, correct)
+    assert err_power > tol, (
+        f"power instead of amplitude normalisation moves the eigenvalue by {err_power:.3e}, "
+        f"not above mapped tol {tol:.3e}"
     )
 
 
