@@ -14,6 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Saved DMD results now store `dmd_embedding_dim` in place of `dmd_delays`.
 - CLI flag `--delays` is removed. Use `--embedding-dim`.
 
+### Removed
+
+Six functions that nothing called. Each was checked for `__all__`, package
+exports, string dispatch and the docs before it went.
+
+- `load_dnami_data`. The two loaders it mirrors, `load_jetles_data` and
+  `load_mat_data`, are re-exported from `core.base` and stay. This one never
+  was, so nothing can reach it.
+- `compute_aspect_ratio` and `get_aspect_ratio`. A dead pair: the only caller
+  of the first was the second. `get_fig_aspect_ratio` is the live helper.
+- `parallel_map`.
+- `_calculate_weights_openmp`, a placeholder that only called
+  `_calculate_weights_numpy`.
+- `blocksfft_optimized`. `base.blocksfft` is now the one public name for a
+  windowed block FFT. `core/welch.py` used to say both names stay public; it
+  no longer does.
+
 ### Added
 
 - DOC.md says that `solver="eigh"` and `solver="svd"` are two different

@@ -14,8 +14,6 @@ import logging
 import numpy as np
 from threadpoolctl import threadpool_info
 
-from openmodalpy.core.welch import windowed_block_fft
-
 logger = logging.getLogger(__name__)
 
 # OpenMP support was removed. All routines rely on NumPy vectorization and the
@@ -123,79 +121,6 @@ def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray, z: np.ndarray | None 
     volumes_2d = np.outer(Wy, Wx)  # (Ny, Nx)
     volumes = theta_fraction[:, None, None] * volumes_2d[None, :, :]  # (Ntheta, Ny, Nx)
     return volumes.reshape(-1, 1)
-
-
-# Placeholder function maintained for backward compatibility. It simply calls
-# the NumPy implementation as OpenMP acceleration has been removed.
-def _calculate_weights_openmp(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    return _calculate_weights_numpy(x, y)
-
-
-def blocksfft_optimized(
-    q: np.ndarray,
-    nfft: int,
-    nblocks: int,
-    novlap: int,
-    blockwise_mean: bool = False,
-    normvar: bool = False,
-    window_norm: str = "power",
-    window_type: str = "hamming",
-) -> np.ndarray:
-    """
-    Optimized blocked FFT computation.
-
-    This function uses the best available linear algebra backend (BLAS/LAPACK)
-    and optimized memory access patterns for better performance.
-
-    Parameters:
-    -----------
-    q : np.ndarray
-        Input data [time, space]
-    nfft : int
-        Number of FFT points
-    nblocks : int
-        Number of blocks
-    novlap : int
-        Number of overlapping points between blocks
-    blockwise_mean : bool
-        Subtract blockwise mean if True
-    normvar : bool
-        If True, divide each block pointwise in space by its variance
-        (unbiased, ``ddof=1``), matching ``spod_matlab`` (``opts.normvar``)
-        and PySPOD (``normalize_data``). This does **not** produce unit
-        variance and is therefore scale-dependent: scaling the input by
-        ``c`` scales the normalized block by ``1/c``. Values below
-        ``4*eps`` are clamped to 1. Implementation option, not a step in
-        Towne, Schmidt & Colonius (2018). Defaults to False.
-    window_norm : str
-        Window normalization type ('amplitude' or 'power')
-    window_type : str
-        Window type. Use 'sine' for the custom sine window or any name
-        recognized by ``scipy.signal.get_window`` (periodic / fftbins=True).
-
-    Returns:
-    --------
-    np.ndarray
-        FFT coefficients [freq, space, block]
-
-    Notes
-    -----
-    Block starts are ``iblk * (nfft - novlap)`` with no end-of-record clamp.
-    Callers must pass an ``nblocks`` that fits; oversize requests raise
-    ``ValueError`` rather than re-using trailing samples.
-
-    Implementation is the shared loop in :func:`openmodalpy.core.welch.windowed_block_fft`.
-    """
-    return windowed_block_fft(
-        q,
-        nfft,
-        nblocks,
-        novlap,
-        blockwise_mean=blockwise_mean,
-        normvar=normvar,
-        window_norm=window_norm,
-        window_type=window_type,
-    )
 
 
 def get_threadpool_summary() -> str:

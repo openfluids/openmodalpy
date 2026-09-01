@@ -1,8 +1,7 @@
 """Welch block helpers and the single windowed-block FFT implementation.
 
-Shared by the serial path in ``base.blocksfft`` and the parallel-module entry
-point ``parallel.blocksfft_optimized``. Both names remain public; both
-delegate here so the window, hop, and scaling live in one place.
+Shared by the serial path in ``base.blocksfft``, delegated here so the
+window, hop, and scaling live in one place.
 
 Dependencies are intentional: ``numpy``, ``scipy.signal.get_window``, and
 ``fftkit``. That is the ceiling for this module — not the optional parallel

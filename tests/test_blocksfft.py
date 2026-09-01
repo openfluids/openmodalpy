@@ -5,7 +5,6 @@ import pytest
 
 from openmodalpy.core.base import blocksfft
 from openmodalpy.core.decomposition import spod_single_frequency
-from openmodalpy.core.parallel import blocksfft_optimized
 from openmodalpy.core.welch import windowed_block_fft
 
 WINDOWS = ("hamming", "hann", "blackman", "bartlett", "sine")
@@ -29,23 +28,18 @@ def test_blocksfft_constant_signal():
     assert np.allclose(result, 0)
 
 
-def test_public_blocksfft_names_delegate_to_windowed_block_fft():
-    """Both public names are thin wrappers around the single shared implementation.
+def test_blocksfft_delegates_to_windowed_block_fft():
+    """``blocksfft`` stays a thin wrapper, not a second implementation.
 
-    Since cee9a89, blocksfft and blocksfft_optimized are not two algorithms —
-    they are two names for windowed_block_fft. The only contract still worth
-    pinning between them is that delegation. Numerical correctness is pinned
-    by the definition oracles in test_welch_analytical.py, not by comparing
-    the two names to each other.
+    The window, the hop and the scaling must live in one place. If this name
+    grows its own copy of the loop, the two copies can drift apart and only
+    one of them gets a fix. Numerical correctness is pinned by the definition
+    oracles in test_welch_analytical.py, not here.
     """
     assert "return windowed_block_fft(" in inspect.getsource(blocksfft)
-    assert "return windowed_block_fft(" in inspect.getsource(blocksfft_optimized)
-    # Same callable object on both wrapper modules (not a re-export copy).
     from openmodalpy.core import base as base_mod
-    from openmodalpy.core import parallel as parallel_mod
 
     assert base_mod.windowed_block_fft is windowed_block_fft
-    assert parallel_mod.windowed_block_fft is windowed_block_fft
 
 
 def test_blocksfft_hann_blackman_differ_from_hamming():

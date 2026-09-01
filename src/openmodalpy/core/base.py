@@ -13,8 +13,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 import h5py
 import numpy as np
@@ -361,19 +360,6 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-def parallel_map(func: Callable[[T], R], iterable: Iterable[T], threads: int | None = None) -> list[R]:
-    """Map function over iterable using threads."""
-    threads = threads or get_num_threads()
-    if threads <= 1:
-        return [func(x) for x in iterable]
-    results = []
-    with ThreadPoolExecutor(max_workers=threads) as pool:
-        futures = [pool.submit(func, x) for x in iterable]
-        for f in futures:
-            results.append(f.result())
-    return results
-
-
 def validate_nfft_overlap(nfft: int, overlap: float) -> None:
     """Check that ``nfft`` is positive and ``overlap`` is in [0, 1).
 
@@ -522,24 +508,6 @@ def print_summary(analysis: str, results_dir: str, figures_dir: str) -> None:
     logger.info("%s analysis finished", analysis)
     logger.info("Results: %s", results_dir)
     logger.info("Figures: %s", figures_dir)
-
-
-def compute_aspect_ratio(x_coords: np.ndarray, y_coords: np.ndarray) -> float | Literal["auto"]:
-    """Return ``dy/dx`` if coordinates are 1D vectors, else ``'auto'``."""
-    if hasattr(x_coords, "ndim") and hasattr(y_coords, "ndim"):
-        if x_coords.ndim == 1 and y_coords.ndim == 1:
-            dx = float(x_coords.max() - x_coords.min())
-            dy = float(y_coords.max() - y_coords.min())
-            if dx > 0 and dy > 0:
-                return dy / dx
-    return "auto"
-
-
-def get_aspect_ratio(data: dict) -> Union[float, str]:
-    """Return aspect ratio for ``data`` using available coordinates."""
-    x = data.get("x", [])
-    y = data.get("y", [])
-    return compute_aspect_ratio(x, y)
 
 
 def get_robust_clim(data: np.ndarray, method: str = "percentile", sigma: float = 2.5) -> tuple:

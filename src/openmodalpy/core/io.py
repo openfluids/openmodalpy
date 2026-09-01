@@ -1440,9 +1440,4 @@ def load_mat_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
     return load_data(file_path, loader_type="mat", **kwargs)
 
 
-def load_dnami_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
-    """Convenience wrapper for the general dNami loader."""
-    return load_data(file_path, loader_type="dnami", **kwargs)
-
-
 DNamiXNPZLoader = DNamiDataLoader
