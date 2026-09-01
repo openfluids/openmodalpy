@@ -4,12 +4,10 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable, Iterable
 from typing import Any, cast
 
-import h5py
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -133,29 +131,37 @@ class MPODAnalyzer(PODAnalyzer):
             "band_mode_counts": np.asarray(self.band_mode_counts, dtype=int),
         }
 
-    def load_results(self, filename: str | None = None) -> None:
-        super().load_results(filename=filename)
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-        load_path = os.path.join(self.results_dir, filename)
-        if not os.path.isfile(load_path):
-            from openmodalpy.core.results import find_latest_result
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return mPOD datasets and metadata to save.
 
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if not latest:
-                return
-            load_path = latest
-        with h5py.File(load_path, "r") as handle:  # type: ignore[name-defined]
-            if "band_edges_hz" in handle.attrs:
-                self._resolved_band_edges_hz = np.asarray(handle.attrs["band_edges_hz"], dtype=float)
-            if "mode_band_indices" in handle.attrs:
-                self.mode_band_indices = np.asarray(handle.attrs["mode_band_indices"], dtype=int)
-            if "band_mode_counts" in handle.attrs:
-                self.band_mode_counts = np.asarray(handle.attrs["band_mode_counts"], dtype=int)
-            if "filter_kind" in handle.attrs:
-                self.filter_kind = str(handle.attrs["filter_kind"])
-            if "band_scale" in handle.attrs:
-                self.band_scale = str(handle.attrs["band_scale"])
+        Inherits POD's datasets and adds band-specific attributes.
+        """
+        datasets, attrs = super()._result_payload()
+        # Add mPOD-specific metadata.
+        attrs["band_edges_hz"] = np.asarray(self._resolved_band_edges_hz, dtype=float)
+        attrs["mode_band_indices"] = np.asarray(self.mode_band_indices, dtype=int)
+        attrs["band_mode_counts"] = np.asarray(self.band_mode_counts, dtype=int)
+        attrs["filter_kind"] = self.filter_kind
+        attrs["band_scale"] = self.band_scale
+        return datasets, attrs
+
+    def _assign_loaded_results(self, res: Any) -> None:
+        """Assign POD's arrays, then restore the band attributes.
+
+        The base reads the file once and hands the result here, so mPOD does
+        not open it a second time.
+        """
+        super()._assign_loaded_results(res)
+        if "band_edges_hz" in res.attrs:
+            self._resolved_band_edges_hz = np.asarray(res.attrs["band_edges_hz"], dtype=float)
+        if "mode_band_indices" in res.attrs:
+            self.mode_band_indices = np.asarray(res.attrs["mode_band_indices"], dtype=int)
+        if "band_mode_counts" in res.attrs:
+            self.band_mode_counts = np.asarray(res.attrs["band_mode_counts"], dtype=int)
+        if "filter_kind" in res.attrs:
+            self.filter_kind = str(res.attrs["filter_kind"])
+        if "band_scale" in res.attrs:
+            self.band_scale = str(res.attrs["band_scale"])
 
     def perform_mpod(self) -> None:
         """Perform mPOD by POD-decomposing non-overlapping band-limited data."""

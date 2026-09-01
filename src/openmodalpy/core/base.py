@@ -1825,6 +1825,8 @@ class BaseAnalyzer:
 
         # Calculated later
         self.novlap = 0
+        os.makedirs(self.results_dir, exist_ok=True)
+
         self.data: dict[str, Any] = data if data is not None else {}
         self.W = np.array([])
         self.nblocks = 0
@@ -1852,8 +1854,6 @@ class BaseAnalyzer:
             self.data_root = getattr(self, "_METHOD_NAME", "analyzer")
 
         # Ensure output directories exist
-        os.makedirs(self.results_dir, exist_ok=True)
-        os.makedirs(self.figures_dir, exist_ok=True)
 
     def load_and_preprocess(self) -> None:
         """Load data and calculate weights."""
@@ -2203,12 +2203,42 @@ class BaseAnalyzer:
             self._save_fft_block_cache(cache_path)
         self._on_fft_blocks_ready()
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save results to HDF5 file with harmonized filename and format.
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return datasets and metadata to save.
 
-        Args:
-            filename: Custom filename. If omitted, uses the harmonized scheme
-                with ``self.analysis_type``.
+        Returns a tuple of (datasets dict, attributes dict). Subclasses
+        override to specify their result structure. The base implementation
+        is a no-op stub; all seven analyzers and toy implement this.
+
+        Datasets should be canonical names (lowercase); write_results
+        handles None values. Attributes are arbitrary metadata
+        (provenance is added automatically by write_results).
+        """
+        return {}, {}
+
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """Name the datasets a real result file of this method must hold.
+
+        The loader raises when one is absent, which keeps a wrong file loud:
+        assigning only what is present would give empty arrays and a cheerful
+        "results loaded" line. The default is empty, because some methods
+        accept a partial file on purpose. BSMD reads a file with no ``modes1``
+        to reach the weights, and DMD lowers its mode cap from an empty file.
+        A subclass that wants the loud failure names its datasets here.
+        """
+        return ()
+
+    def save_results(self, filename: str | None = None) -> None:
+        """Save results to HDF5 using the unified writer.
+
+        Calls _result_payload() to get the datasets and metadata,
+        ensures results_dir exists, and writes through write_results.
+
+        Parameters
+        ----------
+        filename
+            Custom HDF5 filename. If None, uses harmonized scheme
+            with data_root, nfft, overlap, analysis_type.
         """
         from openmodalpy.core.results import write_results
 
@@ -2221,23 +2251,115 @@ class BaseAnalyzer:
                 getattr(self, "analysis_type", "spod"),
             )
         save_path = os.path.join(self.results_dir, filename)
-        logger.info("Saving results to %s", save_path)
-        # Placeholder — subclasses write their full payload through write_results.
-        write_results(
-            save_path,
-            {
-                "x": self.data["x"],
-                "y": self.data["y"],
-                "W": self.W,
-            },
-            attrs={
-                "nfft": self.nfft,
-                "overlap": self.overlap,
-                "nblocks": self.nblocks,
-                "fs": self.fs,
-            },
-        )
+        os.makedirs(self.results_dir, exist_ok=True)
 
+        datasets, attrs = self._result_payload()
+        name = display_name_for(getattr(self, "analysis_type", "spod"))
+        own_logger = logging.getLogger(type(self).__module__)
+        own_logger.info("Saving %s results to %s", name, save_path)
+        write_results(save_path, datasets, attrs=attrs)
+        own_logger.info("%s results saved to %s", name, save_path)
+
+    def load_results(self, filename: str | None = None) -> None:
+        """Load results from HDF5 using the unified reader.
+
+        Reads the file through read_results and assigns arrays to instance.
+        Subclasses may override to handle special post-processing.
+
+        Parameters
+        ----------
+        filename
+            Custom HDF5 filename. If None, uses the same harmonized scheme
+            as save_results.
+        """
+        from openmodalpy.core.results import read_results
+
+        if not filename:
+            filename = make_result_filename(
+                self.data_root,
+                self.nfft,
+                self.overlap,
+                self.data.get("Ns", 0),
+                getattr(self, "analysis_type", "spod"),
+            )
+        load_path = os.path.join(self.results_dir, filename)
+        name = display_name_for(getattr(self, "analysis_type", "spod"))
+        own_logger = logging.getLogger(type(self).__module__)
+        own_logger.info("Loading %s results from %s", name, load_path)
+
+        if not os.path.isfile(load_path):
+            from openmodalpy.core.results import find_latest_result
+
+            latest = find_latest_result(self.results_dir, f"*_{getattr(self, 'analysis_type', 'spod')}.hdf5")
+            if latest:
+                load_path = latest
+                logger.info("[Auto-detect] Using available results file: %s", load_path)
+            else:
+                logger.error(
+                    "No results file found in %s matching '*_%s.hdf5'. Run the analysis or call save_results first.",
+                    self.results_dir,
+                    getattr(self, "analysis_type", "spod"),
+                )
+                return
+
+        res = read_results(load_path)
+        missing = [field for field in self._required_result_fields() if getattr(res, field, None) is None]
+        if missing:
+            raise KeyError(f"{load_path} is not a {name} result file: missing {', '.join(missing)}")
+        self._assign_loaded_results(res)
+        own_logger.info("%s results loaded.", name)
+
+    def _assign_loaded_results(self, res: Any) -> None:
+        """Assign loaded AnalysisResults to instance.
+
+        Default base implementation assigns standard fields (modes,
+        eigenvalues, time_coefficients, coordinates, weights, etc.).
+        Subclasses override to handle non-standard fields or post-processing.
+
+        Parameters
+        ----------
+        res
+            AnalysisResults object from read_results.
+        """
+        # Standard fields available in AnalysisResults.
+        if res.modes is not None:
+            self.modes = res.modes
+        if res.eigenvalues is not None:
+            self.eigenvalues = res.eigenvalues
+        if res.time_coefficients is not None:
+            self.time_coefficients = res.time_coefficients
+        if res.W is not None:
+            self.W = res.W
+        if res.temporal_mean is not None:
+            self.temporal_mean = res.temporal_mean
+
+        # Coordinates and metadata.
+        for coord_key in ("x", "y", "z"):
+            value = getattr(res, coord_key, None)
+            if value is not None:
+                self.data[coord_key] = value
+            elif coord_key in res.extra:
+                self.data[coord_key] = res.extra[coord_key]
+
+        # Metadata attributes.
+        if "dt" in res.attrs:
+            self.data["dt"] = res.attrs["dt"]
+        if "Ns" in res.attrs:
+            self.data["Ns"] = res.attrs["Ns"]
+        if "Nspace" in res.attrs:
+            self.data["Nspace"] = res.attrs["Nspace"]
+        if "Nx" in res.attrs:
+            self.data["Nx"] = int(res.attrs["Nx"])
+        if "Ny" in res.attrs:
+            self.data["Ny"] = int(res.attrs["Ny"])
+        if "Nz" in res.attrs:
+            self.data["Nz"] = int(res.attrs["Nz"])
+
+    def _ensure_figures_dir_exists(self) -> None:
+        """Create figures_dir if it does not exist (first plot write)."""
+        os.makedirs(self.figures_dir, exist_ok=True)
+
+    # Analysis-sequence seam
     # Analysis-sequence seam.
     # Subclasses declare their perform entry and whether Welch blocks precede
     # it; plotting policy lives in _plot_run. Both the library entry point and

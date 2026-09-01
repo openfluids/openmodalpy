@@ -50,6 +50,7 @@ from openmodalpy.core.config import (
     FIGURES_DIR_POD,
     RESULTS_DIR_POD,
 )
+from openmodalpy.core.results import AnalysisResults
 from openmodalpy.specs import display_name_for
 
 logger = logging.getLogger(__name__)
@@ -317,110 +318,13 @@ class PODAnalyzer(BaseAnalyzer):
             meta["energy_captured_fraction"] = float(self.energy_captured_fraction)
         return meta
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load POD modes, eigenvalues, and time coefficients from an HDF5 file."""
-        from openmodalpy.core.results import read_results
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """POD refuses a file that is not a POD result, and says which key is absent."""
+        return ("modes", "eigenvalues", "time_coefficients")
 
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-        load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading %s results from %s", display_name_for(self.analysis_type), load_path)
-        if not os.path.isfile(load_path):
-            # Try to auto-detect a results file for this variable and analysis type
-            from openmodalpy.core.results import find_latest_result
-
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if latest:
-                load_path = latest
-                logger.info("[Auto-detect] Using available results file: %s", load_path)
-            else:
-                logger.error(
-                    "No results file found for plotting in %s matching '*_%s.hdf5'. Run with --compute first.",
-                    self.results_dir,
-                    self.analysis_type,
-                )
-                return  # Or: raise FileNotFoundError("No POD results file found for plotting.")
-
-        res = read_results(load_path)
-        # Before the unified reader this indexed modes/eigenvalues directly, so a
-        # file that was not a POD result raised. Assigning only when present would
-        # turn that into empty arrays and a "results loaded" print, so keep it loud.
-        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            missing = [
-                n
-                for n, v in (
-                    ("modes", res.modes),
-                    ("eigenvalues", res.eigenvalues),
-                    ("time_coefficients", res.time_coefficients),
-                )
-                if v is None
-            ]
-            raise KeyError(
-                f"{load_path} is not a {display_name_for(self.analysis_type)} result file: missing {', '.join(missing)}"
-            )
-        self.modes = res.modes
-        self.eigenvalues = res.eigenvalues
-        self.time_coefficients = res.time_coefficients
-        if res.W is not None:
-            # Modes are (n_space, n_modes). Any other rank means the file
-            # carries no usable size, so leave the length unchecked.
-            n_space = int(res.modes.shape[0]) if res.modes is not None and res.modes.ndim == 2 else None
-            self.W = _as_spatial_weight_column(res.W, n_space)
-        if res.temporal_mean is not None:
-            self.temporal_mean = res.temporal_mean
-        for coord_key in ("x", "y", "z"):
-            value = getattr(res, coord_key, None)
-            if value is not None:
-                self.data[coord_key] = value
-            elif coord_key in res.extra:
-                self.data[coord_key] = res.extra[coord_key]
-        if "dt" in res.attrs:
-            self.data["dt"] = res.attrs["dt"]
-        if "n_snapshots" in res.attrs:
-            self.data["Ns"] = res.attrs["n_snapshots"]
-        if "Nspace" in res.attrs:
-            self.data["Nspace"] = res.attrs["Nspace"]
-        if "Nx" in res.attrs:
-            self.data["Nx"] = int(res.attrs["Nx"])
-        if "Ny" in res.attrs:
-            self.data["Ny"] = int(res.attrs["Ny"])
-        if "Nz" in res.attrs:
-            self.data["Nz"] = int(res.attrs["Nz"])
-        # Reset first: a file without these attrs means "unknown", and a
-        # stale total from an earlier run on other data would otherwise be
-        # used as the denominator with no "retained modes only" label.
-        self.total_energy = float("nan")
-        self.energy_captured_fraction = float("nan")
-        if "total_energy" in res.attrs:
-            self.total_energy = float(res.attrs["total_energy"])
-        if "energy_captured_fraction" in res.attrs:
-            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
-        # Cap may only fall to the loaded width — never rise, never slice modes.
-        # A file written before this was fixed can hold the 1-D empty default,
-        # which has no width to compare against.
-        if self.modes.ndim == 2:
-            self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
-        logger.info("%s results loaded.", display_name_for(self.analysis_type))
-
-    def save_results(self, filename: str | None = None) -> None:
-        """Save POD modes, eigenvalues, and time coefficients to an HDF5 file.
-
-        The results are saved in `self.results_dir`. If `filename` is None,
-        a simplified name is used (POD does not key on nfft/overlap).
-
-        Datasets (canonical names): modes, eigenvalues, time_coefficients,
-        coordinates, W, temporal_mean.
-        """
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            # Use a simplified name for POD as nfft/overlap are not primary params
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-
-        save_path = os.path.join(self.results_dir, filename)
-        logger.info("Saving %s results to %s", display_name_for(self.analysis_type), save_path)
-
-        datasets: dict = {
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return POD datasets and metadata to save."""
+        datasets: dict[str, Any] = {
             "modes": self.modes,
             "eigenvalues": self.eigenvalues,
             "time_coefficients": self.time_coefficients,
@@ -437,15 +341,78 @@ class PODAnalyzer(BaseAnalyzer):
             datasets["temporal_mean"] = self.temporal_mean
 
         attrs = self._get_metadata()
-        # Describe the file, not the request. An analyzer that never ran still
-        # holds the 1-D empty default, which has no second axis.
         attrs["n_modes_saved"] = self.modes.shape[1] if self.modes.ndim == 2 else 0
         attrs["n_snapshots"] = self.data.get("Ns", 0)
         attrs["Nspace"] = self.modes.shape[0]
-        write_results(save_path, datasets, attrs=attrs)
-        logger.info("%s results saved.", display_name_for(self.analysis_type))
+        return datasets, attrs
+
+    def load_results(self, filename: str | None = None) -> None:
+        """Load POD results and restore state."""
+        super().load_results(filename=filename)
+
+        from openmodalpy.core.results import read_results
+
+        if not filename:
+            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
+        load_path = os.path.join(self.results_dir, filename)
+
+        res = read_results(load_path)
+        # Validate required fields before accepting.
+        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
+            missing = [
+                n
+                for n, v in (
+                    ("modes", res.modes),
+                    ("eigenvalues", res.eigenvalues),
+                    ("time_coefficients", res.time_coefficients),
+                )
+                if v is None
+            ]
+            raise KeyError(f"{load_path} is not a {self.analysis_type} result file: missing {', '.join(missing)}")
+
+        # Cap mode count: if a file is older, it may have fewer modes than n_modes_save.
+        if self.modes.ndim == 2:
+            self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
+
+        # Capture energy metadata if present.
+        self.total_energy = float("nan")
+        self.energy_captured_fraction = float("nan")
+        if "total_energy" in res.attrs:
+            self.total_energy = float(res.attrs["total_energy"])
+        if "energy_captured_fraction" in res.attrs:
+            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
+
+    def save_results(self, filename: str | None = None) -> None:
+        """Save POD results using a simplified harmonized name."""
+        # POD has no primary Welch parameters, so use a simplified scheme.
+        if not filename:
+            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
+            # Temporarily override the analysis_type for make_result_filename compatibility.
+            saved_type = getattr(self, "analysis_type", None)
+            self.analysis_type = saved_type or "pod"
+
+        super().save_results(filename=filename)
+
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results and reshape W to column form."""
+        super()._assign_loaded_results(res)
+
+        if res.W is not None:
+            n_space = int(res.modes.shape[0]) if res.modes is not None and res.modes.ndim == 2 else None
+            self.W = _as_spatial_weight_column(res.W, n_space)
+
+        self.total_energy = float("nan")
+        self.energy_captured_fraction = float("nan")
+        if "total_energy" in res.attrs:
+            self.total_energy = float(res.attrs["total_energy"])
+        if "energy_captured_fraction" in res.attrs:
+            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
+
+        if self.modes.ndim == 2:
+            self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
 
     def plot_eigenvalues(self) -> None:
+        os.makedirs(self.figures_dir, exist_ok=True)
         """Plot the POD eigenvalue spectrum (energy vs. mode number).
 
         Shows the decay of energy (eigenvalues) with increasing mode number.
@@ -1325,6 +1292,7 @@ class PODAnalyzer(BaseAnalyzer):
         plt.title("Spatial Mode Orthogonality Check (Modes.T @ W @ Modes)")
         plt.xlabel("Mode Index")
         plt.ylabel("Mode Index")
+        os.makedirs(self.figures_dir, exist_ok=True)
         plot_filename = os.path.join(self.figures_dir, f"{self.data_root}_{self.analysis_type}_spatial_ortho_check.png")
         plt.savefig(plot_filename, dpi=FIG_DPI)
         plt.close()

@@ -48,7 +48,6 @@ from tqdm import tqdm
 
 from openmodalpy.core.base import (
     BaseAnalyzer,
-    _as_spatial_weight_column,
     _hdf5_write_mode,
     add_inset_colorbar,
     canonical_tie_groups,
@@ -69,6 +68,7 @@ from openmodalpy.core.config import (
     FIGURES_DIR_BSMD,
     RESULTS_DIR_BSMD,
 )
+from openmodalpy.core.results import AnalysisResults
 from openmodalpy.core.threads import apply_blas_limit
 
 logger = logging.getLogger(__name__)
@@ -811,13 +811,25 @@ class BSMDAnalyzer(BaseAnalyzer):
         return grid
 
     # Save triads, eigenvalues, modes, and weights to HDF5.
-    def save_results(self, filename: str | None = None) -> None:
-        """Save BSMD results (triads, eigenvalues, modes) to an HDF5 file.
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return BSMD datasets and metadata to save."""
+        datasets: dict[str, Any] = {
+            "triads": np.array(self.triads),
+            "eigenvalues": self.eigenvalues,
+            "modes1": self.modes1,
+            "modes2": self.modes2,
+            "x": self.data["x"],
+            "y": self.data["y"],
+            "W": self.W,
+        }
+        if "z" in self.data and self.data["z"] is not None:
+            datasets["z"] = self.data["z"]
+        if self.energy_map.size:
+            datasets["energy_map"] = self.energy_map
+        return datasets, self._get_metadata()
 
-        When the destination is the same path as the open FFT cache, the write
-        opens in append mode so ``FFTBlocks`` is preserved. Otherwise it
-        overwrites with mode ``"w"``.
-        """
+    def save_results(self, filename: str | None = None) -> None:
+        """Save BSMD results, preserving FFT cache if reusing its path."""
         from openmodalpy.core.results import write_results
 
         if filename is None:
@@ -835,39 +847,27 @@ class BSMDAnalyzer(BaseAnalyzer):
         )
         was_on_disk = self._qhat_on_disk
         if using_cache_file and self._qhat_file is not None:
-            # The FFT cache may already hold an open handle to this same path.
-            # Close it before updating the file in append mode.
+            # Close the cache file handle before updating it.
             self._qhat_file.close()
             self._qhat_file = None
             self._qhat_dataset = None
             self._qhat_on_disk = False
 
         file_mode = _hdf5_write_mode(results_path) if using_cache_file else "w"
-        datasets: dict = {
-            "triads": np.array(self.triads),
-            "eigenvalues": self.eigenvalues,
-            "modes1": self.modes1,
-            "modes2": self.modes2,
-            "x": self.data["x"],
-            "y": self.data["y"],
-            "W": self.W,
-        }
-        if "z" in self.data and self.data["z"] is not None:
-            datasets["z"] = self.data["z"]
-        if self.energy_map.size:
-            datasets["energy_map"] = self.energy_map
+        datasets, attrs = self._result_payload()
         try:
-            write_results(results_path, datasets, attrs=self._get_metadata(), mode=file_mode, compression=None)
+            logger.info("Saving BSMD results to %s", results_path)
+            write_results(results_path, datasets, attrs=attrs, mode=file_mode, compression=None)
         finally:
             # Restore the binding we dropped to avoid two handles on one path.
-            # The honest end state is the one we started with; if FFTBlocks is
-            # gone, _rebind_qhat_dataset clears the flag instead.
             if was_on_disk and using_cache_file:
                 self._rebind_qhat_dataset(qhat_cache_path)
-        logger.info("Results saved to %s", results_path)
+        logger.info("BSMD results saved to %s", results_path)
 
     def load_results(self, filename: str | None = None) -> None:
-        """Load BSMD results from an HDF5 file."""
+        """Load BSMD results and restore state."""
+        super().load_results(filename=filename)
+
         from openmodalpy.core.results import read_results
 
         if filename is None:
@@ -877,18 +877,9 @@ class BSMDAnalyzer(BaseAnalyzer):
             )
         else:
             load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading BSMD results from %s", load_path)
-        if not os.path.isfile(load_path):
-            from openmodalpy.core.results import find_latest_result
 
-            latest = find_latest_result(self.results_dir, "*_bsmd.hdf5")
-            if latest:
-                load_path = latest
-                logger.info("[Auto-detect] Using: %s", load_path)
-            else:
-                logger.error("No BSMD results file found in %s", self.results_dir)
-                return
         res = read_results(load_path)
+        # Validate conjugation stamp.
         stamp = res.attrs.get("bispectrum_conjugation")
         if stamp != "sum_frequency_conjugated":
             raise ValueError(
@@ -896,25 +887,23 @@ class BSMDAnalyzer(BaseAnalyzer):
                 "sum-frequency term was not conjugated; its eigenvalues and modes "
                 "are invalid. Recompute from the raw data."
             )
+
+        # BSMD-specific fields.
         self.triads = res.triads if res.triads is not None else np.array([])
-        self.eigenvalues = res.eigenvalues if res.eigenvalues is not None else np.array([])
         self.modes1 = res.modes1 if res.modes1 is not None else np.array([])
         self.modes2 = res.modes2 if res.modes2 is not None else np.array([])
         if res.energy_map is not None:
             self.energy_map = res.energy_map
+
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results and reshape W to column form."""
+        super()._assign_loaded_results(res)
+
         if res.W is not None:
-            # Modes are (n_triads, n_space). Any other rank means the file
-            # carries no usable size, so leave the length unchecked.
+            from openmodalpy.core.base import _as_spatial_weight_column
+
             n_space = int(res.modes1.shape[1]) if res.modes1 is not None and res.modes1.ndim == 2 else None
             self.W = _as_spatial_weight_column(res.W, n_space)
-        for coord_key in ("x", "y", "z"):
-            value = getattr(res, coord_key, None)
-            if value is not None:
-                self.data[coord_key] = value
-        for attr_key in ("dt", "Ns", "Nx", "Ny", "Nz", "nfft", "overlap"):
-            if attr_key in res.attrs:
-                self.data[attr_key] = res.attrs[attr_key]
-        logger.info("BSMD results loaded.")
 
     def _triad_plot_order(self, lambdas: NDArray[np.floating], valid_idx: NDArray[np.integer]) -> list[int]:
         """Canonical plot order of ``valid_idx`` triads: |lambda| descending, ties by triad tuple.

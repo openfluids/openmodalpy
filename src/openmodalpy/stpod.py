@@ -38,7 +38,6 @@ from fftkit import find_peaks, periodogram_rfft
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.base import (
     BaseAnalyzer,
-    _as_spatial_weight_column,
     get_fig_aspect_ratio,
     plot_modes_3d,
     reshape_mode_to_volume,
@@ -50,6 +49,7 @@ from openmodalpy.core.config import (
     FIGURES_DIR_STPOD,
     RESULTS_DIR_STPOD,
 )
+from openmodalpy.core.results import AnalysisResults
 
 logger = logging.getLogger(__name__)
 
@@ -313,19 +313,9 @@ class STPODAnalyzer(BaseAnalyzer):
             mode_frames[k, :] = self.extract_spatial_mode(mode_idx, k)
         return mode_frames
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save ST-POD results to HDF5 file."""
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            filename = (
-                f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_d{self.embedding_dim}_{self.analysis_type}.hdf5"
-            )
-
-        save_path = os.path.join(self.results_dir, filename)
-        logger.info("Saving ST-POD results to %s", save_path)
-
-        datasets: dict = {
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return ST-POD datasets and metadata to save."""
+        datasets: dict[str, Any] = {
             "modes": self.modes,
             "eigenvalues": self.eigenvalues,
             "time_coefficients": self.time_coefficients,
@@ -343,42 +333,25 @@ class STPODAnalyzer(BaseAnalyzer):
 
         attrs = self._get_metadata()
         attrs["embedding_dim"] = self.embedding_dim
-        # Describe the file, not the request. An analyzer that never ran still
-        # holds the 1-D empty default, which has no second axis.
         attrs["n_modes_saved"] = self.modes.shape[1] if self.modes.ndim == 2 else 0
         attrs["n_snapshots"] = self.data.get("Ns", 0)
         attrs["Nspace"] = self.modes.shape[0] // self.embedding_dim
-        write_results(save_path, datasets, attrs=attrs)
-        logger.info("ST-POD results saved.")
+        return datasets, attrs
 
-    def load_results(self, filename: Optional[str] = None) -> None:
-        """Load ST-POD results from HDF5 file."""
+    def load_results(self, filename: str | None = None) -> None:
+        """Load ST-POD results and restore state."""
+        super().load_results(filename=filename)
+
         from openmodalpy.core.results import read_results
 
         if not filename:
             filename = (
                 f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_d{self.embedding_dim}_{self.analysis_type}.hdf5"
             )
-
         load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading ST-POD results from %s", load_path)
-
-        if not os.path.isfile(load_path):
-            from openmodalpy.core.results import find_latest_result
-
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if latest:
-                load_path = latest
-                logger.info("[Auto-detect] Using: %s", load_path)
-            else:
-                logger.error("No results file found in %s", self.results_dir)
-                return
 
         res = read_results(load_path)
-        # Before the unified reader this indexed modes/eigenvalues directly, so a
-        # file that was not an ST-POD result raised. Assigning only when present
-        # would turn that into empty arrays and a "results loaded" print, so keep
-        # it loud.
+        # Validate required fields.
         if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
             missing = [
                 n
@@ -390,58 +363,50 @@ class STPODAnalyzer(BaseAnalyzer):
                 if v is None
             ]
             raise KeyError(f"{load_path} is not an ST-POD result file: missing {', '.join(missing)}")
-        self.modes = res.modes
-        self.eigenvalues = res.eigenvalues
-        self.time_coefficients = res.time_coefficients
-        if res.W is not None:
-            n_space = None
-            embedding_dim = res.attrs.get("embedding_dim")
-            # Modes are (d * n_space, n_modes) with d the embedding dimension.
-            # Any other rank, or a missing d, means the file carries no usable
-            # size, so leave the length unchecked.
-            if res.modes is not None and res.modes.ndim == 2 and embedding_dim is not None and int(embedding_dim) > 0:
-                n_space = int(res.modes.shape[0]) // int(embedding_dim)
-            self.W = _as_spatial_weight_column(res.W, n_space)
-        if res.temporal_mean is not None:
-            self.temporal_mean = res.temporal_mean
-        for coord_key in ("x", "y", "z"):
-            value = getattr(res, coord_key, None)
-            if value is not None:
-                self.data[coord_key] = value
-            elif coord_key in res.extra:
-                self.data[coord_key] = res.extra[coord_key]
+
+        # Restore embedding_dim.
         if "embedding_dim" in res.attrs:
             self.embedding_dim = res.attrs["embedding_dim"]
-        if "dt" in res.attrs:
-            self.data["dt"] = res.attrs["dt"]
-        if "n_snapshots" in res.attrs:
-            self.data["Ns"] = res.attrs["n_snapshots"]
-        if "Nspace" in res.attrs:
-            self.data["Nspace"] = res.attrs["Nspace"]
-        if "Nx" in res.attrs:
-            self.data["Nx"] = int(res.attrs["Nx"])
-        if "Ny" in res.attrs:
-            self.data["Ny"] = int(res.attrs["Ny"])
-        if "Nz" in res.attrs:
-            self.data["Nz"] = int(res.attrs["Nz"])
-        # Reset first: a file without these attrs means "unknown", and a
-        # stale total from an earlier run on other data would otherwise be
-        # used as the denominator with no "retained modes only" label.
+
+        # Restore energy tracking metadata.
         self.total_energy = float("nan")
         self.energy_captured_fraction = float("nan")
         if "total_energy" in res.attrs:
             self.total_energy = float(res.attrs["total_energy"])
         if "energy_captured_fraction" in res.attrs:
             self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
-        # Cap may only fall to the loaded width — never rise, never slice modes.
-        # A file written before this was fixed can hold the 1-D empty default,
-        # which has no width to compare against.
+
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results, restore embedding_dim, and reshape W."""
+        # Restore embedding_dim before using it.
+        if "embedding_dim" in res.attrs:
+            self.embedding_dim = res.attrs["embedding_dim"]
+
+        super()._assign_loaded_results(res)
+
+        if res.W is not None:
+            n_space = None
+            embedding_dim = self.embedding_dim
+            if res.modes is not None and res.modes.ndim == 2 and embedding_dim is not None and int(embedding_dim) > 0:
+                n_space = int(res.modes.shape[0]) // int(embedding_dim)
+            from openmodalpy.core.base import _as_spatial_weight_column
+
+            self.W = _as_spatial_weight_column(res.W, n_space)
+
+        # Cap n_modes_save to actual modes available.
         if self.modes.ndim == 2:
             self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
 
-        logger.info("ST-POD results loaded.")
+    def save_results(self, filename: str | None = None) -> None:
+        """Save ST-POD results using embedding-aware filename."""
+        if not filename:
+            filename = (
+                f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_d{self.embedding_dim}_{self.analysis_type}.hdf5"
+            )
+        super().save_results(filename=filename)
 
     def plot_eigenvalues(self) -> None:
+        os.makedirs(self.figures_dir, exist_ok=True)
         """Plot the ST-POD eigenvalue spectrum."""
         if self.eigenvalues.size == 0:
             logger.warning("No eigenvalues to plot. Run perform_stpod() first.")

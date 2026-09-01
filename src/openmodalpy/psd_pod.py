@@ -25,7 +25,6 @@ from fftkit import rfftfreq
 import openmodalpy.core.decomposition as decomposition
 from openmodalpy.core.base import (
     BaseAnalyzer,
-    _as_spatial_weight_column,
     add_inset_colorbar,
     get_fig_aspect_ratio,
     get_robust_clim,
@@ -42,6 +41,7 @@ from openmodalpy.core.config import (
     WINDOW_NORM,
     WINDOW_TYPE,
 )
+from openmodalpy.core.results import AnalysisResults
 
 logger = logging.getLogger(__name__)
 
@@ -193,24 +193,9 @@ class PSDPODAnalyzer(BaseAnalyzer):
             "n_fourier_realizations": int(self.n_fourier_realizations),
         }
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Write modes, eigenvalues, time coefficients, freq, st and W to HDF5."""
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                self.analysis_type,
-            )
-        save_path = os.path.join(self.results_dir, filename)
-        os.makedirs(self.results_dir, exist_ok=True)
-
-        attrs = self._get_metadata()
-        attrs["analysis_type"] = "psd_pod"
-        datasets: dict = {
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return PSD-POD datasets and metadata to save."""
+        datasets: dict[str, Any] = {
             "eigenvalues": np.asarray(self.eigenvalues),
             "modes": self.modes,
             "time_coefficients": self.time_coefficients,
@@ -219,16 +204,27 @@ class PSDPODAnalyzer(BaseAnalyzer):
         }
         if self.W.size > 0:
             datasets["W"] = self.W
-        write_results(
-            save_path,
-            datasets,
-            attrs=attrs,
-        )
-        self.results_path = save_path
-        logger.info("Saved PSD-POD results to %s", save_path)
+        attrs = self._get_metadata()
+        attrs["analysis_type"] = "psd_pod"
+        return datasets, attrs
+
+    def save_results(self, filename: str | None = None) -> None:
+        """Save PSD-POD results using the harmonized filename."""
+        if not filename:
+            filename = make_result_filename(
+                self.data_root,
+                self.nfft,
+                self.overlap,
+                self.data.get("Ns", 0),
+                self.analysis_type,
+            )
+        super().save_results(filename=filename)
+        self.results_path = os.path.join(self.results_dir, filename)
 
     def load_results(self, filename: str | None = None) -> None:
-        """Load modes, eigenvalues, time coefficients, freq, st and W from HDF5."""
+        """Load PSD-POD results and restore state."""
+        super().load_results(filename=filename)
+
         from openmodalpy.core.results import read_results
 
         if not filename:
@@ -240,47 +236,35 @@ class PSDPODAnalyzer(BaseAnalyzer):
                 self.analysis_type,
             )
         load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading PSD-POD results from %s", load_path)
-        if not os.path.isfile(load_path):
-            from openmodalpy.core.results import find_latest_result
-
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if latest:
-                load_path = latest
-                logger.info("[Auto-detect] Using available results file: %s", load_path)
-            else:
-                logger.error("No PSD-POD results file found in %s. Run with --compute first.", self.results_dir)
-                return
 
         res = read_results(load_path)
-        # Same loud-failure policy as the POD/SPOD loaders: a file that is not a
-        # PSD-POD result must raise, not turn into empty arrays and a loaded print.
+        # Validate required fields.
         if res.modes is None or res.eigenvalues is None:
             missing = [n for n, v in (("modes", res.modes), ("eigenvalues", res.eigenvalues)) if v is None]
             raise KeyError(f"{load_path} is not a PSD-POD result file: missing {', '.join(missing)}")
-        self.modes = res.modes
-        self.eigenvalues = res.eigenvalues
-        if res.time_coefficients is not None:
-            self.time_coefficients = res.time_coefficients
+
+        # PSD-POD-specific fields.
         if res.freq is not None:
             self.freq = res.freq
         if res.st is not None:
             self.St = res.st
+
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results and reshape W to column form."""
+        super()._assign_loaded_results(res)
+
         if res.W is not None:
-            # Modes are (n_space, n_modes). Any other rank means the file
-            # carries no usable size, so leave the length unchecked.
-            n_space = int(res.modes.shape[0]) if res.modes.ndim == 2 else None
+            from openmodalpy.core.base import _as_spatial_weight_column
+
+            n_space = int(res.modes.shape[0]) if res.modes is not None and res.modes.ndim == 2 else None
             self.W = _as_spatial_weight_column(res.W, n_space)
-        for attr_key in ("dt", "Ns", "Nx", "Ny", "Nz"):
-            if attr_key in res.attrs:
-                self.data[attr_key] = res.attrs[attr_key]
-        logger.info("PSD-POD results loaded.")
 
     def _figure_prefix(self, run_id: str | None) -> str:
         """Figure-name stem: the CLI run id when given, the dataset root otherwise."""
         return run_id if run_id is not None else self.data_root
 
     def plot_eigenvalues(self, run_id: str | None = None) -> list[Path]:
+        os.makedirs(self.figures_dir, exist_ok=True)
         """Plot the pooled-ensemble eigenvalue spectrum on a log axis."""
         saved: list[Path] = []
         eigenvalues = np.asarray(self.eigenvalues)

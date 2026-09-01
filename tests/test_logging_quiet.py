@@ -467,15 +467,17 @@ def test_mpod_console_labels_say_mpod_not_pod(tmp_path, caplog, mpod_kw):
 def test_mpod_load_results_labels_say_mpod_not_pod(tmp_path, caplog):
     """The two load_results notices follow analysis_type; an mPOD load says mPOD.
 
-    Pins pod.py's 'Loading %s results from %s' and '%s results loaded.' lines.
-    Hardcoding either one back to POD turns this red.
+    Pins the base's 'Loading %s results from %s' and '%s results loaded.'
+    lines. Hardcoding either one back to POD turns this red. The capture is on
+    the ``openmodalpy`` parent, because the loader now logs on the logger of
+    the analyzer's own module, and the parent sees every one of them.
     """
     analyzer = _make_mpod(tmp_path, _synthetic_data())
     analyzer.load_and_preprocess()
     analyzer.perform_mpod()
     analyzer.save_results("mpod_load_labels.hdf5")
 
-    with caplog.at_level(logging.INFO, logger="openmodalpy.pod"):
+    with caplog.at_level(logging.INFO, logger="openmodalpy"):
         analyzer.load_results("mpod_load_labels.hdf5")
 
     info_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]

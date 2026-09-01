@@ -37,7 +37,6 @@ from tqdm import tqdm
 
 from openmodalpy.core.base import (
     BaseAnalyzer,
-    _as_spatial_weight_column,
     _write_qhat_stamp,
     add_inset_colorbar,
     format_mode_title,
@@ -59,6 +58,7 @@ from openmodalpy.core.config import (
     WINDOW_TYPE,
 )
 from openmodalpy.core.decomposition import spod_single_frequency
+from openmodalpy.core.results import AnalysisResults
 
 logger = logging.getLogger(__name__)
 
@@ -400,26 +400,9 @@ class SPODAnalyzer(BaseAnalyzer):
     ############################################################
     # Results Handling                                         #
     ############################################################
-    def save_results(self, filename: str | None = None) -> None:
-        """Save SPOD modes, eigenvalues, frequencies, and Strouhal numbers.
-
-        Uses mode ``"w"`` and rewrites ``FFTBlocks`` from ``self.qhat`` when
-        present. The previous append-with-manual-delete path existed so that a
-        prior FFT cache on the same path would survive; at save time ``qhat`` is
-        already in memory, so a full rewrite is enough and matches the other
-        analyzers.
-        """
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root, self.nfft, self.overlap, self.data.get("Ns", 0), self.analysis_type
-            )
-        save_path = os.path.join(self.results_dir, filename)
-        os.makedirs(self.results_dir, exist_ok=True)
-
-        logger.info("Saving SPOD results to %s", save_path)
-        datasets: dict = {
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return SPOD datasets and metadata to save."""
+        datasets: dict[str, Any] = {
             "eigenvalues": self.eigenvalues,
             "modes": self.modes,
             "freq": self.freq,
@@ -437,17 +420,32 @@ class SPODAnalyzer(BaseAnalyzer):
             datasets["y"] = self.data["y"]
         if self.data.get("z") is not None:
             datasets["z"] = self.data["z"]
+        return datasets, self._get_metadata()
 
-        write_results(save_path, datasets, attrs=self._get_metadata(), mode="w")
-        # Full rewrite clears the FFT-cache stamp; re-apply so a later run can
-        # reuse FFTBlocks without recomputing.
+    def save_results(self, filename: str | None = None) -> None:
+        """Save SPOD results with FFT cache stamp.
+
+        Calls parent to write datasets and attrs, then reopens with append
+        mode to restore the FFT cache stamp for reuse in subsequent runs.
+        """
+        from openmodalpy.core.results import write_results
+
+        if not filename:
+            filename = make_result_filename(
+                self.data_root, self.nfft, self.overlap, self.data.get("Ns", 0), self.analysis_type
+            )
+        save_path = os.path.join(self.results_dir, filename)
+        os.makedirs(self.results_dir, exist_ok=True)
+
+        logger.info("Saving SPOD results to %s", save_path)
+        datasets, attrs = self._result_payload()
+        write_results(save_path, datasets, attrs=attrs, mode="w")
+
+        # Reapply the FFT-cache stamp after full rewrite.
         if self.qhat is not None and self.qhat.size > 0 and self.data.get("q") is not None:
             with h5py.File(save_path, "a") as handle:
                 _write_qhat_stamp(handle, self, self.data["q"])
         elif self.qhat is not None and self.qhat.size > 0 and self.data.get("q") is None:
-            # Blocks were written, but the stamp is derived from the source
-            # snapshots `q`. Without `q` in memory the next run cannot validate
-            # the cache and will recompute the blocks.
             logger.warning(
                 "FFT blocks saved to %s without a cache stamp because source "
                 "snapshots are not in memory; the next run will recompute them",
@@ -456,7 +454,9 @@ class SPODAnalyzer(BaseAnalyzer):
         logger.info("SPOD results saved to %s", save_path)
 
     def load_results(self, filename: str | None = None) -> None:
-        """Load SPOD results from an HDF5 file."""
+        """Load SPOD results and restore state."""
+        super().load_results(filename=filename)
+
         from openmodalpy.core.results import read_results
 
         if not filename:
@@ -464,58 +464,38 @@ class SPODAnalyzer(BaseAnalyzer):
                 self.data_root, self.nfft, self.overlap, self.data.get("Ns", 0), self.analysis_type
             )
         load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading SPOD results from %s", load_path)
-        if not os.path.isfile(load_path):
-            from openmodalpy.core.results import find_latest_result
-
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if latest:
-                load_path = latest
-                logger.info("[Auto-detect] Using: %s", load_path)
-            else:
-                logger.error("No SPOD results file found in %s", self.results_dir)
-                return
 
         res = read_results(load_path)
-        # Before the unified reader this indexed the eigenvalue dataset directly, so a
-        # file that was not a SPOD result raised. Assigning only when present would turn
-        # that into empty arrays and a "results loaded" print, so keep it loud.
+        # Validate required fields.
         if res.modes is None or res.eigenvalues is None:
             missing = [n for n, v in (("modes", res.modes), ("eigenvalues", res.eigenvalues)) if v is None]
             raise KeyError(f"{load_path} is not a SPOD result file: missing {', '.join(missing)}")
-        if res.eigenvalues is not None:
-            self.eigenvalues = res.eigenvalues
-        if res.modes is not None:
-            self.modes = res.modes
-        if res.time_coefficients is not None:
-            self.time_coefficients = res.time_coefficients
+
+        # SPOD-specific fields.
         if res.freq is not None:
             self.freq = res.freq
         if res.st is not None:
             self.St = res.st
         if res.FFTBlocks is not None:
             self.qhat = res.FFTBlocks
-        if res.W is not None:
-            # Modes are (n_freq, n_space, n_modes_kept). Any other rank means the
-            # file carries no usable size, so leave the length unchecked.
-            n_space = int(res.modes.shape[1]) if res.modes is not None and res.modes.ndim == 3 else None
-            self.W = _as_spatial_weight_column(res.W, n_space)
-        for coord_key in ("x", "y", "z"):
-            value = getattr(res, coord_key, None)
-            if value is not None:
-                self.data[coord_key] = value
-            elif coord_key in res.extra:
-                self.data[coord_key] = res.extra[coord_key]
-        for attr_key in ("dt", "Ns", "Nx", "Ny", "Nz", "nfft", "overlap"):
-            if attr_key in res.attrs:
-                self.data[attr_key] = res.attrs[attr_key]
+
+        # Update fs from dt if present.
         if "dt" in self.data:
             self.fs = 1.0 / self._require_dt()
-        logger.info("SPOD results loaded.")
 
     ############################################################
     # Main Analysis Pipeline Orchestration                     #
     ############################################################
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results and reshape W to column form."""
+        super()._assign_loaded_results(res)
+
+        if res.W is not None:
+            from openmodalpy.core.base import _as_spatial_weight_column
+
+            n_space = int(res.modes.shape[1]) if res.modes is not None and res.modes.ndim == 3 else None
+            self.W = _as_spatial_weight_column(res.W, n_space)
+
     @staticmethod
     def _run_plot(method: Callable[..., None], options: dict | None) -> None:
         """Call *method* with *options* unless explicitly disabled."""
@@ -531,6 +511,7 @@ class SPODAnalyzer(BaseAnalyzer):
     _needs_fft_blocks = True
 
     def _plot_run(self, run_id: str | None = None) -> None:
+        os.makedirs(self.figures_dir, exist_ok=True)
         """Default figures after run_analysis — the CLI spod set.
 
         Finer per-plot enable/disable control stays available through

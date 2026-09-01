@@ -97,62 +97,37 @@ class ToyAnalyzer(BaseAnalyzer):
 
     _perform_name = "perform_toy"
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save toy results to HDF5."""
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-        save_path = os.path.join(self.results_dir, filename)
-        logger.info("Saving results to %s", save_path)
-
-        write_results(
-            save_path,
-            {
-                "modes": self.modes,
-                "eigenvalues": self.eigenvalues,
-                "time_coefficients": self.time_coefficients,
-                "x": self.data["x"],
-                "y": self.data["y"],
-                "W": self.W,
-            },
-            attrs={
-                "analysis_type": self.analysis_type,
-                "n_modes_save": self.n_modes_save,
-                "nfft": self.nfft,
-                "overlap": self.overlap,
-                "nblocks": self.nblocks,
-                "fs": self.fs,
-            },
-        )
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return toy analyzer datasets and metadata to save."""
+        datasets: dict[str, Any] = {
+            "modes": self.modes,
+            "eigenvalues": self.eigenvalues,
+            "time_coefficients": self.time_coefficients,
+            "x": self.data["x"],
+            "y": self.data["y"],
+            "W": self.W,
+        }
+        return datasets, self._get_metadata()
 
     def load_results(self, filename: str | None = None) -> None:
-        """Load toy results from HDF5."""
+        """Load toy analyzer results."""
+        super().load_results(filename=filename)
+
         from openmodalpy.core.results import read_results
 
         if not filename:
             filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
         load_path = os.path.join(self.results_dir, filename)
-        logger.info("Loading %s results from %s", display_name_for(self.analysis_type), load_path)
-
-        if not os.path.isfile(load_path):
-            from openmodalpy.core.results import find_latest_result
-
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if not latest:
-                logger.error("No results file found for %s", self.analysis_type)
-                return
-            load_path = latest
 
         res = read_results(load_path)
         if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            logger.error("Missing required fields in results file")
-            return
+            raise KeyError(f"{load_path} is not a toy analyzer result file")
 
-        self.modes = np.asarray(res.modes, dtype=float)
-        self.eigenvalues = np.asarray(res.eigenvalues, dtype=float)
-        self.time_coefficients = np.asarray(res.time_coefficients, dtype=float)
-        logger.info("%s results loaded.", display_name_for(self.analysis_type))
+    def save_results(self, filename: str | None = None) -> None:
+        """Save toy analyzer results using the harmonized filename."""
+        if not filename:
+            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
+        super().save_results(filename=filename)
 
     def _plot_run(self, run_id: str | None = None) -> None:
         """Minimal plot for the toy analyzer."""

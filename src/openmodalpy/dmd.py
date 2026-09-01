@@ -23,6 +23,8 @@ from typing import Any, Literal, Optional
 
 import matplotlib.pyplot as plt
 
+from openmodalpy.core.results import AnalysisResults
+
 logger = logging.getLogger(__name__)
 
 # Suppress contour warnings when no levels can be plotted
@@ -504,20 +506,9 @@ class DMDAnalyzer(BaseAnalyzer):
             "dmd_embedding_dim": embedding_dim,
         }
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save DMD results to an HDF5 file."""
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                self.analysis_type,
-            )
-        path = os.path.join(self.results_dir, filename)
-        datasets: dict = {
+    def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return DMD datasets and metadata to save."""
+        datasets: dict[str, Any] = {
             "eigenvalues": self.eigenvalues,
             "modes": self.modes,
             "time_coefficients": self.time_coefficients,
@@ -529,10 +520,52 @@ class DMDAnalyzer(BaseAnalyzer):
             datasets["omega"] = self.omega
         if "z" in self.data and self.data["z"] is not None:
             datasets["z"] = self.data["z"]
-        write_results(path, datasets, attrs=self._get_metadata())
-        logger.info("DMD results saved to %s", path)
+        return datasets, self._get_metadata()
 
-    _perform_name = "perform_dmd"
+    def load_results(self, filename: str | None = None) -> None:
+        """Load DMD results and restore state."""
+        super().load_results(filename=filename)
+
+        from openmodalpy.core.results import read_results
+
+        if not filename:
+            filename = make_result_filename(
+                self.data_root,
+                self.nfft,
+                self.overlap,
+                self.data.get("Ns", 0),
+                self.analysis_type,
+            )
+        path = os.path.join(self.results_dir, filename)
+
+        res = read_results(path)
+        # Validate required fields.
+        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
+            missing = [
+                n
+                for n, v in (
+                    ("modes", res.modes),
+                    ("eigenvalues", res.eigenvalues),
+                    ("time_coefficients", res.time_coefficients),
+                )
+                if v is None
+            ]
+            raise KeyError(f"{path} is not a DMD result file: missing {', '.join(missing)}")
+
+        # Load amplitudes (backward compatible).
+        if res.amplitudes is not None:
+            self.amplitudes = res.amplitudes
+        else:
+            self.amplitudes = np.abs(self.eigenvalues)
+
+        # Load continuous-time eigenvalues if present.
+        if res.omega is not None:
+            self.omega = res.omega
+
+        # Restore DMD configuration from metadata.
+        self._dmd_method = str(res.attrs.get("dmd_method", "ls"))
+        self._dmd_embedding_dim = int(res.attrs.get("dmd_embedding_dim", 1))
+        self._dmd_named_variant = str(res.attrs.get("dmd_named_variant", "dmd"))
 
     def _plot_run(self, run_id: str | None = None) -> None:
         """Default figures after run_analysis — the CLI dmd set.
@@ -546,10 +579,16 @@ class DMDAnalyzer(BaseAnalyzer):
         self.plot_time_coefficients(n_coeffs_to_plot=min(2, self.n_modes_save))
         self.plot_cumulative_energy()
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load DMD results from an HDF5 file."""
-        from openmodalpy.core.results import read_results
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results and cap n_modes_save."""
+        super()._assign_loaded_results(res)
 
+        # Cap n_modes_save to actual modes available (for narrow files loaded into wide cap).
+        n_modes_available = self.modes.shape[1] if self.modes.ndim >= 2 else self.modes.size
+        self.n_modes_save = min(self.n_modes_save, n_modes_available)
+
+    def save_results(self, filename: str | None = None) -> None:
+        """Save DMD results using the harmonized filename."""
         if not filename:
             filename = make_result_filename(
                 self.data_root,
@@ -558,74 +597,7 @@ class DMDAnalyzer(BaseAnalyzer):
                 self.data.get("Ns", 0),
                 self.analysis_type,
             )
-        path = os.path.join(self.results_dir, filename)
-
-        if not os.path.exists(path):
-            # Try to auto-detect a results file for this variable and analysis type
-            from openmodalpy.core.results import find_latest_result
-
-            latest = find_latest_result(self.results_dir, f"*_{self.analysis_type}.hdf5")
-            if latest:
-                path = latest
-                logger.info("[Auto-detect] Using available results file: %s", path)
-            else:
-                logger.error(
-                    "No results file found for plotting in %s matching '*_%s.hdf5'. Run with --compute first.",
-                    self.results_dir,
-                    self.analysis_type,
-                )
-                return  # Or: raise FileNotFoundError("No DMD results file found for plotting.")
-
-        res = read_results(path)
-        # Before the unified reader this indexed modes/eigenvalues directly, so a
-        # file that was not a DMD result raised. Assigning only when present would
-        # turn that into empty arrays and a "results loaded" print, so keep it loud.
-        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            missing = [
-                n
-                for n, v in (
-                    ("modes", res.modes),
-                    ("eigenvalues", res.eigenvalues),
-                    ("time_coefficients", res.time_coefficients),
-                )
-                if v is None
-            ]
-            raise KeyError(f"{path} is not a DMD result file: missing {', '.join(missing)}")
-        self.eigenvalues = res.eigenvalues
-        self.modes = res.modes
-        self.time_coefficients = res.time_coefficients
-        # Load amplitudes if available (backward compatibility)
-        if res.amplitudes is not None:
-            self.amplitudes = res.amplitudes
-        else:
-            self.amplitudes = np.abs(self.eigenvalues)
-        # Load continuous-time eigenvalues if available
-        if res.omega is not None:
-            self.omega = res.omega
-        # Reader already decodes attrs; keep the same defaults as the old helper.
-        self._dmd_method = str(res.attrs["dmd_method"] if "dmd_method" in res.attrs else "ls")
-        self._dmd_embedding_dim = int(res.attrs["dmd_embedding_dim"] if "dmd_embedding_dim" in res.attrs else 1)
-        self._dmd_named_variant = str(res.attrs["dmd_named_variant"] if "dmd_named_variant" in res.attrs else "dmd")
-        for coord_key in ("x", "y", "z"):
-            value = getattr(res, coord_key, None)
-            if value is not None:
-                self.data[coord_key] = value
-            elif coord_key in res.extra:
-                self.data[coord_key] = res.extra[coord_key]
-        if "dt" in res.attrs:
-            self.data["dt"] = res.attrs["dt"]
-        if "Ns" in res.attrs:
-            self.data["Ns"] = int(res.attrs["Ns"])
-        if "Nx" in res.attrs:
-            self.data["Nx"] = int(res.attrs["Nx"])
-        if "Ny" in res.attrs:
-            self.data["Ny"] = int(res.attrs["Ny"])
-        if "Nz" in res.attrs:
-            self.data["Nz"] = int(res.attrs["Nz"])
-        # eigenvalues is the mode-count authority and is always 1-D,
-        # so this reads a width even from an empty file.
-        self.n_modes_save = min(self.n_modes_save, len(self.eigenvalues))
-        logger.info("DMD results loaded from %s", path)
+        super().save_results(filename=filename)
 
     def _mode_freq(self, eigvals: np.ndarray) -> np.ndarray | None:
         """Return mode frequencies in Hz, or ``None`` when ``dt`` is unusable.
@@ -646,7 +618,10 @@ class DMDAnalyzer(BaseAnalyzer):
             return None
         return np.angle(eigvals) / (2 * np.pi * dt_f)
 
+    _perform_name = "perform_dmd"
+
     def plot_eigenvalues(self) -> None:
+        os.makedirs(self.figures_dir, exist_ok=True)
         """Plot DMD eigenvalues in the complex plane."""
         if self.eigenvalues.size == 0:
             logger.warning("No eigenvalues to plot.")
