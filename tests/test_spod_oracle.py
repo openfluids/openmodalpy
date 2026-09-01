@@ -24,6 +24,13 @@ only the total energy at this bin would stay green; that is why each
 eigenvalue is asserted on its own. Every tone sits on an integer bin so energy
 does not leak, and the two occupied bins are two apart so window side lobes
 cannot mix them.
+
+The rank-2 pair at ``K_BIN`` is a ZERO-OVERLAP property. The phase ramp that
+splits it is a jump at each block boundary. A zero-overlap block never
+crosses that boundary; an overlapped block does, and the jump smears the
+pair's energy across every bin. The pair does not survive overlapped blocks,
+and that is not a library fault. The overlapped path below is checked with a
+single tone per bin instead, where no ramp and no boundary jump exist.
 """
 
 from __future__ import annotations
@@ -73,14 +80,15 @@ _POWER_NORM_FACTOR = {
 }
 
 
-def _relative_tolerance() -> float:
+def _relative_tolerance(nblocks: int = NBLOCKS) -> float:
     """Relative round-off bound for the block FFT plus the block Gram.
 
-    The block FFT sums ``nfft`` terms and the Gram sums ``nblocks``, so
+    The block FFT sums ``nfft`` terms and the Gram sums ``nblocks`` terms, so
     relative round-off goes like ``(nfft + nblocks) * eps``. Observed error
-    is about 2 eps, so this bound carries roughly 13x margin.
+    is about 2 eps, so this bound carries roughly 13x margin. Pass the real
+    block count when overlap has changed it away from the module default.
     """
-    return (NFFT + NBLOCKS) * float(np.finfo(float).eps)
+    return (NFFT + nblocks) * float(np.finfo(float).eps)
 
 
 def _dst(*, length: float = 1.0, velocity: float = 1.0) -> float:
@@ -123,6 +131,33 @@ def _manufactured_field() -> dict:
     }
 
 
+def _steady_tone_field() -> dict:
+    """One steady tone at ``K_BIN`` on ``PHI1``, one at ``K_BIN2`` on ``PHI3``.
+
+    ``_manufactured_field`` adds a per-block phase ramp to split a rank-2
+    pair. That ramp is a jump at each block boundary. This field carries no
+    ramp, so it has no boundary jump, and the closed form holds at any
+    overlap.
+    """
+    ns = NBLOCKS * NFFT
+    q = np.zeros((ns, N_SPACE))
+    for block in range(NBLOCKS):
+        t = np.arange(NFFT)
+        sl = slice(block * NFFT, (block + 1) * NFFT)
+        q[sl] = A1 * np.outer(np.cos(2.0 * np.pi * K_BIN * t / NFFT), PHI1) + A3 * np.outer(
+            np.cos(2.0 * np.pi * K_BIN2 * t / NFFT), PHI3
+        )
+    return {
+        "q": q,
+        "x": np.arange(N_SPACE, dtype=float),
+        "y": np.array([0.0]),
+        "dt": DT,
+        "Nx": N_SPACE,
+        "Ny": 1,
+        "Ns": ns,
+    }
+
+
 def _run_spod(
     tmp_path: Path,
     *,
@@ -131,13 +166,19 @@ def _run_spod(
     characteristic_length: float | None = None,
     characteristic_velocity: float | None = None,
     file_path: str = "spod_oracle",
-) -> np.ndarray:
-    """Drive ``SPODAnalyzer`` end to end; cache lands under ``tmp_path``."""
-    field = _manufactured_field()
+    overlap: float = 0.0,
+    field: dict | None = None,
+) -> tuple[np.ndarray, int]:
+    """Drive ``SPODAnalyzer`` end to end; cache lands under ``tmp_path``.
+
+    Returns the eigenvalues and the block count the analyzer actually used,
+    so a caller can check that ``overlap`` changed the block count.
+    """
+    field = field if field is not None else _manufactured_field()
     analyzer = SPODAnalyzer(
         file_path=file_path,
         nfft=NFFT,
-        overlap=0.0,
+        overlap=overlap,
         window_type=window_type,
         window_norm=window_norm,
         results_dir=str(tmp_path),
@@ -154,7 +195,7 @@ def _run_spod(
     analyzer.load_and_preprocess()
     analyzer.compute_fft_blocks()
     analyzer.perform_spod()
-    return np.asarray(analyzer.eigenvalues)
+    return np.asarray(analyzer.eigenvalues), analyzer.nblocks
 
 
 @pytest.mark.parametrize("window_type", _WINDOWS)
@@ -166,7 +207,7 @@ def test_amplitude_norm_eigenvalues_match_closed_form(tmp_path: Path, window_typ
     a second bin with a different amplitude stops one lucky frequency carrying
     the test.
     """
-    lam = _run_spod(tmp_path, window_type=window_type, window_norm="amplitude")
+    lam, _ = _run_spod(tmp_path, window_type=window_type, window_norm="amplitude")
     dst = _dst()
     rtol = _relative_tolerance()
     want1 = _expected_lambda(A1, dst)
@@ -199,7 +240,7 @@ def test_power_norm_energy_matches_window_factor(tmp_path: Path, window_type: st
     normalisation error. Measured that directly -- the ratio-only version of
     this test passed under all three library mutations the gate applies.
     """
-    lam = _run_spod(tmp_path, window_type=window_type, window_norm="power")
+    lam, _ = _run_spod(tmp_path, window_type=window_type, window_norm="power")
     rtol = _relative_tolerance()
 
     factor = _POWER_NORM_FACTOR[window_type]
@@ -216,7 +257,7 @@ def test_eigenvalues_scale_with_u_over_l(tmp_path: Path) -> None:
     with ``U/L``. This is a metamorphic relation, not a restatement of the
     closed form at a second pair of scales.
     """
-    lam_ref = _run_spod(
+    lam_ref, _ = _run_spod(
         tmp_path,
         window_type="boxcar",
         window_norm="amplitude",
@@ -231,7 +272,7 @@ def test_eigenvalues_scale_with_u_over_l(tmp_path: Path) -> None:
     )
     rtol = _relative_tolerance()
     for length, velocity in cases:
-        lam = _run_spod(
+        lam, _ = _run_spod(
             tmp_path,
             window_type="boxcar",
             window_norm="amplitude",
@@ -244,3 +285,39 @@ def test_eigenvalues_scale_with_u_over_l(tmp_path: Path) -> None:
         # are round-off and some are already clamped to zero.
         np.testing.assert_allclose(lam[K_BIN, :2], lam_ref[K_BIN, :2] * scale, rtol=rtol, atol=0.0)
         np.testing.assert_allclose(lam[K_BIN2, :1], lam_ref[K_BIN2, :1] * scale, rtol=rtol, atol=0.0)
+
+
+@pytest.mark.parametrize("window_type", _WINDOWS)
+@pytest.mark.parametrize("window_norm", ("amplitude", "power"))
+@pytest.mark.parametrize("overlap", (0.25, 0.5, 0.75))
+def test_overlapped_blocks_match_closed_form(
+    tmp_path: Path, window_type: str, window_norm: str, overlap: float
+) -> None:
+    """Overlap 0.25/0.5/0.75, single tone per bin, still match the closed form.
+
+    ``overlap=0.5`` is the library default, so this is the path most callers
+    take. The block-count check is the point of this test: the two energies
+    are overlap-invariant, so they would pass even if the library dropped
+    ``overlap`` and always used a hop of ``nfft``.
+    """
+    field = _steady_tone_field()
+    hop = NFFT * (1.0 - overlap)
+    want_nblocks = int((field["Ns"] - NFFT) // hop + 1)
+
+    lam, nblocks = _run_spod(
+        tmp_path,
+        window_type=window_type,
+        window_norm=window_norm,
+        overlap=overlap,
+        field=field,
+    )
+    assert nblocks == want_nblocks
+
+    rtol = _relative_tolerance(nblocks)
+    factor = _POWER_NORM_FACTOR[window_type] if window_norm == "power" else 1.0
+    dst = _dst()
+
+    np.testing.assert_allclose(lam[K_BIN, 0], _expected_lambda(A1, dst) * factor, rtol=rtol, atol=0.0)
+    np.testing.assert_allclose(lam[K_BIN2, 0], _expected_lambda(A3, dst) * factor, rtol=rtol, atol=0.0)
+    assert lam[K_BIN, 1] <= rtol * lam[K_BIN, 0]
+    assert lam[K_BIN2, 1] <= rtol * lam[K_BIN2, 0]

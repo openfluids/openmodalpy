@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SPOD closed-form check now runs the default 0.5 block overlap, and the two
+  other overlaps around it.
 - `SPODAnalyzer` accepts `n_modes_save`. SPOD makes one mode per Welch block at
   each frequency, and `modes` is the largest array it writes. `n_modes_save`
   keeps the leading modes and cuts `modes` and `time_coefficients` on their last
