@@ -568,15 +568,41 @@ class TestSTPODAnalytical:
     """ST-POD tests with known mathematical solutions."""
 
     def test_stpod_traveling_wave_rank(self):
-        """Traveling wave should have bounded rank in Hankel matrix.
+        """A traveling wave gives a rank-2 Hankel matrix with a known energy split.
 
-        Mathematical basis:
-        - A traveling wave cos(kx - ωt) can be written as:
-          cos(kx)cos(ωt) + sin(kx)sin(ωt)
-        - This is rank-2 in standard POD
-        - In ST-POD with embedding dimension d, the Hankel matrix captures
-          d consecutive time steps, but the underlying dynamics still have
-          bounded rank related to the number of independent oscillations.
+        Rank. The delay lift stacks d copies of the record, so the Hankel entry
+        for delay l, grid point j and column i is
+
+            H[(l, j), i] = cos(k*x_j - omega*dt*(i + l))
+                         = cos(k*x_j - omega*dt*l) * cos(omega*dt*i)
+                           + sin(k*x_j - omega*dt*l) * sin(omega*dt*i)
+
+        by the cosine subtraction rule. The first factor of each term depends
+        only on the row (l, j) and the second only on the column i, so
+        H = a c^T + b s^T and the rank is at most 2. This holds for every delay
+        depth and every grid. Removing the row mean gives
+        a (c - c_bar*1)^T + b (s - s_bar*1)^T, which is still rank 2, so
+        centring cannot make a third mode.
+
+        Energy split. For this fixture a and b are orthogonal and carry equal
+        norm, and c and s are orthogonal too. The two non-zero singular values
+        are then sigma_0^2 = |a|^2 |c|^2 and sigma_1^2 = |b|^2 |s|^2, so the
+        eigenvalue ratio is |c|^2 / |s|^2 over the m Hankel columns. The record
+        holds 10 whole periods, but the lift leaves m = Ns - d + 1 = 91 columns,
+        which is 9.1 periods. That leftover tenth of a period is what makes the
+        two modes unequal: sum(cos^2) = 46 and sum(sin^2) = 45 exactly, so the
+        ratio is 46/45. The test computes both sums from the fixture instead of
+        pasting 46/45, so it stays an oracle if Ns, f or d change.
+
+        Measured: sigma_0^2 = 9200 and sigma_1^2 = 9000 exactly, and the third
+        singular value sits at the round-off floor. For an m-by-n matrix that
+        floor is about max(m, n) * eps * sigma_0; here 400 * eps = 8.9e-14,
+        while the measured sigma_2 / sigma_0 is 1.0e-15, which is 87 times
+        below it.
+
+        Why the ratio matters. Rank alone is a weak check, because the rank
+        stays 2 whatever the delay depth is. The ratio moves: an ST-POD that
+        applies no lift gives 1.0513, and d = 9 gives 1.0313.
         """
         dt = 0.02
         f = 5.0
@@ -612,13 +638,21 @@ class TestSTPODAnalytical:
         analyzer.load_and_preprocess()
         analyzer.perform_stpod()
 
-        # The first few modes should capture essentially all energy
-        total_energy = np.sum(analyzer.eigenvalues)
-        energy_first_4 = np.sum(analyzer.eigenvalues[:4])
-        energy_fraction = energy_first_4 / total_energy
+        # The Hankel matrix is rank 2, so the analyzer must stop at two modes.
+        assert len(analyzer.eigenvalues) == 2, (
+            f"Traveling wave Hankel matrix is rank 2, but analyzer returned {len(analyzer.eigenvalues)} modes"
+        )
 
-        assert energy_fraction > 0.99, (
-            f"Traveling wave should have >99% energy in first 4 modes, got {energy_fraction * 100:.2f}%"
+        # The energy split, derived above: |c|^2 / |s|^2 over the m Hankel
+        # columns. Both sums come from the fixture, so this stays an oracle.
+        m = Ns - embedding_dim + 1
+        column_times = np.arange(m) * dt
+        expected_ratio = np.sum(np.cos(omega * column_times) ** 2) / np.sum(np.sin(omega * column_times) ** 2)
+        ratio = analyzer.eigenvalues[0] / analyzer.eigenvalues[1]
+        # 1e-10 leaves room for a different BLAS. The nearest wrong answers are
+        # 0.9 percent away (d = 9) and 2.8 percent away (no lift).
+        assert ratio == pytest.approx(expected_ratio, rel=1e-10), (
+            f"Expected eigenvalue ratio {expected_ratio:.12f} from the closed form, got {ratio:.12f}"
         )
 
     def test_stpod_reconstruction_error_decreases(self):
