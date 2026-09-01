@@ -65,6 +65,7 @@ def test_load_jsonc_expanduser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """load_jsonc expands ~ in paths."""
     home = tmp_path
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
     config_file = home / "config.jsonc"
     config_file.write_text('{"key": "value"}')
@@ -73,39 +74,41 @@ def test_load_jsonc_expanduser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert result["key"] == "value"
 
 
-def test_resolve_path_relative() -> None:
+def test_resolve_path_relative(tmp_path: Path) -> None:
     """resolve_path resolves relative paths against base."""
-    base = Path("/base/dir/config.json")
+    base = tmp_path / "dir" / "config.json"
     result = resolve_path("../data/file.txt", base)
 
-    assert result == Path("/base/data/file.txt")
+    assert result == tmp_path / "data" / "file.txt"
     assert result.is_absolute()
 
 
-def test_resolve_path_absolute() -> None:
+def test_resolve_path_absolute(tmp_path: Path) -> None:
     """resolve_path returns absolute paths unchanged."""
-    result = resolve_path("/absolute/path/file.txt", "/any/base")
+    absolute_path = tmp_path / "absolute" / "path" / "file.txt"
+    result = resolve_path(absolute_path, tmp_path / "any" / "base")
 
-    assert result == Path("/absolute/path/file.txt")
+    assert result == absolute_path
 
 
-def test_resolve_path_expandvars() -> None:
+def test_resolve_path_expandvars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """resolve_path expands environment variables."""
-    import os
+    test_dir = tmp_path / "test" / "dir"
+    test_dir.mkdir(parents=True)
+    monkeypatch.setenv("TEST_VAR", str(test_dir))
 
-    os.environ["TEST_VAR"] = "/test/dir"
+    result = resolve_path("$TEST_VAR/file.txt", tmp_path / "base")
 
-    result = resolve_path("$TEST_VAR/file.txt", "/base")
-
-    assert result == Path("/test/dir/file.txt")
+    assert result == test_dir / "file.txt"
 
 
 def test_resolve_path_expanduser(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """resolve_path expands ~ in paths."""
     home = tmp_path
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
-    result = resolve_path("~/config.json", "/any/base")
+    result = resolve_path("~/config.json", tmp_path / "any" / "base")
 
     assert result == home / "config.json"
 
