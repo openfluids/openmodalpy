@@ -61,7 +61,7 @@ def _delay_embed(X: np.ndarray, d: int) -> np.ndarray:
     X : ndarray, shape (n, m)
         Snapshot matrix with *n* spatial points and *m* time steps.
     d : int
-        Number of delays (stack depth).  ``d=1`` returns *X* unchanged.
+        Stack depth for delay embedding.  ``d=1`` returns *X* unchanged.
 
     Returns
     -------
@@ -266,7 +266,7 @@ class DMDAnalyzer(BaseAnalyzer):
         self.effective_rank = 0
         # Algorithm settings (written by perform_dmd, read by metadata)
         self._dmd_method = "ls"
-        self._dmd_delays = 1
+        self._dmd_embedding_dim = 1
         self._dmd_named_variant = "dmd"
 
     def _svd_request_rank(self, shape: Sequence[int]) -> int:
@@ -331,7 +331,7 @@ class DMDAnalyzer(BaseAnalyzer):
     def perform_dmd(
         self,
         method: str = "ls",
-        delays: int = 1,
+        embedding_dim: int = 1,
         named_variant: str | None = None,
     ) -> None:
         """Compute DMD on raw shifted snapshots.
@@ -341,17 +341,18 @@ class DMDAnalyzer(BaseAnalyzer):
         method : ``"ls"`` | ``"tls"``
             ``"ls"``  — standard exact DMD (least-squares).
             ``"tls"`` — total least-squares DMD. Its advantage on noisy data
-            is a ``delays=1`` property; see ``delays`` below.
-        delays : int, default 1
-            Number of delay embeddings.  ``delays=1`` is standard DMD;
-            ``delays>1`` builds a Hankel matrix before forming snapshot pairs.
+            is an ``embedding_dim=1`` property; see ``embedding_dim`` below.
+        embedding_dim : int, default 1
+            Embedding depth.  ``embedding_dim=1`` is standard DMD (no delay lift);
+            ``embedding_dim>1`` builds a Hankel matrix before forming snapshot pairs.
             Delay embedding repeats the same noise across the Hankel rows, and
             ``"tls"`` assumes the errors in the two snapshot matrices are
-            independent. The TLS advantage therefore decays as ``delays`` grows:
+            independent. The TLS advantage therefore decays as ``embedding_dim`` grows:
             measured over 200 noisy seeds, TLS beat LS in 177/200 runs at
-            ``delays=1`` but only 95/200 at ``delays=5``, where LS is better on
-            average. Do not pick ``"tls"`` and deep delays together to fight
-            noise.
+            ``embedding_dim=1`` but only 95/200 at ``embedding_dim=5``, where LS is better on
+            average. Do not pick ``"tls"`` and a large ``embedding_dim`` together
+            to fight noise. ``embedding_dim=1`` on DMD is accepted and does no
+            delay embedding. ST-POD rejects ``embedding_dim=1``.
 
         Notes
         -----
@@ -366,8 +367,8 @@ class DMDAnalyzer(BaseAnalyzer):
         """
         if method not in ("ls", "tls"):
             raise ValueError(f"Unknown method '{method}'; use 'ls' or 'tls'.")
-        if delays < 1:
-            raise ValueError("delays must be >= 1.")
+        if embedding_dim < 1:
+            raise ValueError("embedding_dim must be >= 1.")
 
         if "q" not in self.data:
             raise ValueError("Data not loaded. Call load_and_preprocess() first.")
@@ -377,20 +378,20 @@ class DMDAnalyzer(BaseAnalyzer):
         X = q.T  # (n_spatial, n_time)
 
         # Delay embedding (Hankel lift)
-        if delays > 1:
-            if delays > n_snapshots - 2:
+        if embedding_dim > 1:
+            if embedding_dim > n_snapshots - 2:
                 raise ValueError(
-                    f"delays={delays} too large for n_snapshots={n_snapshots}; "
+                    f"embedding_dim={embedding_dim} too large for n_snapshots={n_snapshots}; "
                     "need at least 2 snapshot pairs after embedding "
-                    f"(max delays = {n_snapshots - 2})."
+                    f"(max embedding_dim = {n_snapshots - 2})."
                 )
-            if delays >= n_snapshots // 2:
+            if embedding_dim >= n_snapshots // 2:
                 warnings.warn(
-                    f"delays={delays} is large relative to n_snapshots={n_snapshots}; "
+                    f"embedding_dim={embedding_dim} is large relative to n_snapshots={n_snapshots}; "
                     "the effective snapshot count will be small.",
                     stacklevel=2,
                 )
-            X = _delay_embed(X, delays)
+            X = _delay_embed(X, embedding_dim)
 
         X1 = X[:, :-1]
         X2 = X[:, 1:]
@@ -424,7 +425,7 @@ class DMDAnalyzer(BaseAnalyzer):
             self.time_coefficients = np.array([])
             self.amplitudes = np.array([])
             self._dmd_method = method
-            self._dmd_delays = delays
+            self._dmd_embedding_dim = embedding_dim
             self._dmd_named_variant = named_variant or "dmd"
             self._resync_mode_count()
             return
@@ -474,24 +475,24 @@ class DMDAnalyzer(BaseAnalyzer):
         self.time_coefficients = time_dynamics[:, idx][:, :n_keep]
         self.amplitudes = np.abs(b[idx][:n_keep])
         self._dmd_method = method
-        self._dmd_delays = delays
+        self._dmd_embedding_dim = embedding_dim
         self._dmd_named_variant = named_variant or "dmd"
         self._resync_mode_count()
 
     def _get_algorithm_metadata(self) -> dict:
         """Describe the DMD contract currently implemented."""
         method = self._dmd_method
-        delays = self._dmd_delays
+        embedding_dim = self._dmd_embedding_dim
         named_variant = self._dmd_named_variant
         variant = "tls_dmd" if method == "tls" else "exact_dmd"
         if named_variant == "hodmd":
             variant = "hodmd"
         elif named_variant == "tls_hodmd":
             variant = "tls_hodmd"
-        elif delays > 1:
+        elif embedding_dim > 1:
             variant = f"delay_embedded_{variant}"
         return {
-            "lift_kind": "delay_embedding" if delays > 1 else "identity_paired_snapshots",
+            "lift_kind": "delay_embedding" if embedding_dim > 1 else "identity_paired_snapshots",
             "paired_data_contract": "raw_shifted_snapshots",
             "uses_mean_subtraction": False,
             "uses_spatial_metric_in_regression": False,
@@ -500,7 +501,7 @@ class DMDAnalyzer(BaseAnalyzer):
             "dmd_variant": variant,
             "dmd_named_variant": named_variant,
             "dmd_method": method,
-            "dmd_delays": delays,
+            "dmd_embedding_dim": embedding_dim,
         }
 
     def save_results(self, filename: str | None = None) -> None:
@@ -603,7 +604,7 @@ class DMDAnalyzer(BaseAnalyzer):
             self.omega = res.omega
         # Reader already decodes attrs; keep the same defaults as the old helper.
         self._dmd_method = str(res.attrs["dmd_method"] if "dmd_method" in res.attrs else "ls")
-        self._dmd_delays = int(res.attrs["dmd_delays"] if "dmd_delays" in res.attrs else 1)
+        self._dmd_embedding_dim = int(res.attrs["dmd_embedding_dim"] if "dmd_embedding_dim" in res.attrs else 1)
         self._dmd_named_variant = str(res.attrs["dmd_named_variant"] if "dmd_named_variant" in res.attrs else "dmd")
         for coord_key in ("x", "y", "z"):
             value = getattr(res, coord_key, None)
@@ -1056,7 +1057,7 @@ class DMDAnalyzer(BaseAnalyzer):
             return
         _nx, _ny, _nz, lifted_delays = layout
         if delay_idx >= lifted_delays:
-            raise ValueError(f"delay_idx={delay_idx} exceeds available lifted delays ({lifted_delays}).")
+            raise ValueError(f"delay_idx={delay_idx} exceeds available lifted embedding_dim ({lifted_delays}).")
         n_modes = min(self.modes.shape[1], self.n_modes_save)
         if plot_n_modes is not None:
             n_modes = min(n_modes, plot_n_modes)

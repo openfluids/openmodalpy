@@ -353,7 +353,7 @@ def test_default_args_match_original():
     expected = _exact_dmd_eigenvalues(data_q, n_modes_save=2, rank=2)
 
     analyzer = _make_analyzer(data_q, n_modes_save=2)
-    analyzer.perform_dmd()  # defaults: method="ls", delays=1
+    analyzer.perform_dmd()  # defaults: method="ls", embedding_dim=1
     np.testing.assert_allclose(analyzer.eigenvalues, expected, rtol=1e-10, atol=1e-10)
 
 
@@ -404,19 +404,19 @@ def test_tls_noise_robustness():
 # ---------------------------------------------------------------------------
 
 
-def test_dmd_with_delays():
+def test_dmd_with_embedding_dim():
     """DMD with delay embedding runs and returns valid eigenvalues."""
     A = np.array([[0.9, 0.1], [-0.1, 0.8]])
     q = _make_linear_snapshots(A, np.array([1.0, 0.5]), 40)
 
     analyzer = _make_analyzer(q, n_modes_save=4)
     with pytest.warns(RuntimeWarning, match="effective rank"):
-        analyzer.perform_dmd(delays=3)
+        analyzer.perform_dmd(embedding_dim=3)
 
     # Order-2 linear system → numerical rank 2 even after delay lift.
     assert analyzer.effective_rank == 2
     assert analyzer.eigenvalues.size == 2
-    assert analyzer.modes.shape[0] == 2 * 3  # n_spatial * delays
+    assert analyzer.modes.shape[0] == 2 * 3  # n_spatial * embedding_dim
     assert analyzer.omega.size == 2
     # All eigenvalues should be finite
     assert np.all(np.isfinite(analyzer.eigenvalues))
@@ -428,10 +428,10 @@ def test_hodmd_eigenvalue_oracle():
     q = _make_linear_snapshots(A, np.array([1.0, 0.5]), 50)
     true = np.linalg.eigvals(A)
     # For a diagonalizable A, |dlambda| <= cond(V) * ||dA||. Pipeline round-off
-    # grows like the working dimension n_spatial * delays, so
-    #   tol = C * cond(V) * eps * n_spatial * delays
-    # with C a small integer. On this fixture (ls/tls, delays 2/3/5) the worst
-    # observed set_err is 7.1e-16, and the tightest bound is the delays=2 one,
+    # grows like the working dimension n_spatial * embedding_dim, so
+    #   tol = C * cond(V) * eps * n_spatial * embedding_dim
+    # with C a small integer. On this fixture (ls/tls, embedding_dim 2/3/5) the worst
+    # observed set_err is 7.1e-16, and the tightest bound is the embedding_dim=2 one,
     # so C=4 leaves ~8.6x margin. Jittering the snapshots at ulp scale -- a
     # stand-in for a different BLAS summation order on another platform --
     # pushed the worst case only to 9.1e-16, still 15% of that bound.
@@ -439,12 +439,12 @@ def test_hodmd_eigenvalue_oracle():
     n_spatial = A.shape[0]
     eps = np.finfo(float).eps
     C = 4
-    # Both methods at delays=2, delays=3, delays=5 (nothing truncated).
+    # Both methods at embedding_dim=2, embedding_dim=3, embedding_dim=5 (nothing truncated).
     for method in ("ls", "tls"):
-        for delays in (2, 3, 5):
+        for dim in (2, 3, 5):
             analyzer = _make_analyzer(q, n_modes_save=2, rank=2)
-            analyzer.perform_dmd(method=method, delays=delays)
-            tol = C * np.linalg.cond(V) * eps * n_spatial * delays
+            analyzer.perform_dmd(method=method, embedding_dim=dim)
+            tol = C * np.linalg.cond(V) * eps * n_spatial * dim
             np.testing.assert_allclose(
                 np.sort_complex(analyzer.eigenvalues),
                 np.sort_complex(true),
@@ -472,7 +472,7 @@ def test_hodmd_rank_staircase():
     # rank=4 requested at every depth so the cap is the Hankel's, not the argument.
     for d in (1, 2, 3, 4, 6):
         analyzer = _make_analyzer(q, n_modes_save=4, rank=4)
-        analyzer.perform_dmd(delays=d)
+        analyzer.perform_dmd(embedding_dim=d)
         assert analyzer.effective_rank == min(d, 4)
         ranks.append(analyzer.effective_rank)
         rec = np.asarray(analyzer.eigenvalues)
@@ -511,9 +511,9 @@ def test_hodmd_tls_vs_ls_median():
         rng = np.random.default_rng(seed)
         q_noisy = q_clean + rng.normal(0.0, noise_std, q_clean.shape)
         analyzer_ls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
-        analyzer_ls.perform_dmd(method="ls", delays=1)
+        analyzer_ls.perform_dmd(method="ls", embedding_dim=1)
         analyzer_tls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
-        analyzer_tls.perform_dmd(method="tls", delays=1)
+        analyzer_tls.perform_dmd(method="tls", embedding_dim=1)
         err_ls.append(_eig_set_err(analyzer_ls.eigenvalues, true))
         err_tls.append(_eig_set_err(analyzer_tls.eigenvalues, true))
     assert np.median(err_tls) < np.median(err_ls)
@@ -524,8 +524,8 @@ def test_tls_hodmd_differs_from_ls_at_depth():
 
     Nothing else here can see this. On clean, fully observed data LS and TLS
     agree to ~1e-16, so the oracle stays green even if the TLS branch silently
-    became LS whenever ``delays > 1``; the staircase runs the default LS path;
-    and the median comparison runs ``delays=1``. Noise at depth is what
+    became LS whenever ``embedding_dim > 1``; the staircase runs the default LS path;
+    and the median comparison runs ``embedding_dim=1``. Noise at depth is what
     separates the two formulas.
     """
     A = np.array([[0.9, 0.1], [-0.1, 0.8]])
@@ -535,10 +535,10 @@ def test_tls_hodmd_differs_from_ls_at_depth():
         rng = np.random.default_rng(seed)
         q_noisy = q_clean + rng.normal(0.0, noise_std, q_clean.shape)
         analyzer_ls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
-        analyzer_ls.perform_dmd(method="ls", delays=3)
+        analyzer_ls.perform_dmd(method="ls", embedding_dim=3)
         analyzer_tls = _make_analyzer(q_noisy, n_modes_save=2, rank=2)
-        analyzer_tls.perform_dmd(method="tls", delays=3)
-        # Smallest separation measured over 25 seeds at delays=3 is 4.3e-3, so
+        analyzer_tls.perform_dmd(method="tls", embedding_dim=3)
+        # Smallest separation measured over 25 seeds at embedding_dim=3 is 4.3e-3, so
         # 1e-3 leaves margin while still being far above any round-off.
         gap = _eig_set_err(analyzer_tls.eigenvalues, analyzer_ls.eigenvalues)
         assert gap > 1e-3
@@ -557,12 +557,12 @@ def test_invalid_method_raises():
         analyzer.perform_dmd(method="bogus")
 
 
-def test_invalid_delays_raises():
+def test_invalid_embedding_dim_raises():
     A = np.eye(2) * 0.9
     q = _make_linear_snapshots(A, np.array([1.0, 0.5]), 10)
     analyzer = _make_analyzer(q)
-    with pytest.raises(ValueError, match="delays must be >= 1"):
-        analyzer.perform_dmd(delays=0)
+    with pytest.raises(ValueError, match="embedding_dim must be >= 1"):
+        analyzer.perform_dmd(embedding_dim=0)
 
 
 # ---------------------------------------------------------------------------
@@ -570,18 +570,18 @@ def test_invalid_delays_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_metadata_tls_delays(tmp_path):
+def test_metadata_tls_embedding_dim(tmp_path):
     """Metadata should reflect TLS + delay embedding settings."""
     q = _make_rank4_snapshots(30)
 
     analyzer = _make_analyzer(q, n_modes_save=4)
-    analyzer.perform_dmd(method="tls", delays=3)
+    analyzer.perform_dmd(method="tls", embedding_dim=3)
     assert analyzer.effective_rank == 4
 
     meta = analyzer._get_algorithm_metadata()
     assert meta["dmd_variant"] == "delay_embedded_tls_dmd"
     assert meta["dmd_method"] == "tls"
-    assert meta["dmd_delays"] == 3
+    assert meta["dmd_embedding_dim"] == 3
     assert meta["lift_kind"] == "delay_embedding"
 
 
@@ -591,7 +591,7 @@ def test_load_results_restores_variant_metadata(tmp_path):
 
     analyzer = _make_analyzer(q, n_modes_save=4)
     analyzer.results_dir = tmp_path
-    analyzer.perform_dmd(method="tls", delays=3)
+    analyzer.perform_dmd(method="tls", embedding_dim=3)
     assert analyzer.effective_rank == 4
     analyzer.save_results("dmd_variant_roundtrip.hdf5")
 
@@ -602,7 +602,7 @@ def test_load_results_restores_variant_metadata(tmp_path):
     meta = reloaded._get_algorithm_metadata()
     assert meta["dmd_variant"] == "delay_embedded_tls_dmd"
     assert meta["dmd_method"] == "tls"
-    assert meta["dmd_delays"] == 3
+    assert meta["dmd_embedding_dim"] == 3
 
 
 def test_dmd_save_load_roundtrip_arrays(tmp_path):
@@ -635,7 +635,7 @@ def test_hodmd_named_variant_metadata():
     q = _make_rank4_snapshots(40)
 
     analyzer = _make_analyzer(q, n_modes_save=4)
-    analyzer.perform_dmd(method="ls", delays=3, named_variant="hodmd")
+    analyzer.perform_dmd(method="ls", embedding_dim=3, named_variant="hodmd")
     assert analyzer.effective_rank == 4
 
     assert analyzer._dmd_named_variant == "hodmd"
@@ -643,7 +643,7 @@ def test_hodmd_named_variant_metadata():
     assert meta["dmd_variant"] == "hodmd"
     assert meta["dmd_named_variant"] == "hodmd"
     assert meta["dmd_method"] == "ls"
-    assert meta["dmd_delays"] == 3
+    assert meta["dmd_embedding_dim"] == 3
     assert meta["lift_kind"] == "delay_embedding"
 
 
@@ -652,7 +652,7 @@ def test_tls_hodmd_named_variant_metadata():
     q = _make_rank4_snapshots(40)
 
     analyzer = _make_analyzer(q, n_modes_save=4)
-    analyzer.perform_dmd(method="tls", delays=3, named_variant="tls_hodmd")
+    analyzer.perform_dmd(method="tls", embedding_dim=3, named_variant="tls_hodmd")
     assert analyzer.effective_rank == 4
 
     assert analyzer._dmd_named_variant == "tls_hodmd"
@@ -660,7 +660,7 @@ def test_tls_hodmd_named_variant_metadata():
     assert meta["dmd_variant"] == "tls_hodmd"
     assert meta["dmd_named_variant"] == "tls_hodmd"
     assert meta["dmd_method"] == "tls"
-    assert meta["dmd_delays"] == 3
+    assert meta["dmd_embedding_dim"] == 3
     assert meta["lift_kind"] == "delay_embedding"
 
 
@@ -670,7 +670,7 @@ def test_hodmd_save_load_roundtrip(tmp_path):
 
     analyzer = _make_analyzer(q, n_modes_save=4)
     analyzer.results_dir = tmp_path
-    analyzer.perform_dmd(method="ls", delays=3, named_variant="hodmd")
+    analyzer.perform_dmd(method="ls", embedding_dim=3, named_variant="hodmd")
     assert analyzer.effective_rank == 4
     analyzer.save_results("hodmd_roundtrip.hdf5")
 
@@ -682,7 +682,7 @@ def test_hodmd_save_load_roundtrip(tmp_path):
     meta = reloaded._get_algorithm_metadata()
     assert meta["dmd_variant"] == "hodmd"
     assert meta["dmd_method"] == "ls"
-    assert meta["dmd_delays"] == 3
+    assert meta["dmd_embedding_dim"] == 3
 
 
 def test_hodmd_plot_modes_uses_2d_slice(monkeypatch, tmp_path):
@@ -714,7 +714,7 @@ def test_hodmd_plot_modes_uses_2d_slice(monkeypatch, tmp_path):
         rank=2,
     )
     analyzer.load_and_preprocess()
-    analyzer.perform_dmd(method="ls", delays=2, named_variant="hodmd")
+    analyzer.perform_dmd(method="ls", embedding_dim=2, named_variant="hodmd")
 
     line_calls = {"count": 0}
     orig_plot = matplotlib.axes.Axes.plot
@@ -1344,3 +1344,59 @@ def test_dmd_two_pair_spectrum_binds_companions_by_time_dynamics():
             atol=1e-8,
         ), f"sorting amplitudes by {name} still matched |time_coefficients[0]|"
     assert saw_second_sort, "need a spectrum where |b| or column energy differs from canonical order"
+
+
+def test_dmd_embedding_dim_parameter_accepts_new_name():
+    """Check perform_dmd(embedding_dim=d) lifts modes to n_spatial * d rows."""
+    q = _make_rank4_snapshots(20)
+    n_spatial = q.shape[1]
+    analyzer = _make_analyzer(q, n_modes_save=4, rank=4)
+    analyzer.perform_dmd(embedding_dim=2)
+    assert analyzer._dmd_embedding_dim == 2
+    assert analyzer.modes.shape[0] == n_spatial * 2
+    meta = analyzer._get_algorithm_metadata()
+    assert meta["dmd_embedding_dim"] == 2
+    assert meta["lift_kind"] == "delay_embedding"
+
+
+def test_dmd_old_keyword_raises_typeerror():
+    """Check perform_dmd rejects the old keyword with TypeError."""
+    A = np.eye(2) * 0.9
+    q = _make_linear_snapshots(A, np.array([1.0, 0.5]), 10)
+    analyzer = _make_analyzer(q, n_modes_save=2, rank=2)
+    with pytest.raises(TypeError, match="delays"):
+        analyzer.perform_dmd(delays=1)
+
+
+def test_embedding_dim_one_accepted_by_dmd_rejected_by_stpod(tmp_path):
+    """Check embedding_dim=1 is DMD's no-lift default and an ST-POD error."""
+    from openmodalpy import STPODAnalyzer
+
+    q = _make_rank4_snapshots(10)
+    n_spatial = q.shape[1]
+    dmd = _make_analyzer(q, n_modes_save=2, rank=2)
+    dmd.perform_dmd(embedding_dim=1)
+    assert dmd.modes.shape[0] == n_spatial
+    assert dmd._get_algorithm_metadata()["lift_kind"] == "identity_paired_snapshots"
+
+    data = {
+        "q": np.array([[1, 2, 3], [2, 4, 6], [4, 8, 12]], dtype=float).T,
+        "x": np.array([0.0, 1.0, 2.0]),
+        "y": np.array([0.0]),
+        "dt": 1.0,
+        "Nx": 3,
+        "Ny": 1,
+        "Ns": 3,
+    }
+    stpod = STPODAnalyzer(
+        file_path="dummy",
+        data_loader=lambda _: data,
+        spatial_weight_type="uniform",
+        n_modes_save=2,
+        embedding_dim=1,
+        results_dir=tmp_path,
+        figures_dir=tmp_path,
+    )
+    stpod.load_and_preprocess()
+    with pytest.raises(ValueError, match="embedding_dim must be >= 2"):
+        stpod.perform_stpod()

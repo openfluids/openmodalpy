@@ -94,7 +94,7 @@ this package over a single-method library:
     { "id": "pod",   "method": "pod" },
     { "id": "spod",  "method": "spod" },
     { "id": "dmd",   "method": "dmd",   "params": { "method": "ls" } },
-    { "id": "hodmd", "method": "hodmd", "params": { "delays": 4 } },
+    { "id": "hodmd", "method": "hodmd", "params": { "embedding_dim": 4 } },
     { "id": "bsmd",  "method": "bsmd" }
   ]
 }
@@ -138,12 +138,12 @@ takes in a config file.
 | `bsmd` | triadic interaction | nonlinear triad structures | [Schmidt (2020)](https://doi.org/10.1007/s11071-020-06037-z) |
 
 `dmd` accepts `method: "ls"` (least squares) or `method: "tls"` (total least squares,
-de-biased for noisy data). The TLS advantage on noisy data is a `delays=1`
-property. It decays as `delays` grows, and by `delays=5` plain LS is closer on
-average. Do not choose `tls` and deep delays together to fight noise.
+de-biased for noisy data). The TLS advantage on noisy data is an `embedding_dim=1`
+property. It decays as `embedding_dim` grows, and by `embedding_dim=5` plain LS is closer on
+average. Do not choose `tls` and a large `embedding_dim` together to fight noise.
 
 `hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations.
-Call `perform_dmd(delays=<d>, method="ls")` or `perform_dmd(delays=<d>, method="tls")`
+Call `perform_dmd(embedding_dim=<d>, method="ls")` or `perform_dmd(embedding_dim=<d>, method="tls")`
 where `<d>` is the delay embedding depth.
 
 The BSMD implementation follows Schmidt (2020) and was inspired by the reference

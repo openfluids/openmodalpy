@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- `perform_dmd` now takes `embedding_dim` in place of `delays`. The old keyword raises TypeError.
+- Config run params now use `embedding_dim` in place of `delays`.
+- Saved DMD results now store `dmd_embedding_dim` in place of `dmd_delays`.
+- CLI flag `--delays` is removed. Use `--embedding-dim`.
+
 ### Added
 
 - DOC.md says that `solver="eigh"` and `solver="svd"` are two different
@@ -55,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- DMD, HODMD and ST-POD now share the name `embedding_dim` for delay embedding depth. DMD default is 1 and does no lift. ST-POD still rejects 1.
 - The SPOD eigenproblem is now one hop from `spod.py`. `spod.py` imports
   `spod_single_frequency` from `openmodalpy.core.decomposition` and calls it
   directly. It used to call `spod_function` in `openmodalpy.core.base`, a file
@@ -108,11 +116,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actual cap applied. `prov_blas` now names only the BLAS or LAPACK build
   that ran.
 - The documentation called TLS-DMD "de-biased for noisy data" and set no bound
-  on it. That advantage holds at `delays=1` and decays as `delays` grows,
+  on it. That advantage holds at `embedding_dim=1` and decays as `embedding_dim` grows,
   because delay embedding repeats the same noise across the Hankel rows while
   TLS assumes the two snapshot matrices carry independent errors. Measured over
-  200 seeds, TLS beat LS in 177/200 runs at `delays=1` and in 95/200 at
-  `delays=5`, where LS is better on average. README.md, DOC.md and the
+  200 seeds, TLS beat LS in 177/200 runs at `embedding_dim=1` and in 95/200 at
+  `embedding_dim=5`, where LS is better on average. README.md, DOC.md and the
   `perform_dmd` docstring now say so. No solver changed.
 - The `BSMDAnalyzer` class docstring said BSMD "keeps one mode per triad, so
   the mode count follows from the triad count, not a chosen number". Keeping one

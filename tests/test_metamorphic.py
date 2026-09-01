@@ -63,17 +63,17 @@ def _independent_hankel(data_centered: np.ndarray, embedding_dim: int) -> np.nda
 
 
 # ---------------------------------------------------------------------------
-# DMD: exact DMD at delays=1 vs independent numpy; delays=2 is a real lift
+# DMD: exact DMD at embedding_dim=1 vs independent numpy; embedding_dim=2 is a real lift
 # ---------------------------------------------------------------------------
 
 
-def test_dmd_delays_one_matches_independent_exact_dmd():
-    """delays=1 must match exact DMD built with plain numpy in the test.
+def test_dmd_embedding_dim_one_matches_independent_exact_dmd():
+    """embedding_dim=1 must match exact DMD built with plain numpy in the test.
 
     WHY: exact DMD is the eigendecomposition of the projected companion
     A_tilde = U^H X2 V S^{-1} from the thin SVD of X1 = q.T[:, :-1]. Building
     that operator here with np.linalg (not dmd.py helpers) is an independent
-    oracle: agreement proves perform_dmd(delays=1) implements exact DMD, not
+    oracle: agreement proves perform_dmd(embedding_dim=1) implements exact DMD, not
     that two aliases of the same call match. Sorted by |lambda| descending.
     """
     rng = np.random.default_rng(0)
@@ -89,7 +89,7 @@ def test_dmd_delays_one_matches_independent_exact_dmd():
         rank=n_modes,  # explicit operator rank (matches independent reference)
     )
     analyzer.load_and_preprocess()
-    analyzer.perform_dmd(delays=1)
+    analyzer.perform_dmd(embedding_dim=1)
 
     # Independent exact-DMD reference (no library helpers).
     X = q.T  # (n_space, n_time) — same layout as dmd.py
@@ -104,10 +104,10 @@ def test_dmd_delays_one_matches_independent_exact_dmd():
     np.testing.assert_allclose(analyzer.eigenvalues, ref_eigs, rtol=_RTOL_EXACT, atol=_ATOL_EXACT)
 
 
-def test_dmd_delays_two_differs_from_one():
-    """delays=2 must change the spectrum relative to delays=1.
+def test_dmd_embedding_dim_two_differs_from_one():
+    """embedding_dim=2 must change the spectrum relative to embedding_dim=1.
 
-    WHY: delays=1 regresses in R^{n_space}; delays=2 stacks consecutive
+    WHY: embedding_dim=1 regresses in R^{n_space}; embedding_dim=2 stacks consecutive
     snapshots into R^{2 n_space} before forming (X1, X2), so A_tilde is a
     different operator. On broadband random data the lifted eigenvalues are
     not a permutation of the plain ones — if the delay path silently
@@ -125,16 +125,16 @@ def test_dmd_delays_two_differs_from_one():
     )
     d1 = DMDAnalyzer(file_path="meta_dmd_d1_vs", **common, rank=n_modes)
     d1.load_and_preprocess()
-    d1.perform_dmd(delays=1)
+    d1.perform_dmd(embedding_dim=1)
 
     d2 = DMDAnalyzer(file_path="meta_dmd_d2", **common, rank=n_modes)
     d2.load_and_preprocess()
-    d2.perform_dmd(delays=2)
+    d2.perform_dmd(embedding_dim=2)
 
     # Positive: embedding ran — spectra must differ on this data.
-    assert d2._dmd_delays == 2
+    assert d2._dmd_embedding_dim == 2
     assert not np.allclose(d2.eigenvalues, d1.eigenvalues, rtol=_RTOL_EXACT, atol=_ATOL_EXACT), (
-        "delays=2 spectrum matched delays=1; delay path looks like a no-op"
+        "embedding_dim=2 spectrum matched embedding_dim=1; delay path looks like a no-op"
     )
 
 
@@ -194,7 +194,7 @@ def test_stpod_d2_matches_independent_hankel_pod():
 
     # Independent reference: center → Hankel → sqrt(W) weighting → thin SVD
     # → lambda = sigma^2 / m. W is the metric the load built (cell volumes
-    # for grid-shaped 1-D coordinates), tiled over the delays; modes are
+    # for grid-shaped 1-D coordinates), tiled over the embedding blocks; modes are
     # divided back by sqrt(W) exactly as the solver unweights them.
     centered = q - np.mean(q, axis=0)
     hankel = _independent_hankel(centered, embedding_dim)

@@ -145,7 +145,7 @@ METHOD_REGISTRY: dict[str, MethodInfo] = {
         description="Lift-and-regress dynamic mode decomposition on paired snapshots.",
         parameter_help={
             "method": "Regression model: ls or tls.",
-            "delays": "Delay embedding depth; >1 gives Hankel / HODMD-style coordinates.",
+            "embedding_dim": "Embedding depth; >1 gives Hankel / HODMD-style coordinates.",
         },
     ),
     "hodmd": MethodInfo(
@@ -154,7 +154,7 @@ METHOD_REGISTRY: dict[str, MethodInfo] = {
         display_name="HODMD",
         description="Higher-order / Hankel DMD using a delay embedding before DMD regression.",
         parameter_help={
-            "delays": "Delay embedding depth; defaults to the case embedding dimension.",
+            "embedding_dim": "Embedding depth; defaults to the case embedding dimension.",
         },
     ),
     "tls_hodmd": MethodInfo(
@@ -163,7 +163,7 @@ METHOD_REGISTRY: dict[str, MethodInfo] = {
         display_name="TLS-HODMD",
         description="Higher-order / Hankel DMD with total least-squares regression.",
         parameter_help={
-            "delays": "Delay embedding depth; defaults to the case embedding dimension.",
+            "embedding_dim": "Embedding depth; defaults to the case embedding dimension.",
         },
     ),
     "spod": MethodInfo(

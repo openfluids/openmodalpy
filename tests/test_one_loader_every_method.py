@@ -142,7 +142,7 @@ ROWS: tuple[MethodRow, ...] = (
         False,
         ("modes", "eigenvalues", "time_coefficients", "amplitudes", "omega"),
         _check_modal,
-        {"delays": DELAYS, "named_variant": "hodmd"},
+        {"embedding_dim": DELAYS, "named_variant": "hodmd"},
     ),
     MethodRow(
         "tls_hodmd",
@@ -152,7 +152,7 @@ ROWS: tuple[MethodRow, ...] = (
         False,
         ("modes", "eigenvalues", "time_coefficients", "amplitudes", "omega"),
         _check_modal,
-        {"method": "tls", "delays": DELAYS, "named_variant": "tls_hodmd"},
+        {"method": "tls", "embedding_dim": DELAYS, "named_variant": "tls_hodmd"},
     ),
     MethodRow(
         "spod",

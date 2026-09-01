@@ -505,7 +505,7 @@ class _DMDPerformKwargs(TypedDict, total=False):
     """Keyword arguments accepted by ``DMDAnalyzer.perform_dmd``."""
 
     method: str
-    delays: int
+    embedding_dim: int
     named_variant: str
 
 
@@ -532,14 +532,16 @@ def _run_dmd(spec: AnalyzeSpec, *, dry_run: bool) -> RunOutcome:
     _hodmd_variants = {"hodmd": "ls", "tls_hodmd": "tls"}
     perform_kwargs: _DMDPerformKwargs
     if spec.method in _hodmd_variants:
-        delays = int(spec.params.get("delays", spec.case.embedding_dim))
-        if delays < 2:
-            raise ValueError(f"{spec.method} requires delays >= 2.")
-        perform_kwargs = dict(method=_hodmd_variants[spec.method], delays=delays, named_variant=spec.method)
+        embedding_dim = int(spec.params.get("embedding_dim", spec.case.embedding_dim))
+        if embedding_dim < 2:
+            raise ValueError(f"{spec.method} requires embedding_dim >= 2.")
+        perform_kwargs = dict(
+            method=_hodmd_variants[spec.method], embedding_dim=embedding_dim, named_variant=spec.method
+        )
     else:
         perform_kwargs = dict(
             method=str(spec.params.get("method", "ls")),
-            delays=int(spec.params.get("delays", 1)),
+            embedding_dim=int(spec.params.get("embedding_dim", 1)),
         )
 
     analyzer.run_analysis(
@@ -688,10 +690,10 @@ def analyze_from_config(
         "n_modes_save",
         "nfft",
         "overlap",
-        "embedding_dim",
         "use_parallel",
     ):
         params.pop(case_key, None)
+    # embedding_dim is a case field and a DMD/ST-POD method param, so it stays.
     normalized_method = normalize_method_name(method)
     resolved_run_id = run_id or f"{normalized_method}_cli"
     spec = AnalyzeSpec(

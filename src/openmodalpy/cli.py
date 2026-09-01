@@ -88,7 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--n-modes", type=int, default=None, help="Override the number of saved modes.")
     analyze.add_argument("--nfft", type=int, default=None, help="Override the FFT block size.")
     analyze.add_argument("--overlap", type=float, default=None, help="Override the FFT overlap fraction.")
-    analyze.add_argument("--embedding-dim", type=int, default=None, help="Override the ST-POD embedding depth.")
+    analyze.add_argument(
+        "--embedding-dim",
+        type=int,
+        default=None,
+        help="Override the delay embedding dimension (DMD, HODMD, ST-POD).",
+    )
     analyze.add_argument(
         "--band-edges",
         type=str,
@@ -114,7 +119,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="DMD regression model (used only when analyze dmd).",
     )
-    analyze.add_argument("--delays", type=int, default=None, help="DMD delay embedding depth.")
     analyze.add_argument(
         "--solver",
         choices=("eigh", "svd"),
@@ -175,8 +179,6 @@ def _collect_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["filter_kind"] = args.filter_kind
     if args.dmd_method is not None:
         overrides["method"] = args.dmd_method
-    if args.delays is not None:
-        overrides["delays"] = args.delays
     if args.solver is not None:
         overrides["solver"] = args.solver
     return overrides

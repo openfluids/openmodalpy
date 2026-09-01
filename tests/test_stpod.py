@@ -62,7 +62,7 @@ class TestSTPODBasic:
 
         # Weighted orthonormality under the lifted metric the load built
         # (analyzer.W, whatever load_and_preprocess constructed), extended
-        # over the embedding delays.
+        # over the embedding blocks.
         w_lift = np.tile(np.asarray(analyzer.W).ravel(), embedding_dim)
         gram = analyzer.modes.T @ (w_lift[:, None] * analyzer.modes)
         np.testing.assert_allclose(gram, np.eye(n_modes), rtol=0.0, atol=1e-10)
@@ -246,7 +246,7 @@ class TestSTPODBasic:
         # Independent block-Hankel: column j stacks delays [Q[j], ..., Q[j+d-1]].
         # Shape (d * Nspace, m); library lift is the transpose layout, same SVD.
         # Weighted by the metric the load built (analyzer.W), tiled over the
-        # embedding delays — the same sqrt(W) the solver applies.
+        # embedding blocks — the same sqrt(W) the solver applies.
         data_centered = data["q"] - np.mean(data["q"], axis=0)
         m_cols = Ns - embedding_dim + 1
         hankel = np.empty((embedding_dim * Nspace, m_cols), dtype=data_centered.dtype)

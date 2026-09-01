@@ -548,11 +548,11 @@ from openmodalpy import DMDAnalyzer
 
 dmd = DMDAnalyzer(file_path="data.mat", n_modes_save=10, rank=10)
 dmd.load_and_preprocess()
-dmd.perform_dmd(method="ls", delays=1)        # standard DMD
-dmd.perform_dmd(method="tls", delays=1)       # TLS-DMD
-dmd.perform_dmd(method="ls", delays=4,
+dmd.perform_dmd(method="ls", embedding_dim=1)        # standard DMD
+dmd.perform_dmd(method="tls", embedding_dim=1)       # TLS-DMD
+dmd.perform_dmd(method="ls", embedding_dim=4,
                 named_variant="hodmd")          # HODMD
-dmd.perform_dmd(method="tls", delays=4,
+dmd.perform_dmd(method="tls", embedding_dim=4,
                 named_variant="tls_hodmd")      # TLS-HODMD
 dmd.save_results()
 ```
@@ -599,11 +599,11 @@ criterion you used.
 **Key facts:**
 - Eigenvalues encode frequency (angle) and growth/decay (modulus)
 - LS regression assumes noise only in Z+; TLS allows errors on both sides
-- TLS only beats LS on noisy data at `delays=1`. Measured over 200 seeds on
+- TLS only beats LS on noisy data at `embedding_dim=1`. Measured over 200 seeds on
   A = [[0.9, 0.1], [-0.1, 0.8]] with noise at 3e-2 of the clean peak, TLS lands
-  closer to the true eigenvalues in 177/200 runs at `delays=1`, with a median
-  error ratio of 0.311. At `delays=3` the margin is almost gone (104/200, median
-  0.882), and at `delays=5` LS is better on average (95/200, median 1.051).
+  closer to the true eigenvalues in 177/200 runs at `embedding_dim=1`, with a median
+  error ratio of 0.311. At `embedding_dim=3` the margin is almost gone (104/200, median
+  0.882), and at `embedding_dim=5` LS is better on average (95/200, median 1.051).
   Delay embedding stacks shifted copies of one record, so the noise repeats
   across the Hankel rows. TLS assumes the errors in the two snapshot matrices
   are independent, and the Hankel structure breaks that assumption.
@@ -640,8 +640,8 @@ residual is not a bug.
 `hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations, not separate
 classes. The exact mapping is:
 
-- `method="hodmd"` ⟹ `perform_dmd(delays=<d>, method="ls")`
-- `method="tls-hodmd"` ⟹ `perform_dmd(delays=<d>, method="tls")`
+- `method="hodmd"` ⟹ `perform_dmd(embedding_dim=<d>, method="ls")`
+- `method="tls-hodmd"` ⟹ `perform_dmd(embedding_dim=<d>, method="tls")`
 
 where `<d>` is the delay embedding depth (default: case `embedding_dim`).
 
@@ -704,7 +704,7 @@ n_modes is the number of kept modes, and n_freq is the number of frequency bins.
 | TLS-HODMD | (d·Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
 | ST-POD | (d·Nspace, n_modes) | (n_modes,) | (Ns-d+1, n_modes) |
 
-Notes: **HODMD and TLS-HODMD** use delay embedding depth d (parameter `delays`).
+Notes: **HODMD and TLS-HODMD** use delay embedding depth d (parameter `embedding_dim`).
 SPOD eigenvalues store one row per frequency bin with one entry per Welch block.
 PSD-POD stacks its blocks and frequencies on one axis, so the first axis of its
 time coefficients is `n_blocks * n_freq`, where `n_freq = nfft/2 + 1`.
@@ -750,13 +750,13 @@ BSMD has a distinct output structure; refer to its docstring.
       "params": { "band_edges": [0, 0.15, 0.35, 1.0],
                   "band_scale": "normalized_nyquist" } },
     { "id": "dmd_ls",   "method": "dmd",
-      "params": { "method": "ls", "delays": 1 } },
+      "params": { "method": "ls", "embedding_dim": 1 } },
     { "id": "dmd_tls",  "method": "dmd",
-      "params": { "method": "tls", "delays": 1 } },
+      "params": { "method": "tls", "embedding_dim": 1 } },
     { "id": "hodmd",    "method": "hodmd",
-      "params": { "delays": 4 } },
+      "params": { "embedding_dim": 4 } },
     { "id": "tls_hodmd","method": "tls-hodmd",
-      "params": { "delays": 4 } },
+      "params": { "embedding_dim": 4 } },
     { "id": "spod",     "method": "spod" },
     { "id": "psd_pod",  "method": "psd-pod" },
     { "id": "bsmd",     "method": "bsmd" },
@@ -808,9 +808,8 @@ openmodalpy results inspect <path>
 | `--n-modes` | Override n_modes_save |
 | `--nfft` | Override FFT block size |
 | `--overlap` | Override overlap fraction |
-| `--embedding-dim` | Override delay depth |
+| `--embedding-dim` | Override delay embedding dimension (DMD, HODMD, ST-POD) |
 | `--method ls\|tls` | DMD regression model |
-| `--delays` | DMD delay embedding depth |
 | `--band-edges` | mPOD band edges (comma-separated) |
 | `--band-scale` | mPOD band scale (`hz` or `normalized_nyquist`) |
 | `--results-dir` | Override results root |
@@ -973,7 +972,7 @@ res = read_results("path/to/result.hdf5")
 DMD and ST-POD, `nfft` is 1 and `overlap` is 0.0: those methods never form an
 FFT block, so the pair is a stamp, not a setting.
 
-DMD also records `dmd_variant`, `dmd_method`, `dmd_delays`, `dmd_named_variant`.
+DMD also records `dmd_variant`, `dmd_method`, `dmd_embedding_dim`, `dmd_named_variant`.
 
 **Provenance** — every file written through `write_results` also carries a
 `prov_*` block describing the software that produced it. Read it as
@@ -1015,7 +1014,7 @@ Key test categories:
 |------|--------------|
 | `test_pod.py` | POD eigenvalues, mode shapes, energy convergence |
 | `test_mpod.py` | Band filtering, frequency separation |
-| `test_dmd.py` | Exact DMD, TLS, delays, HODMD metadata, roundtrip |
+| `test_dmd.py` | Exact DMD, TLS, embedding_dim, HODMD metadata, roundtrip |
 | `test_stpod.py` | Delay embedding, Hankel shape, validation |
 | `test_spod_plot.py` | SPOD plotting paths |
 | `test_bsmd_core.py` | BSMD triad detection, energy map |

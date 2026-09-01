@@ -38,7 +38,7 @@ def test_method_registry_exposes_mpod_psd_pod_and_hodmd() -> None:
     assert "Fourier realizations" in psd_pod.description
     assert hodmd.method_id == "hodmd"
     assert "Hankel" in hodmd.description
-    assert "delays" in hodmd.parameter_help
+    assert "embedding_dim" in hodmd.parameter_help
     assert tls_hodmd.method_id == "tls_hodmd"
 
 
@@ -80,11 +80,11 @@ def test_analyze_from_config_routes_hodmd_aliases(tmp_path: Path, monkeypatch) -
         def load_and_preprocess(self):
             return None
 
-        def perform_dmd(self, *, method: str, delays: int, named_variant: str | None = None):
+        def perform_dmd(self, *, method: str, embedding_dim: int, named_variant: str | None = None):
             captured.append(
                 {
                     "method": method,
-                    "delays": delays,
+                    "embedding_dim": embedding_dim,
                     "named_variant": named_variant,
                     "results_dir": self._kwargs["results_dir"],
                 }
@@ -112,10 +112,10 @@ def test_analyze_from_config_routes_hodmd_aliases(tmp_path: Path, monkeypatch) -
     outcome_tls = analyze_from_config(config_path, method="tls-hodmd", overrides={"generate_plots": False})
 
     assert captured[0]["method"] == "ls"
-    assert captured[0]["delays"] == 5
+    assert captured[0]["embedding_dim"] == 5
     assert captured[0]["named_variant"] == "hodmd"
     assert captured[1]["method"] == "tls"
-    assert captured[1]["delays"] == 5
+    assert captured[1]["embedding_dim"] == 5
     assert captured[1]["named_variant"] == "tls_hodmd"
     assert outcome_hodmd.method == "hodmd"
     assert outcome_tls.method == "tls_hodmd"
@@ -158,8 +158,8 @@ def test_analyze_from_config_forwards_dmd_variant_options(tmp_path: Path, monkey
         def load_and_preprocess(self):
             captured["loaded"] = True
 
-        def perform_dmd(self, *, method: str, delays: int, named_variant: str | None = None):
-            captured["perform"] = {"method": method, "delays": delays}
+        def perform_dmd(self, *, method: str, embedding_dim: int, named_variant: str | None = None):
+            captured["perform"] = {"method": method, "embedding_dim": embedding_dim}
 
         def save_results(self):
             results_dir = Path(captured["init"]["results_dir"])
@@ -185,7 +185,7 @@ def test_analyze_from_config_forwards_dmd_variant_options(tmp_path: Path, monkey
         method="dmd",
         overrides={
             "method": "tls",
-            "delays": 4,
+            "embedding_dim": 4,
             "generate_plots": False,
             "results_root": str(tmp_path / "custom_results"),
             "figures_root": str(tmp_path / "custom_figures"),
@@ -194,7 +194,7 @@ def test_analyze_from_config_forwards_dmd_variant_options(tmp_path: Path, monkey
 
     init_kwargs = captured["init"]
     assert captured["loaded"] is True
-    assert captured["perform"] == {"method": "tls", "delays": 4}
+    assert captured["perform"] == {"method": "tls", "embedding_dim": 4}
     assert init_kwargs["file_path"] == "toy_case"
     assert callable(init_kwargs["data_loader"])
     # Compare path components, not a substring: on Windows the separator is "\",
@@ -203,6 +203,64 @@ def test_analyze_from_config_forwards_dmd_variant_options(tmp_path: Path, monkey
     assert Path(init_kwargs["figures_dir"]).parts[-2:] == ("custom_figures", "dmd_cli")
     assert outcome.method == "dmd"
     assert outcome.executed is True
+
+
+def test_config_params_embedding_dim_reaches_dmd_analyzer(tmp_path: Path, monkeypatch) -> None:
+    """Check run params embedding_dim reaches perform_dmd."""
+    config_path = tmp_path / "suite.jsonc"
+    _write_jsonc(
+        config_path,
+        {
+            "name": "Toy suite",
+            "description": "Toy suite",
+            "case": {
+                "name": "toy_case",
+                "case_type": "analytical",
+                "data": {
+                    "kind": "generator",
+                    "name": "double_gyre",
+                    "params": {"Nx": 8, "Ny": 4, "Nt": 12},
+                },
+                "spatial_weight_type": "uniform",
+                "generate_plots": False,
+                "results_root": str(tmp_path / "results"),
+                "figures_root": str(tmp_path / "figures"),
+            },
+            "runs": [
+                {
+                    "id": "tls",
+                    "method": "dmd",
+                    "params": {"method": "tls", "embedding_dim": 3},
+                },
+            ],
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeDMDAnalyzer:
+        def __init__(self, **kwargs):
+            self._kwargs = kwargs
+
+        def run_analysis(self, *, plots, run_id=None, snapshot_limit=None, **kwargs):
+            self.load_and_preprocess()
+            self.perform_dmd(**kwargs)
+            self.save_results()
+
+        def load_and_preprocess(self):
+            return None
+
+        def perform_dmd(self, *, method: str, embedding_dim: int, named_variant: str | None = None):
+            captured["perform"] = {"method": method, "embedding_dim": embedding_dim}
+
+        def save_results(self):
+            results_dir = Path(self._kwargs["results_dir"])
+            results_dir.mkdir(parents=True, exist_ok=True)
+            (results_dir / "fake.hdf5").write_text("fake")
+
+    monkeypatch.setattr("openmodalpy.commands.DMDAnalyzer", FakeDMDAnalyzer)
+    run_from_config(config_path)
+    assert captured["perform"] == {"method": "tls", "embedding_dim": 3}
 
 
 def test_config_rank_reaches_the_dmd_analyzer(tmp_path: Path, monkeypatch) -> None:
@@ -280,7 +338,7 @@ def test_config_rank_reaches_the_dmd_analyzer(tmp_path: Path, monkeypatch) -> No
     # A per-run override must win over the case value.
     assert build("svht", {"rank": 5}) == 5
     # And an override must not wipe a case value it does not mention.
-    assert build(7, {"delays": 1}) == 7
+    assert build(7, {"embedding_dim": 1}) == 7
 
 
 def test_config_without_rank_refuses_through_the_real_analyzer(tmp_path: Path) -> None:
@@ -390,7 +448,7 @@ def test_config_energy_fraction_reaches_the_dmd_analyzer(tmp_path: Path, monkeyp
     init_ov = build(0.95, {"energy_fraction": 0.8})
     assert init_ov["energy_fraction"] == 0.8
     # An override that does not mention energy_fraction must not drop the case value.
-    init_keep = build(0.92, {"delays": 1})
+    init_keep = build(0.92, {"embedding_dim": 1})
     assert init_keep["energy_fraction"] == 0.92
 
 
@@ -439,7 +497,7 @@ def test_run_from_config_executes_runs_schema(tmp_path: Path, monkeypatch) -> No
                 {"id": "mpod", "method": "mpod"},
                 {"id": "psd", "method": "psd-pod"},
                 {"id": "hodmd", "method": "hodmd"},
-                {"id": "tls", "method": "dmd", "params": {"method": "tls", "delays": 3}},
+                {"id": "tls", "method": "dmd", "params": {"method": "tls", "embedding_dim": 3}},
             ],
         },
     )
@@ -459,7 +517,7 @@ def test_run_from_config_executes_runs_schema(tmp_path: Path, monkeypatch) -> No
         ("mpod", "mpod", {}),
         ("psd", "psd_pod", {}),
         ("hodmd", "hodmd", {}),
-        ("tls", "dmd", {"method": "tls", "delays": 3}),
+        ("tls", "dmd", {"method": "tls", "embedding_dim": 3}),
     ]
 
 
@@ -666,7 +724,7 @@ def test_cli_analyze_subcommand_routes_overrides(tmp_path: Path, monkeypatch, ca
             str(config_path),
             "--method",
             "tls",
-            "--delays",
+            "--embedding-dim",
             "4",
             "--no-plots",
             "--run-id",
@@ -680,7 +738,7 @@ def test_cli_analyze_subcommand_routes_overrides(tmp_path: Path, monkeypatch, ca
     assert captured["run_id"] == "custom_run"
     assert captured["dry_run"] is False
     assert captured["overrides"]["method"] == "tls"
-    assert captured["overrides"]["delays"] == 4
+    assert captured["overrides"]["embedding_dim"] == 4
     assert captured["overrides"]["generate_plots"] is False
     assert capsys.readouterr().out == ""
 

@@ -56,7 +56,6 @@ class TestCollectOverridesAllPaths:
             "band_scale": None,
             "filter_kind": None,
             "dmd_method": None,
-            "delays": None,
             "solver": None,
         }
         defaults.update(kwargs)
@@ -147,12 +146,6 @@ class TestCollectOverridesAllPaths:
         args = self._make_args(dmd_method="tls")
         result = _collect_overrides(args)
         assert result == {"method": "tls"}
-
-    def test_collect_overrides_delays(self) -> None:
-        """--delays override is collected."""
-        args = self._make_args(delays=5)
-        result = _collect_overrides(args)
-        assert result == {"delays": 5}
 
     def test_collect_overrides_solver(self) -> None:
         """--solver override is collected."""

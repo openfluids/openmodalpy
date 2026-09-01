@@ -293,7 +293,7 @@ def _build_document(dmd_cls, pydmd_version: str) -> dict:
                 "class": "openmodalpy.DMDAnalyzer",
                 "rank": RANK,
                 "n_modes_save": RANK,
-                "delays": 1,
+                "embedding_dim": 1,
                 "spatial_weight_type": "uniform",
                 "mean_subtraction": False,
                 "methods": {

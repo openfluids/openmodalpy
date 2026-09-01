@@ -579,7 +579,7 @@ def test_legacy_capitalised_file_loads_through_dmd(tmp_path: Path) -> None:
     np.testing.assert_array_equal(analyzer.time_coefficients, coeffs)
     np.testing.assert_array_equal(analyzer.amplitudes, np.abs(eigenvalues))
     assert analyzer._dmd_method == "ls"
-    assert analyzer._dmd_delays == 1
+    assert analyzer._dmd_embedding_dim == 1
     assert analyzer._dmd_named_variant == "dmd"
 
 

@@ -69,7 +69,7 @@
       "class": "openmodalpy.DMDAnalyzer",
       "rank": 5,
       "n_modes_save": 5,
-      "delays": 1,
+      "embedding_dim": 1,
       "spatial_weight_type": "uniform",
       "mean_subtraction": false,
       "methods": {
