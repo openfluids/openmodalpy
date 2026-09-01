@@ -142,6 +142,10 @@ de-biased for noisy data). The TLS advantage on noisy data is a `delays=1`
 property. It decays as `delays` grows, and by `delays=5` plain LS is closer on
 average. Do not choose `tls` and deep delays together to fight noise.
 
+`hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations.
+Call `perform_dmd(delays=<d>, method="ls")` or `perform_dmd(delays=<d>, method="tls")`
+where `<d>` is the delay embedding depth.
+
 The BSMD implementation follows Schmidt (2020) and was inspired by the reference
 [MATLAB implementation](https://github.com/olivertschmidt/bmd).
 

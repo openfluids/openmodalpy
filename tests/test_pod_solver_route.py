@@ -209,3 +209,86 @@ def test_analyze_from_spec_passes_solver_to_perform_pod(tmp_path: Path, monkeypa
     assert outcome.success and outcome.executed
     assert captured, "perform_pod was never called"
     assert captured[0].get("solver") == "svd"
+
+
+def test_solver_route_numerical_agreement_shipped_generators() -> None:
+    """eigh and svd routes agree within derived error bound on shipped data.
+
+    Pins FACT 1: the two routes are numerically distinct and never bitwise
+    identical; disagreement on shipped cases is O(lambda_max * eps).
+
+    The eigh route forms the covariance Q^T W Q, whose entries each sum
+    Nspace products, then eigendecomposes it. By Weyl, a symmetric backward
+    error E moves each eigenvalue by at most ||E||_2, and inner-product
+    round-off gives ||E||_2 about sqrt(Nspace) * eps * lambda_max under
+    the usual statistical model (Wilkinson). So the tolerance is:
+
+        atol = sqrt(Nspace) * eps * lambda_max
+        rtol = 0 (absolute tolerance against lambda_max, not per-eigenvalue)
+
+    Measured margins under this bound: 9x (double_gyre), 71x (taylor_green).
+    """
+    from openmodalpy import generate_example_dataset
+
+    eps = np.finfo(np.float64).eps
+
+    # Test double_gyre
+    data_dg = generate_example_dataset("double_gyre")
+    a_dg_e = PODAnalyzer(data=data_dg, n_modes_save=3)
+    a_dg_e.load_and_preprocess()
+    a_dg_e.perform_pod(solver="eigh")
+
+    a_dg_s = PODAnalyzer(data=data_dg, n_modes_save=3)
+    a_dg_s.load_and_preprocess()
+    a_dg_s.perform_pod(solver="svd")
+
+    # Verify they are NOT bitwise identical
+    assert not np.allclose(a_dg_e.modes, a_dg_s.modes, rtol=0, atol=0), "modes must differ between routes"
+    assert not np.allclose(a_dg_e.eigenvalues, a_dg_s.eigenvalues, rtol=0, atol=0), (
+        "eigenvalues must differ between routes"
+    )
+
+    # Verify they agree within derived tolerance
+    n_modes = a_dg_e.eigenvalues.shape[0]
+    lambda_max = float(np.max(a_dg_e.eigenvalues))
+    nspace = data_dg["q"].shape[1]
+    atol_dg = np.sqrt(nspace) * eps * lambda_max
+
+    np.testing.assert_allclose(
+        a_dg_e.eigenvalues[:n_modes],
+        a_dg_s.eigenvalues[:n_modes],
+        rtol=0,
+        atol=atol_dg,
+        err_msg=f"double_gyre eigenvalues exceed tolerance {atol_dg}",
+    )
+
+    # Test taylor_green (returns only 1 mode, not 3; read the length, never assume)
+    data_tg = generate_example_dataset("taylor_green")
+    a_tg_e = PODAnalyzer(data=data_tg, n_modes_save=3)
+    a_tg_e.load_and_preprocess()
+    a_tg_e.perform_pod(solver="eigh")
+
+    a_tg_s = PODAnalyzer(data=data_tg, n_modes_save=3)
+    a_tg_s.load_and_preprocess()
+    a_tg_s.perform_pod(solver="svd")
+
+    # Verify they are NOT bitwise identical
+    assert not np.allclose(a_tg_e.modes, a_tg_s.modes, rtol=0, atol=0), "modes must differ between routes"
+    assert not np.allclose(a_tg_e.eigenvalues, a_tg_s.eigenvalues, rtol=0, atol=0), (
+        "eigenvalues must differ between routes"
+    )
+
+    # Verify they agree within derived tolerance
+    # taylor_green may return fewer modes than requested
+    n_modes = min(a_tg_e.eigenvalues.shape[0], a_tg_s.eigenvalues.shape[0])
+    lambda_max = float(np.max(a_tg_e.eigenvalues))
+    nspace = data_tg["q"].shape[1]
+    atol_tg = np.sqrt(nspace) * eps * lambda_max
+
+    np.testing.assert_allclose(
+        a_tg_e.eigenvalues[:n_modes],
+        a_tg_s.eigenvalues[:n_modes],
+        rtol=0,
+        atol=atol_tg,
+        err_msg=f"taylor_green eigenvalues exceed tolerance {atol_tg}",
+    )

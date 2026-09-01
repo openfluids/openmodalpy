@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- DOC.md says that `solver="eigh"` and `solver="svd"` are two different
+  numerical routes, and when to prefer each.
+- DOC.md and README say that `hodmd` and `tls-hodmd` are `DMDAnalyzer`
+  settings, and show the call. DOC.md adds a table of the array shapes
+  each method returns.
 - SPOD closed-form check now runs the default 0.5 block overlap, and the two
   other overlaps around it.
 - `SPODAnalyzer` accepts `n_modes_save`. SPOD makes one mode per Welch block at
@@ -95,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `np.allclose` that used to wave through a small off-diagonal is gone.
 
 ### Fixed
+
+- DOC.md pointed to `commands.py` for `METHOD_REGISTRY`. It lives in `specs.py`.
 
 - `prov_blas` used to report a thread count too, read from the idle pool at
   collection time. That count could contradict `prov_blas_threads`, the

@@ -339,14 +339,27 @@ indistinguishable from the noise floor. The snapshot / Gram route cannot
 resolve below \(\lambda / \lambda_{\max} \sim n\,\varepsilon\). Do not read the
 number of returned eigenvalues as the rank of the snapshot matrix itself.
 
-**Choosing the solver route.** POD defaults to `solver="eigh"`: it factors
+**The two solver routes.** POD defaults to `solver="eigh"`: it factors
 the correlation / Gram kernel. Pass `solver="svd"` (or, from a config,
 `params: {solver: "svd"}`) to factor the weighted snapshot matrix instead.
 ST-POD already uses the SVD route internally and has no user knob.
 
-A singular-value ratio \(r\) is an energy ratio \(r^{2}\). The gap between the
-routes therefore starts to matter around energy \(\sim 10^{-14}\) on ordinary
-velocity POD (where \(r \sim 10^{-7}\)). Reach for `svd` when that matters:
+The routes are numerically distinct and never bitwise identical.
+Disagreement on shipped cases (200 to 500 snapshots, 3200 to 5000 spatial points)
+is order \(\lambda_{\max} \cdot \varepsilon\), about 1e-14 on eigenvalues of order
+70. This is the expected consequence of two algorithms, not a defect. Both routes
+are \(O(n_{s}^{2}\,n_{x})\); only the constant differs, with `eigh` cheaper when
+\(n_{\mathrm{samples}} \ll n_{\mathrm{space}}\). On well-separated modes both
+return the same leading subspace.
+
+Prefer `solver="svd"` for ill-conditioned data (large condition number \(\kappa\))
+because the eigh route squares the condition number when forming the covariance.
+The SVD error grows as \(\kappa\), but the eigh error grows as \(\kappa^{2}\).
+Past \(\kappa \approx 10^{7}\), eigh starts returning fewer modes than requested
+because the smallest eigenvalue falls below the solver's threshold
+\(\kappa^{2} \cdot \varepsilon\).
+
+Reach for `svd` when that matters:
 
 - delay-embedded / Hankel data (ST-POD’s case; already on this path)
 - strongly anisotropic or stretched spatial weights, where the weighted
@@ -354,10 +367,6 @@ velocity POD (where \(r \sim 10^{-7}\)). Reach for `svd` when that matters:
 - nearly redundant snapshots from oversampled slow dynamics
 - mid-spectrum eigenvector quality, which degrades from squaring before the
   hard \(n\,\varepsilon\) floor is hit
-
-Both routes are \(O(n_{s}^{2}\,n_{x})\). Only the constant differs; `eigh` is
-cheaper when \(n_{\mathrm{samples}} \ll n_{\mathrm{space}}\). On well-separated
-modes both return the same leading subspace.
 
 ```python
 pod.perform_pod()                 # default: correlation / Gram (eigh)
@@ -628,7 +637,13 @@ residual is not a bug.
 
 ### 7. HODMD — Higher-Order DMD
 
-Same class as DMD (`DMDAnalyzer`), with `delays >= 2`.
+`hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations, not separate
+classes. The exact mapping is:
+
+- `method="hodmd"` ⟹ `perform_dmd(delays=<d>, method="ls")`
+- `method="tls-hodmd"` ⟹ `perform_dmd(delays=<d>, method="tls")`
+
+where `<d>` is the delay embedding depth (default: case `embedding_dim`).
 
 **Key facts:**
 - Delay-embeds snapshots into Hankel vectors before forming pairs
@@ -671,6 +686,32 @@ every offender. Dynamic triad selection (`use_static_triads=False`) is not
 implemented and raises `NotImplementedError`.
 
 ---
+## Output shapes from load_results
+
+After running an analysis, the shapes of the returned arrays depend on the method.
+All shapes are measured with uniform spatial weights unless otherwise noted.
+Here Nspace is the number of spatial grid points, Ns is the number of snapshots,
+n_modes is the number of kept modes, and n_freq is the number of frequency bins.
+
+| Method | modes | eigenvalues/eigs | time_coefficients |
+|--------|-------|------------------|--------------------|
+| POD | (Nspace, n_modes) | (n_modes,) | (Ns, n_modes) |
+| MPOD | (Nspace, n_modes) | (n_modes,) | (Ns, n_modes) |
+| PSD-POD | (Nspace, n_modes) | (n_modes,) | (n_blocks·n_freq, n_modes) |
+| SPOD | (n_freq, Nspace, n_modes) | (n_freq, n_blocks) | (n_freq, n_blocks, n_modes) |
+| DMD | (Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
+| HODMD | (d·Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
+| TLS-HODMD | (d·Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
+| ST-POD | (d·Nspace, n_modes) | (n_modes,) | (Ns-d+1, n_modes) |
+
+Notes: **HODMD and TLS-HODMD** use delay embedding depth d (parameter `delays`).
+SPOD eigenvalues store one row per frequency bin with one entry per Welch block.
+PSD-POD stacks its blocks and frequencies on one axis, so the first axis of its
+time coefficients is `n_blocks * n_freq`, where `n_freq = nfft/2 + 1`.
+BSMD has a distinct output structure; refer to its docstring.
+
+---
+
 
 ## Configuration System
 
@@ -1080,7 +1121,7 @@ To add a new decomposition:
 
 In all cases:
 - Subclass `BaseAnalyzer`
-- Register in `METHOD_REGISTRY` in `commands.py`
+- Register in `METHOD_REGISTRY` in `specs.py`
 - Add a `_run_*` function and a dispatch entry in `analyze_from_spec`
 - Add a JSONC example config
 - Add tests
