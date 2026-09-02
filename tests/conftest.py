@@ -172,3 +172,17 @@ def pytest_collection_modifyitems(config, items):
             )
     if problems:
         raise pytest.UsageError("characterization label registry out of sync:\n  " + "\n  ".join(problems))
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Print the performance tripwire records after the run.
+
+    The records go here, not to ``print``, for two reasons. pytest captures
+    stdout, so a printed line does not reach a plain ``-q`` gate log. A
+    progress bar also writes carriage returns, which overwrote the lines when
+    they went to stdout during the test.
+    """
+    from tests.test_perf_tripwire import PERF_RECORDS
+
+    for line in PERF_RECORDS:
+        terminalreporter.write_line(line)

@@ -33,6 +33,12 @@ exports, string dispatch and the docs before it went.
 
 ### Added
 
+- A speed and memory tripwire test runs three cases and measures each one:
+  DMD with a delay embedding, POD, and SPOD. Each case has a wall-time
+  ceiling and a peak-memory ceiling taken from measured numbers, with a wide
+  margin, so the test only fails when a change makes a case several times
+  slower or several times larger. The measured numbers print after the run
+  on a `PERF` line, so a slow machine is easy to tell from a slow change.
 - DOC.md says that `solver="eigh"` and `solver="svd"` are two different
   numerical routes, and when to prefer each.
 - DOC.md and README say that `hodmd` and `tls-hodmd` are `DMDAnalyzer`
