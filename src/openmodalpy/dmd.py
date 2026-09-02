@@ -522,50 +522,9 @@ class DMDAnalyzer(BaseAnalyzer):
             datasets["z"] = self.data["z"]
         return datasets, self._get_metadata()
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load DMD results and restore state."""
-        super().load_results(filename=filename)
-
-        from openmodalpy.core.results import read_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                self.analysis_type,
-            )
-        path = os.path.join(self.results_dir, filename)
-
-        res = read_results(path)
-        # Validate required fields.
-        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            missing = [
-                n
-                for n, v in (
-                    ("modes", res.modes),
-                    ("eigenvalues", res.eigenvalues),
-                    ("time_coefficients", res.time_coefficients),
-                )
-                if v is None
-            ]
-            raise KeyError(f"{path} is not a DMD result file: missing {', '.join(missing)}")
-
-        # Load amplitudes (backward compatible).
-        if res.amplitudes is not None:
-            self.amplitudes = res.amplitudes
-        else:
-            self.amplitudes = np.abs(self.eigenvalues)
-
-        # Load continuous-time eigenvalues if present.
-        if res.omega is not None:
-            self.omega = res.omega
-
-        # Restore DMD configuration from metadata.
-        self._dmd_method = str(res.attrs.get("dmd_method", "ls"))
-        self._dmd_embedding_dim = int(res.attrs.get("dmd_embedding_dim", 1))
-        self._dmd_named_variant = str(res.attrs.get("dmd_named_variant", "dmd"))
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """DMD requires modes, eigenvalues, and time coefficients."""
+        return ("modes", "eigenvalues", "time_coefficients")
 
     def _plot_run(self, run_id: str | None = None) -> None:
         """Default figures after run_analysis — the CLI dmd set.
@@ -582,6 +541,21 @@ class DMDAnalyzer(BaseAnalyzer):
     def _assign_loaded_results(self, res: AnalysisResults) -> None:
         """Assign loaded results and cap n_modes_save."""
         super()._assign_loaded_results(res)
+
+        # Load amplitudes (backward compatible).
+        if res.amplitudes is not None:
+            self.amplitudes = res.amplitudes
+        else:
+            self.amplitudes = np.abs(self.eigenvalues)
+
+        # Load continuous-time eigenvalues if present.
+        if res.omega is not None:
+            self.omega = res.omega
+
+        # Restore DMD configuration from metadata.
+        self._dmd_method = str(res.attrs.get("dmd_method", "ls"))
+        self._dmd_embedding_dim = int(res.attrs.get("dmd_embedding_dim", 1))
+        self._dmd_named_variant = str(res.attrs.get("dmd_named_variant", "dmd"))
 
         # Cap n_modes_save to actual modes available (for narrow files loaded into wide cap).
         n_modes_available = self.modes.shape[1] if self.modes.ndim >= 2 else self.modes.size

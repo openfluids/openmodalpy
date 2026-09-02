@@ -864,39 +864,17 @@ class BSMDAnalyzer(BaseAnalyzer):
                 self._rebind_qhat_dataset(qhat_cache_path)
         logger.info("BSMD results saved to %s", results_path)
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load BSMD results and restore state."""
-        super().load_results(filename=filename)
-
-        from openmodalpy.core.results import read_results
-
-        if filename is None:
-            load_path = os.path.join(
-                self.results_dir,
-                make_result_filename(self.data_root, self.nfft, self.overlap, self.data.get("Ns", 0), "bsmd"),
-            )
-        else:
-            load_path = os.path.join(self.results_dir, filename)
-
-        res = read_results(load_path)
-        # Validate conjugation stamp.
+    def _assign_loaded_results(self, res: AnalysisResults) -> None:
+        """Assign loaded results and reshape W to column form."""
+        # Validate conjugation stamp before assigning.
         stamp = res.attrs.get("bispectrum_conjugation")
         if stamp != "sum_frequency_conjugated":
             raise ValueError(
-                f"{load_path} was written by a pre-fix BSMD build in which the "
+                f"{res.path} was written by a pre-fix BSMD build in which the "
                 "sum-frequency term was not conjugated; its eigenvalues and modes "
                 "are invalid. Recompute from the raw data."
             )
 
-        # BSMD-specific fields.
-        self.triads = res.triads if res.triads is not None else np.array([])
-        self.modes1 = res.modes1 if res.modes1 is not None else np.array([])
-        self.modes2 = res.modes2 if res.modes2 is not None else np.array([])
-        if res.energy_map is not None:
-            self.energy_map = res.energy_map
-
-    def _assign_loaded_results(self, res: AnalysisResults) -> None:
-        """Assign loaded results and reshape W to column form."""
         super()._assign_loaded_results(res)
 
         if res.W is not None:
@@ -904,6 +882,13 @@ class BSMDAnalyzer(BaseAnalyzer):
 
             n_space = int(res.modes1.shape[1]) if res.modes1 is not None and res.modes1.ndim == 2 else None
             self.W = _as_spatial_weight_column(res.W, n_space)
+
+        # BSMD-specific fields.
+        self.triads = res.triads if res.triads is not None else np.array([])
+        self.modes1 = res.modes1 if res.modes1 is not None else np.array([])
+        self.modes2 = res.modes2 if res.modes2 is not None else np.array([])
+        if res.energy_map is not None:
+            self.energy_map = res.energy_map
 
     def _triad_plot_order(self, lambdas: NDArray[np.floating], valid_idx: NDArray[np.integer]) -> list[int]:
         """Canonical plot order of ``valid_idx`` triads: |lambda| descending, ties by triad tuple.

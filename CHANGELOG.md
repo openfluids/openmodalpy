@@ -85,6 +85,15 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- `load_results` now reads the result file once. Every method rebuilt the
+  file name after the base class had already read the file, then read it a
+  second time to reach a few fields. A POD load opened the file twice and
+  built every array twice; so did SPOD, ST-POD, DMD, PSD-POD and BSMD. The
+  fields each method wants now come from the first read. Six `load_results`
+  overrides are gone, and each method names the datasets it demands instead
+  of writing its own check.
+- BSMD checks the conjugation stamp before it assigns anything, so a file
+  from a pre-fix build no longer leaves the analyzer half filled.
 - ARPACK now gets a contiguous matrix. It does one matrix-vector product per
   iteration, and a sliced view made every one of them stride through memory.
   DMD with `embedding_dim=4` on a 64 MB field fell from 2.559 s to 0.557 s.

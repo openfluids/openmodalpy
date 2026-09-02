@@ -338,43 +338,9 @@ class STPODAnalyzer(BaseAnalyzer):
         attrs["Nspace"] = self.modes.shape[0] // self.embedding_dim
         return datasets, attrs
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load ST-POD results and restore state."""
-        super().load_results(filename=filename)
-
-        from openmodalpy.core.results import read_results
-
-        if not filename:
-            filename = (
-                f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_d{self.embedding_dim}_{self.analysis_type}.hdf5"
-            )
-        load_path = os.path.join(self.results_dir, filename)
-
-        res = read_results(load_path)
-        # Validate required fields.
-        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            missing = [
-                n
-                for n, v in (
-                    ("modes", res.modes),
-                    ("eigenvalues", res.eigenvalues),
-                    ("time_coefficients", res.time_coefficients),
-                )
-                if v is None
-            ]
-            raise KeyError(f"{load_path} is not an ST-POD result file: missing {', '.join(missing)}")
-
-        # Restore embedding_dim.
-        if "embedding_dim" in res.attrs:
-            self.embedding_dim = res.attrs["embedding_dim"]
-
-        # Restore energy tracking metadata.
-        self.total_energy = float("nan")
-        self.energy_captured_fraction = float("nan")
-        if "total_energy" in res.attrs:
-            self.total_energy = float(res.attrs["total_energy"])
-        if "energy_captured_fraction" in res.attrs:
-            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """ST-POD requires modes, eigenvalues, and time coefficients."""
+        return ("modes", "eigenvalues", "time_coefficients")
 
     def _assign_loaded_results(self, res: AnalysisResults) -> None:
         """Assign loaded results, restore embedding_dim, and reshape W."""
@@ -396,6 +362,13 @@ class STPODAnalyzer(BaseAnalyzer):
         # Cap n_modes_save to actual modes available.
         if self.modes.ndim == 2:
             self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
+
+        self.total_energy = float("nan")
+        self.energy_captured_fraction = float("nan")
+        if "total_energy" in res.attrs:
+            self.total_energy = float(res.attrs["total_energy"])
+        if "energy_captured_fraction" in res.attrs:
+            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
 
     def save_results(self, filename: str | None = None) -> None:
         """Save ST-POD results using embedding-aware filename."""

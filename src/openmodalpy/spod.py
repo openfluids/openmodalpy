@@ -453,35 +453,9 @@ class SPODAnalyzer(BaseAnalyzer):
             )
         logger.info("SPOD results saved to %s", save_path)
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load SPOD results and restore state."""
-        super().load_results(filename=filename)
-
-        from openmodalpy.core.results import read_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root, self.nfft, self.overlap, self.data.get("Ns", 0), self.analysis_type
-            )
-        load_path = os.path.join(self.results_dir, filename)
-
-        res = read_results(load_path)
-        # Validate required fields.
-        if res.modes is None or res.eigenvalues is None:
-            missing = [n for n, v in (("modes", res.modes), ("eigenvalues", res.eigenvalues)) if v is None]
-            raise KeyError(f"{load_path} is not a SPOD result file: missing {', '.join(missing)}")
-
-        # SPOD-specific fields.
-        if res.freq is not None:
-            self.freq = res.freq
-        if res.st is not None:
-            self.St = res.st
-        if res.FFTBlocks is not None:
-            self.qhat = res.FFTBlocks
-
-        # Update fs from dt if present.
-        if "dt" in self.data:
-            self.fs = 1.0 / self._require_dt()
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """SPOD requires modes and eigenvalues."""
+        return ("modes", "eigenvalues")
 
     ############################################################
     # Main Analysis Pipeline Orchestration                     #
@@ -495,6 +469,16 @@ class SPODAnalyzer(BaseAnalyzer):
 
             n_space = int(res.modes.shape[1]) if res.modes is not None and res.modes.ndim == 3 else None
             self.W = _as_spatial_weight_column(res.W, n_space)
+
+        if res.freq is not None:
+            self.freq = res.freq
+        if res.st is not None:
+            self.St = res.st
+        if res.FFTBlocks is not None:
+            self.qhat = res.FFTBlocks
+
+        if "dt" in self.data:
+            self.fs = 1.0 / self._require_dt()
 
     @staticmethod
     def _run_plot(method: Callable[..., None], options: dict | None) -> None:

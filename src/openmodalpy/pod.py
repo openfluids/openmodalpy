@@ -346,42 +346,6 @@ class PODAnalyzer(BaseAnalyzer):
         attrs["Nspace"] = self.modes.shape[0]
         return datasets, attrs
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load POD results and restore state."""
-        super().load_results(filename=filename)
-
-        from openmodalpy.core.results import read_results
-
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-        load_path = os.path.join(self.results_dir, filename)
-
-        res = read_results(load_path)
-        # Validate required fields before accepting.
-        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            missing = [
-                n
-                for n, v in (
-                    ("modes", res.modes),
-                    ("eigenvalues", res.eigenvalues),
-                    ("time_coefficients", res.time_coefficients),
-                )
-                if v is None
-            ]
-            raise KeyError(f"{load_path} is not a {self.analysis_type} result file: missing {', '.join(missing)}")
-
-        # Cap mode count: if a file is older, it may have fewer modes than n_modes_save.
-        if self.modes.ndim == 2:
-            self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
-
-        # Capture energy metadata if present.
-        self.total_energy = float("nan")
-        self.energy_captured_fraction = float("nan")
-        if "total_energy" in res.attrs:
-            self.total_energy = float(res.attrs["total_energy"])
-        if "energy_captured_fraction" in res.attrs:
-            self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
-
     def save_results(self, filename: str | None = None) -> None:
         """Save POD results using a simplified harmonized name."""
         # POD has no primary Welch parameters, so use a simplified scheme.
@@ -407,7 +371,6 @@ class PODAnalyzer(BaseAnalyzer):
             self.total_energy = float(res.attrs["total_energy"])
         if "energy_captured_fraction" in res.attrs:
             self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
-
         if self.modes.ndim == 2:
             self.n_modes_save = min(self.n_modes_save, self.modes.shape[1])
 

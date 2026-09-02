@@ -221,33 +221,9 @@ class PSDPODAnalyzer(BaseAnalyzer):
         super().save_results(filename=filename)
         self.results_path = os.path.join(self.results_dir, filename)
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load PSD-POD results and restore state."""
-        super().load_results(filename=filename)
-
-        from openmodalpy.core.results import read_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                self.analysis_type,
-            )
-        load_path = os.path.join(self.results_dir, filename)
-
-        res = read_results(load_path)
-        # Validate required fields.
-        if res.modes is None or res.eigenvalues is None:
-            missing = [n for n, v in (("modes", res.modes), ("eigenvalues", res.eigenvalues)) if v is None]
-            raise KeyError(f"{load_path} is not a PSD-POD result file: missing {', '.join(missing)}")
-
-        # PSD-POD-specific fields.
-        if res.freq is not None:
-            self.freq = res.freq
-        if res.st is not None:
-            self.St = res.st
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """PSD-POD requires modes and eigenvalues."""
+        return ("modes", "eigenvalues")
 
     def _assign_loaded_results(self, res: AnalysisResults) -> None:
         """Assign loaded results and reshape W to column form."""
@@ -258,6 +234,11 @@ class PSDPODAnalyzer(BaseAnalyzer):
 
             n_space = int(res.modes.shape[0]) if res.modes is not None and res.modes.ndim == 2 else None
             self.W = _as_spatial_weight_column(res.W, n_space)
+
+        if res.freq is not None:
+            self.freq = res.freq
+        if res.st is not None:
+            self.St = res.st
 
     def _figure_prefix(self, run_id: str | None) -> str:
         """Figure-name stem: the CLI run id when given, the dataset root otherwise."""
