@@ -370,13 +370,9 @@ class STPODAnalyzer(BaseAnalyzer):
         if "energy_captured_fraction" in res.attrs:
             self.energy_captured_fraction = float(res.attrs["energy_captured_fraction"])
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save ST-POD results using embedding-aware filename."""
-        if not filename:
-            filename = (
-                f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_d{self.embedding_dim}_{self.analysis_type}.hdf5"
-            )
-        super().save_results(filename=filename)
+    def _result_filename(self) -> str:
+        """The ST-POD name holds the delay depth, because it changes the result."""
+        return f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_d{self.embedding_dim}_{self.analysis_type}.hdf5"
 
     def plot_eigenvalues(self) -> None:
         os.makedirs(self.figures_dir, exist_ok=True)

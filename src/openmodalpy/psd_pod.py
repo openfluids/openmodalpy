@@ -28,7 +28,6 @@ from openmodalpy.core.base import (
     add_inset_colorbar,
     get_fig_aspect_ratio,
     get_robust_clim,
-    make_result_filename,
     plot_isometric_slices_3d,
     plot_orthogonal_slices_3d,
     reshape_mode_to_volume,
@@ -209,17 +208,9 @@ class PSDPODAnalyzer(BaseAnalyzer):
         return datasets, attrs
 
     def save_results(self, filename: str | None = None) -> None:
-        """Save PSD-POD results using the harmonized filename."""
-        if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                self.analysis_type,
-            )
+        """Save PSD-POD results and record the path the CLI reads back."""
         super().save_results(filename=filename)
-        self.results_path = os.path.join(self.results_dir, filename)
+        self.results_path = os.path.join(self.results_dir, filename or self._result_filename())
 
     def _required_result_fields(self) -> tuple[str, ...]:
         """PSD-POD requires modes and eigenvalues."""

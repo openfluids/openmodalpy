@@ -39,7 +39,6 @@ from openmodalpy.core.base import (  # noqa: E402
     compute_reduced_svd,
     format_mode_title,
     get_fig_aspect_ratio,
-    make_result_filename,
     plot_modes_3d,
     reshape_mode_to_volume,
     resolve_volume_layout,
@@ -560,18 +559,6 @@ class DMDAnalyzer(BaseAnalyzer):
         # Cap n_modes_save to actual modes available (for narrow files loaded into wide cap).
         n_modes_available = self.modes.shape[1] if self.modes.ndim >= 2 else self.modes.size
         self.n_modes_save = min(self.n_modes_save, n_modes_available)
-
-    def save_results(self, filename: str | None = None) -> None:
-        """Save DMD results using the harmonized filename."""
-        if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                self.analysis_type,
-            )
-        super().save_results(filename=filename)
 
     def _mode_freq(self, eigvals: np.ndarray) -> np.ndarray | None:
         """Return mode frequencies in Hz, or ``None`` when ``dt`` is unusable.

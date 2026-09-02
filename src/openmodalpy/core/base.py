@@ -2237,6 +2237,21 @@ class BaseAnalyzer:
         """
         return ()
 
+    def _result_filename(self) -> str:
+        """Return the name of this method's result file.
+
+        The base name holds the Welch block size and the overlap. A method
+        that has no blocks gives a shorter name here. Save and load both
+        call this method, so a method cannot write a file it cannot find.
+        """
+        return make_result_filename(
+            self.data_root,
+            self.nfft,
+            self.overlap,
+            self.data.get("Ns", 0),
+            getattr(self, "analysis_type", "spod"),
+        )
+
     def save_results(self, filename: str | None = None) -> None:
         """Save results to HDF5 using the unified writer.
 
@@ -2252,13 +2267,7 @@ class BaseAnalyzer:
         from openmodalpy.core.results import write_results
 
         if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                getattr(self, "analysis_type", "spod"),
-            )
+            filename = self._result_filename()
         save_path = os.path.join(self.results_dir, filename)
         os.makedirs(self.results_dir, exist_ok=True)
 
@@ -2284,13 +2293,7 @@ class BaseAnalyzer:
         from openmodalpy.core.results import read_results
 
         if not filename:
-            filename = make_result_filename(
-                self.data_root,
-                self.nfft,
-                self.overlap,
-                self.data.get("Ns", 0),
-                getattr(self, "analysis_type", "spod"),
-            )
+            filename = self._result_filename()
         load_path = os.path.join(self.results_dir, filename)
         name = display_name_for(getattr(self, "analysis_type", "spod"))
         own_logger = logging.getLogger(type(self).__module__)

@@ -85,6 +85,14 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- POD and ST-POD saved a result file under a name they could not find
+  again. Save built the name in the method, load built it in the base class
+  with the Welch block size in it, and the two did not agree. The load
+  missed, fell back to the newest file that matched the method, and could
+  load a file from another dataset without saying so. Save and load now ask
+  the same method for the name, so this cannot come back. A method that
+  needs a different name gives one there, and DMD's copy of the base name
+  is gone.
 - `load_results` now reads the result file once. Every method rebuilt the
   file name after the base class had already read the file, then read it a
   second time to reach a few fields. A POD load opened the file twice and

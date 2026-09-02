@@ -346,16 +346,9 @@ class PODAnalyzer(BaseAnalyzer):
         attrs["Nspace"] = self.modes.shape[0]
         return datasets, attrs
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save POD results using a simplified harmonized name."""
-        # POD has no primary Welch parameters, so use a simplified scheme.
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-            # Temporarily override the analysis_type for make_result_filename compatibility.
-            saved_type = getattr(self, "analysis_type", None)
-            self.analysis_type = saved_type or "pod"
-
-        super().save_results(filename=filename)
+    def _result_filename(self) -> str:
+        """POD has no Welch blocks, so its name holds no block size."""
+        return f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
 
     def _assign_loaded_results(self, res: AnalysisResults) -> None:
         """Assign loaded results and reshape W to column form."""
