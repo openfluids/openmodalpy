@@ -85,6 +85,12 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- Building an analyzer no longer creates the results directory. The
+  directory is made when something is written to it. A run that only reads,
+  or that fails before it saves, now leaves no empty directory behind.
+- A method that must touch its result file after the writer closes it now
+  says so in one small step instead of repeating the whole save. SPOD writes
+  its FFT cache stamp that way, and its save shrank from 30 lines to 13.
 - POD and ST-POD saved a result file under a name they could not find
   again. Save built the name in the method, load built it in the base class
   with the Welch block size in it, and the two did not agree. The load

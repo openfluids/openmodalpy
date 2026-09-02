@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import h5py
 import numpy as np
 import pytest
@@ -209,6 +211,7 @@ def test_dmd_load_empty_file_lowers_cap(tmp_path):
     # test owns the LOADER contract for such files (legacy or hand-made).
     import h5py
 
+    os.makedirs(write_dir, exist_ok=True)
     with h5py.File(write_dir / "empty.hdf5", "w") as handle:
         handle.create_dataset("modes", data=np.array([], dtype=complex))
         handle.create_dataset("eigenvalues", data=np.array([], dtype=complex))

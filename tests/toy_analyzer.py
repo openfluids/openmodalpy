@@ -109,25 +109,13 @@ class ToyAnalyzer(BaseAnalyzer):
         }
         return datasets, self._get_metadata()
 
-    def load_results(self, filename: str | None = None) -> None:
-        """Load toy analyzer results."""
-        super().load_results(filename=filename)
+    def _required_result_fields(self) -> tuple[str, ...]:
+        """Name the datasets that make a file a toy analyzer result."""
+        return ("modes", "eigenvalues", "time_coefficients")
 
-        from openmodalpy.core.results import read_results
-
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-        load_path = os.path.join(self.results_dir, filename)
-
-        res = read_results(load_path)
-        if res.modes is None or res.eigenvalues is None or res.time_coefficients is None:
-            raise KeyError(f"{load_path} is not a toy analyzer result file")
-
-    def save_results(self, filename: str | None = None) -> None:
-        """Save toy analyzer results using the harmonized filename."""
-        if not filename:
-            filename = f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
-        super().save_results(filename=filename)
+    def _result_filename(self) -> str:
+        """The toy method has no Welch blocks, so its name holds no block size."""
+        return f"{self.data_root}_{self.data.get('Ns', 0)}snapshots_{self.analysis_type}.hdf5"
 
     def _plot_run(self, run_id: str | None = None) -> None:
         """Minimal plot for the toy analyzer."""

@@ -1178,12 +1178,14 @@ method will call your `perform_<method>` after loading and before plotting.
 describing the method for the provenance block (optional: describe the lift kind,
 normalization, or any tuning). The base uses this when writing results.
 
-**Results I/O**: Implement `save_results` and `load_results`. Write via
-`openmodalpy.core.results.write_results(path, data_dict, attrs=metadata_dict)`;
-the base provides the provenance block automatically. Store modes, eigenvalues,
-time_coefficients and any method-specific results (e.g., frequencies for SPOD).
-Read them back in `load_results` using `read_results(path)`, which returns a
-`ResultsData` namedtuple with all fields; pull out what you need and set `self.*`.
+**Results I/O**: The base class provides `save_results()` and
+`load_results()` that handle all HDF5 I/O. Implement `_result_payload()` to return
+a dict of arrays (modes, eigenvalues, time_coefficients, coordinates, etc.) and
+their metadata; the base writes these through the unified writer. If your method
+needs custom logic after the file closes (SPOD writes its FFT cache stamp here),
+override `_after_write(save_path)`. The base provides `_result_filename()` for
+harmonized naming and `_assign_loaded_results()` for unpacking the file back
+into the instance; override these only if your method stores non-standard fields.
 
 **Plotting**: Implement `_plot_run(run_id)` to save figures. Plot the
 eigenvalues in log scale, the spatial modes (via `_maybe_plot_volumetric_modes`
@@ -1223,5 +1225,41 @@ Verify provenance via the `_assert_provenance_block` helper in
 
 See `tests/toy_analyzer.py` for a complete minimal example: a toy decomposition
 that takes the first k snapshots as modes and their norms as eigenvalues. The
-class is 150 lines and the file is 174. Of those 150 lines, 55 are
-`save_results` and `load_results`, which every analyzer writes again.
+class is 113 lines and the file is 137. Six of those lines cover saving and
+loading, because the base does the work. When the toy was written, the same two
+jobs took 55 lines that every analyzer wrote again.
+
+
+**What a new analyzer must implement:**
+
+- `_METHOD_NAME` (class variable): The short name of the method. It names
+  the method in log lines, and it is the default stem of the result file
+  when the caller passes data instead of a file path.
+- `_perform_name` (class variable): The string name of the perform method,
+  e.g. `"perform_pod"`.
+- The perform method itself (e.g., `perform_pod()`): Reads `self.data["q"]`,
+  computes and sets `self.modes`, `self.eigenvalues`, `self.time_coefficients`,
+  and calls `self._resync_mode_count()`.
+- `_get_algorithm_metadata()`: Returns a dict with method metadata for the
+  provenance block (e.g., lift type, window function).
+- `_result_payload()`: Returns (datasets_dict, attributes_dict) of the arrays
+  to save and their metadata. The base writes these to HDF5.
+- `_plot_run(run_id)`: Saves figure files to `self.figures_dir`. Plot the
+  eigenvalues, spatial modes, and time coefficients.
+
+**What the base provides for free (override only if needed):**
+
+- `save_results()` and `load_results()`: Handle all HDF5 I/O automatically.
+- `_result_filename()`: Generates a harmonized filename from data_root, nfft,
+  overlap, and analysis_type. Override to customize naming.
+- `_required_result_fields()`: Returns the tuple of required dataset names
+  (modes, eigenvalues, etc.). Returned fields trigger a missing-field check
+  at load time. Override to enforce method-specific fields.
+- `_assign_loaded_results()`: Unpacks a loaded AnalysisResults object and
+  assigns its fields to self. Override for non-standard fields or post-processing.
+- `_after_write(save_path)`: Called after the result file closes. Does nothing
+  by default. Override to write method-specific metadata (e.g., SPOD's FFT
+  cache stamp).
+- `load_and_preprocess()`, `run_analysis()`: Orchestrate the full pipeline.
+- `_resync_mode_count()`: Truncates modes, eigenvalues, and time_coefficients
+  to `n_modes_save`.

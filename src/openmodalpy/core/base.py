@@ -1834,7 +1834,6 @@ class BaseAnalyzer:
 
         # Calculated later
         self.novlap = 0
-        os.makedirs(self.results_dir, exist_ok=True)
 
         self.data: dict[str, Any] = data if data is not None else {}
         self.W = np.array([])
@@ -2276,6 +2275,7 @@ class BaseAnalyzer:
         own_logger = logging.getLogger(type(self).__module__)
         own_logger.info("Saving %s results to %s", name, save_path)
         write_results(save_path, datasets, attrs=attrs)
+        self._after_write(save_path)
         own_logger.info("%s results saved to %s", name, save_path)
 
     def load_results(self, filename: str | None = None) -> None:
@@ -2366,6 +2366,13 @@ class BaseAnalyzer:
             self.data["Ny"] = int(res.attrs["Ny"])
         if "Nz" in res.attrs:
             self.data["Nz"] = int(res.attrs["Nz"])
+
+    def _after_write(self, save_path: str) -> None:
+        """Do extra work on the result file after the writer closes it.
+
+        The default does nothing. SPOD writes its FFT cache stamp here, so
+        that a later run can reuse the blocks instead of computing them again.
+        """
 
     def _ensure_figures_dir_exists(self) -> None:
         """Create figures_dir if it does not exist (first plot write)."""

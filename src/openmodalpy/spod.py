@@ -41,7 +41,6 @@ from openmodalpy.core.base import (
     add_inset_colorbar,
     format_mode_title,
     get_fig_aspect_ratio,
-    make_result_filename,
     plot_modes_3d,
     reshape_mode_to_volume,
     resolve_volume_layout,
@@ -422,26 +421,12 @@ class SPODAnalyzer(BaseAnalyzer):
             datasets["z"] = self.data["z"]
         return datasets, self._get_metadata()
 
-    def save_results(self, filename: str | None = None) -> None:
-        """Save SPOD results with FFT cache stamp.
+    def _after_write(self, save_path: str) -> None:
+        """Write FFT cache stamp after saving SPOD results.
 
-        Calls parent to write datasets and attrs, then reopens with append
-        mode to restore the FFT cache stamp for reuse in subsequent runs.
+        Reopens the result file in append mode to restore the FFT cache stamp
+        for reuse in subsequent runs.
         """
-        from openmodalpy.core.results import write_results
-
-        if not filename:
-            filename = make_result_filename(
-                self.data_root, self.nfft, self.overlap, self.data.get("Ns", 0), self.analysis_type
-            )
-        save_path = os.path.join(self.results_dir, filename)
-        os.makedirs(self.results_dir, exist_ok=True)
-
-        logger.info("Saving SPOD results to %s", save_path)
-        datasets, attrs = self._result_payload()
-        write_results(save_path, datasets, attrs=attrs, mode="w")
-
-        # Reapply the FFT-cache stamp after full rewrite.
         if self.qhat is not None and self.qhat.size > 0 and self.data.get("q") is not None:
             with h5py.File(save_path, "a") as handle:
                 _write_qhat_stamp(handle, self, self.data["q"])
@@ -451,7 +436,6 @@ class SPODAnalyzer(BaseAnalyzer):
                 "snapshots are not in memory; the next run will recompute them",
                 save_path,
             )
-        logger.info("SPOD results saved to %s", save_path)
 
     def _required_result_fields(self) -> tuple[str, ...]:
         """SPOD requires modes and eigenvalues."""
