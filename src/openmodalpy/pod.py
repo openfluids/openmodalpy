@@ -32,7 +32,7 @@ from fftkit import find_peaks, periodogram_rfft
 from numpy.typing import ArrayLike
 
 import openmodalpy.core.decomposition as decomposition
-from openmodalpy.core.base import BaseAnalyzer, _as_spatial_weight_column, reshape_mode_to_volume, resolve_volume_layout
+from openmodalpy.core.base import BaseAnalyzer, reshape_mode_to_volume, resolve_volume_layout
 from openmodalpy.core.config import (
     CMAP_DIV,
     CMAP_SEQ,
@@ -48,6 +48,7 @@ from openmodalpy.core.plotting import (
     style_spatial_axes,
 )
 from openmodalpy.core.results import AnalysisResults
+from openmodalpy.core.weights import _as_spatial_weight_column
 from openmodalpy.specs import display_name_for
 
 logger = logging.getLogger(__name__)

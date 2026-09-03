@@ -18,7 +18,7 @@ from openmodalpy import (
     SPODAnalyzer,
     STPODAnalyzer,
 )
-from openmodalpy.core.base import PARALLEL_AVAILABLE
+from openmodalpy.core.weights import PARALLEL_AVAILABLE
 
 # Without optimized parallel routines, use_parallel=True falls through to the
 # serial path and serial-vs-parallel would compare serial to serial (vacuous green).

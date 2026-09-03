@@ -14,11 +14,8 @@ import numpy as np
 import pytest
 
 from openmodalpy import PODAnalyzer
-from openmodalpy.core.base import (
-    calculate_cell_volume_weights,
-    calculate_polar_weights,
-)
 from openmodalpy.core.io import load_data
+from openmodalpy.core.weights import calculate_cell_volume_weights, calculate_polar_weights
 
 # ---------------------------------------------------------------------------
 # Helper unit tests

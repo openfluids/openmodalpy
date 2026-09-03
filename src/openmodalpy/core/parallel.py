@@ -115,7 +115,7 @@ def _calculate_weights_numpy(x: np.ndarray, y: np.ndarray, z: np.ndarray | None 
     # 3-D polar: fold in the azimuth sector fraction and flatten (theta, r, x).
     # Imported lazily: base.py imports this module at load time, so importing
     # base at this module's top level would be circular.
-    from openmodalpy.core.base import _polar_theta_sector_fractions
+    from openmodalpy.core.weights import _polar_theta_sector_fractions
 
     theta_fraction = _polar_theta_sector_fractions(np.asarray(z, dtype=np.float64))
     volumes_2d = np.outer(Wy, Wx)  # (Ny, Nx)

@@ -34,13 +34,9 @@ import numpy as np
 import scipy.linalg
 from fftkit import irfft, rfft, rfftfreq
 
-from openmodalpy.core.base import (
-    _coerce_spatial_weights,
-    canonicalize_modes,
-    compute_reduced_svd,
-    require_spatial_metric,
-)
+from openmodalpy.core.base import canonicalize_modes, compute_reduced_svd
 from openmodalpy.core.threads import apply_blas_limit
+from openmodalpy.core.weights import _coerce_spatial_weights, require_spatial_metric
 
 
 @runtime_checkable

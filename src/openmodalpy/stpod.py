@@ -350,7 +350,7 @@ class STPODAnalyzer(BaseAnalyzer):
             embedding_dim = self.embedding_dim
             if res.modes is not None and res.modes.ndim == 2 and embedding_dim is not None and int(embedding_dim) > 0:
                 n_space = int(res.modes.shape[0]) // int(embedding_dim)
-            from openmodalpy.core.base import _as_spatial_weight_column
+            from openmodalpy.core.weights import _as_spatial_weight_column
 
             self.W = _as_spatial_weight_column(res.W, n_space)
 

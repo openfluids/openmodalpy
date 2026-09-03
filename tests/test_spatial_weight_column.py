@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from openmodalpy import BSMDAnalyzer, PODAnalyzer, SPODAnalyzer, STPODAnalyzer
-from openmodalpy.core.base import _as_spatial_weight_column
+from openmodalpy.core.weights import _as_spatial_weight_column
 
 NX, NY, NS = 8, 4, 24
 NSPACE = NX * NY

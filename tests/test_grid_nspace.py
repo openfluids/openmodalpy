@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from openmodalpy import BSMDAnalyzer, PODAnalyzer, SPODAnalyzer, STPODAnalyzer
-from openmodalpy.core.base import _reported_grid, calculate_polar_weights
+from openmodalpy.core.base import _reported_grid
+from openmodalpy.core.weights import calculate_polar_weights
 
 
 def _analyzer(loader, tmp_path):

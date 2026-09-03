@@ -52,7 +52,6 @@ from openmodalpy.core.base import (
     canonical_tie_groups,
     canonicalize_modes,
     make_result_filename,
-    require_spatial_metric,
     reshape_mode_to_volume,
     resolve_volume_layout,
     validate_nfft_overlap,
@@ -67,6 +66,7 @@ from openmodalpy.core.config import (
 from openmodalpy.core.plotting import add_inset_colorbar, get_fig_aspect_ratio, plot_modes_3d, style_spatial_axes
 from openmodalpy.core.results import AnalysisResults
 from openmodalpy.core.threads import apply_blas_limit
+from openmodalpy.core.weights import require_spatial_metric
 
 logger = logging.getLogger(__name__)
 
@@ -875,7 +875,7 @@ class BSMDAnalyzer(BaseAnalyzer):
         super()._assign_loaded_results(res)
 
         if res.W is not None:
-            from openmodalpy.core.base import _as_spatial_weight_column
+            from openmodalpy.core.weights import _as_spatial_weight_column
 
             n_space = int(res.modes1.shape[1]) if res.modes1 is not None and res.modes1.ndim == 2 else None
             self.W = _as_spatial_weight_column(res.W, n_space)

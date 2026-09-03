@@ -12,14 +12,7 @@ from openmodalpy import (
     SPODAnalyzer,
     STPODAnalyzer,
 )
-from openmodalpy.core.base import (
-    BaseAnalyzer,
-    _coerce_spatial_weights,
-    _polar_theta_sector_fractions,
-    calculate_polar_weights,
-    calculate_uniform_weights,
-    require_spatial_metric,
-)
+from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.decomposition import (
     SpatialMetric,
     _as_weight_vector,
@@ -27,6 +20,13 @@ from openmodalpy.core.decomposition import (
     weighted_total_energy,
 )
 from openmodalpy.core.parallel import calculate_polar_weights_optimized
+from openmodalpy.core.weights import (
+    _coerce_spatial_weights,
+    _polar_theta_sector_fractions,
+    calculate_polar_weights,
+    calculate_uniform_weights,
+    require_spatial_metric,
+)
 
 
 def test_square_weight_matrix_yields_diagonal():

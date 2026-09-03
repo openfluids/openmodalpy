@@ -85,6 +85,11 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- The spatial weights left `core/base.py` for a new `core/weights.py`. Eight
+  functions moved: the uniform, polar and cell-volume weights, the metric
+  check, the column shaping, and the three helpers they share. `core/base.py`
+  falls to 1656 lines from 2592 at the start of this work. No weight name is
+  published, so every public import path is unchanged.
 - The figure-drawing helpers left `core/base.py` for a new `core/plotting.py`.
   A file named for a base class held 2592 lines, of which only a third was
   that class; the rest was a drawer of unrelated helpers. Ten functions moved:

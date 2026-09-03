@@ -451,7 +451,7 @@ class SPODAnalyzer(BaseAnalyzer):
         super()._assign_loaded_results(res)
 
         if res.W is not None:
-            from openmodalpy.core.base import _as_spatial_weight_column
+            from openmodalpy.core.weights import _as_spatial_weight_column
 
             n_space = int(res.modes.shape[1]) if res.modes is not None and res.modes.ndim == 3 else None
             self.W = _as_spatial_weight_column(res.W, n_space)
