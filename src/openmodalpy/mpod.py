@@ -12,8 +12,8 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 import openmodalpy.core.decomposition as decomposition
-from openmodalpy.core.base import CANONICAL_TIE_RTOL
 from openmodalpy.core.config import FIGURES_DIR_POD, RESULTS_DIR_POD
+from openmodalpy.core.operators import CANONICAL_TIE_RTOL
 from openmodalpy.pod import PODAnalyzer
 from openmodalpy.specs import display_name_for
 

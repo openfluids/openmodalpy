@@ -15,7 +15,7 @@ import h5py
 import numpy as np
 
 from openmodalpy import SPODAnalyzer
-from openmodalpy.core.base import blocksfft
+from openmodalpy.core.operators import blocksfft
 
 
 def _make_data(q, dt=1.0):

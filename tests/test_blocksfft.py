@@ -3,8 +3,8 @@ import inspect
 import numpy as np
 import pytest
 
-from openmodalpy.core.base import blocksfft
 from openmodalpy.core.decomposition import spod_single_frequency
+from openmodalpy.core.operators import blocksfft
 from openmodalpy.core.welch import windowed_block_fft
 
 WINDOWS = ("hamming", "hann", "blackman", "bartlett", "sine")
@@ -37,9 +37,9 @@ def test_blocksfft_delegates_to_windowed_block_fft():
     oracles in test_welch_analytical.py, not here.
     """
     assert "return windowed_block_fft(" in inspect.getsource(blocksfft)
-    from openmodalpy.core import base as base_mod
+    from openmodalpy.core import operators as operators_mod
 
-    assert base_mod.windowed_block_fft is windowed_block_fft
+    assert operators_mod.windowed_block_fft is windowed_block_fft
 
 
 def test_blocksfft_hann_blackman_differ_from_hamming():

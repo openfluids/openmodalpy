@@ -85,6 +85,13 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- The shared numerical steps left `core/base.py` for a new
+  `core/operators.py`: the reduced singular value decomposition and the rule
+  that routes it, the randomized route, the block transform, and the rules
+  that give modes one sign and one order. `core/base.py` is now 1296 lines,
+  half of the 2592 it held before this work. The three files that came out of
+  it hold the drawing, the spatial weights and the numerics, and none of them
+  imports `core/base.py` back. Every public import path is unchanged.
 - The spatial weights left `core/base.py` for a new `core/weights.py`. Eight
   functions moved: the uniform, polar and cell-volume weights, the metric
   check, the column shaping, and the three helpers they share. `core/base.py`

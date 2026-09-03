@@ -9,11 +9,8 @@ from __future__ import annotations
 import h5py
 import numpy as np
 
-from openmodalpy.core.base import (
-    compute_reduced_svd,
-    generate_dummy_data_like_jetles,
-    use_iterative_svd,
-)
+from openmodalpy.core.base import generate_dummy_data_like_jetles
+from openmodalpy.core.operators import compute_reduced_svd, use_iterative_svd
 
 
 def test_arpack_path_bit_identical():

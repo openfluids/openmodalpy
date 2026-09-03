@@ -9,12 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from openmodalpy.core.base import (
-    ARPACK_MAX_RANK_FRACTION,
-    ARPACK_MIN_DIM,
-    compute_reduced_svd,
-    use_iterative_svd,
-)
+from openmodalpy.core.operators import ARPACK_MAX_RANK_FRACTION, ARPACK_MIN_DIM, compute_reduced_svd, use_iterative_svd
 
 
 def test_near_full_rank_does_not_use_iterative():

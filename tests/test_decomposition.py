@@ -5,12 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from openmodalpy.core.base import (
-    CANONICAL_TIE_RTOL,
-    canonical_eigenvalue_order,
-    canonical_pivot_index,
-    canonicalize_modes,
-)
 from openmodalpy.core.decomposition import (
     BandFilteredLift,
     DelayEmbeddingLift,
@@ -18,6 +12,12 @@ from openmodalpy.core.decomposition import (
     SpatialMetric,
     _significant_eigenvalue_mask,
     weighted_second_order,
+)
+from openmodalpy.core.operators import (
+    CANONICAL_TIE_RTOL,
+    canonical_eigenvalue_order,
+    canonical_pivot_index,
+    canonicalize_modes,
 )
 
 

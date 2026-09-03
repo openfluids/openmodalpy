@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from scipy.signal import get_window, welch
 
-from openmodalpy.core.base import blocksfft
+from openmodalpy.core.operators import blocksfft
 from openmodalpy.core.welch import windowed_block_fft
 
 

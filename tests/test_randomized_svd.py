@@ -11,11 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from openmodalpy.core.base import (
-    compute_reduced_svd,
-    randomized_svd,
-    use_iterative_svd,
-)
+from openmodalpy.core.operators import compute_reduced_svd, randomized_svd, use_iterative_svd
 
 
 def _planted_matrix(m: int, n: int, spectrum: np.ndarray, seed: int = 0):

@@ -19,8 +19,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from openmodalpy.core import base as base_mod
-from openmodalpy.core.base import compute_reduced_svd, use_iterative_svd
+from openmodalpy.core import operators as operators_mod
+from openmodalpy.core.operators import compute_reduced_svd, use_iterative_svd
 
 
 def test_arpack_receives_a_contiguous_matrix(monkeypatch):
@@ -36,13 +36,13 @@ def test_arpack_receives_a_contiguous_matrix(monkeypatch):
     assert use_iterative_svd(min(sliced.shape), rank), "this shape must route to ARPACK"
 
     seen: list[bool] = []
-    real_svds = base_mod.svds
+    real_svds = operators_mod.svds
 
     def recording_svds(matrix, **kwargs):
         seen.append(bool(np.asarray(matrix).flags["C_CONTIGUOUS"]))
         return real_svds(matrix, **kwargs)
 
-    monkeypatch.setattr(base_mod, "svds", recording_svds)
+    monkeypatch.setattr(operators_mod, "svds", recording_svds)
     compute_reduced_svd(sliced, rank)
 
     assert seen == [True], f"svds saw contiguous={seen}, expected [True]"
