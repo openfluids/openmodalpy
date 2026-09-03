@@ -6,7 +6,7 @@ import pytest
 from scipy import signal
 
 from openmodalpy import MPODAnalyzer, PODAnalyzer
-from openmodalpy.core.base import get_robust_clim, subset_volume_focus_3d
+from openmodalpy.core.plotting import get_robust_clim, subset_volume_focus_3d
 
 
 def test_perform_pod_simple():

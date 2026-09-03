@@ -85,6 +85,13 @@ exports, string dispatch and the docs before it went.
 
 ### Changed
 
+- The figure-drawing helpers left `core/base.py` for a new `core/plotting.py`.
+  A file named for a base class held 2592 lines, of which only a third was
+  that class; the rest was a drawer of unrelated helpers. Ten functions moved:
+  the colour limits, the axis styling, the inset colour bar, the mode titles,
+  the volume cropping and the three-dimensional slice plots. `core/base.py` is
+  now 2079 lines. None of the ten is a published name, so every public import
+  path is unchanged and no code outside the package needs an edit.
 - Building an analyzer no longer creates the results directory. The
   directory is made when something is written to it. A run that only reads,
   or that fails before it saves, now leaves no empty directory behind.

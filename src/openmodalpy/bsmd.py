@@ -49,16 +49,12 @@ from tqdm import tqdm
 from openmodalpy.core.base import (
     BaseAnalyzer,
     _hdf5_write_mode,
-    add_inset_colorbar,
     canonical_tie_groups,
     canonicalize_modes,
-    get_fig_aspect_ratio,
     make_result_filename,
-    plot_modes_3d,
     require_spatial_metric,
     reshape_mode_to_volume,
     resolve_volume_layout,
-    style_spatial_axes,
     validate_nfft_overlap,
 )
 from openmodalpy.core.config import (
@@ -68,6 +64,7 @@ from openmodalpy.core.config import (
     FIGURES_DIR_BSMD,
     RESULTS_DIR_BSMD,
 )
+from openmodalpy.core.plotting import add_inset_colorbar, get_fig_aspect_ratio, plot_modes_3d, style_spatial_axes
 from openmodalpy.core.results import AnalysisResults
 from openmodalpy.core.threads import apply_blas_limit
 

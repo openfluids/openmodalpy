@@ -36,19 +36,14 @@ import numpy as np
 from fftkit import find_peaks, periodogram_rfft
 
 import openmodalpy.core.decomposition as decomposition
-from openmodalpy.core.base import (
-    BaseAnalyzer,
-    get_fig_aspect_ratio,
-    plot_modes_3d,
-    reshape_mode_to_volume,
-    resolve_volume_layout,
-)
+from openmodalpy.core.base import BaseAnalyzer, reshape_mode_to_volume, resolve_volume_layout
 from openmodalpy.core.config import (
     CMAP_DIV,
     FIG_DPI,
     FIGURES_DIR_STPOD,
     RESULTS_DIR_STPOD,
 )
+from openmodalpy.core.plotting import get_fig_aspect_ratio, plot_modes_3d
 from openmodalpy.core.results import AnalysisResults
 
 logger = logging.getLogger(__name__)
@@ -472,7 +467,7 @@ class STPODAnalyzer(BaseAnalyzer):
             else:
                 mode_plot = mode_2d
 
-            from openmodalpy.core.base import get_robust_clim
+            from openmodalpy.core.plotting import get_robust_clim
 
             vmin, vmax = get_robust_clim(mode_plot, method="percentile")
             levels = np.linspace(vmin, vmax, 21)

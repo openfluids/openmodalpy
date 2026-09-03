@@ -38,13 +38,8 @@ from tqdm import tqdm
 from openmodalpy.core.base import (
     BaseAnalyzer,
     _write_qhat_stamp,
-    add_inset_colorbar,
-    format_mode_title,
-    get_fig_aspect_ratio,
-    plot_modes_3d,
     reshape_mode_to_volume,
     resolve_volume_layout,
-    style_spatial_axes,
     validate_nfft_overlap,
 )
 from openmodalpy.core.config import (
@@ -57,6 +52,13 @@ from openmodalpy.core.config import (
     WINDOW_TYPE,
 )
 from openmodalpy.core.decomposition import spod_single_frequency
+from openmodalpy.core.plotting import (
+    add_inset_colorbar,
+    format_mode_title,
+    get_fig_aspect_ratio,
+    plot_modes_3d,
+    style_spatial_axes,
+)
 from openmodalpy.core.results import AnalysisResults
 
 logger = logging.getLogger(__name__)
@@ -691,7 +693,7 @@ class SPODAnalyzer(BaseAnalyzer):
                             mode_plot = np.ma.array(mode_2d, mask=np.isnan(mode_2d) | cyl_mask)
                         else:
                             mode_plot = np.ma.array(mode_2d, mask=np.isnan(mode_2d))
-                        from openmodalpy.core.base import get_robust_clim
+                        from openmodalpy.core.plotting import get_robust_clim
 
                         vmin, vmax = get_robust_clim(mode_plot, method="percentile")
                         levels = np.linspace(vmin, vmax, 21)

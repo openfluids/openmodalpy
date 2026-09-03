@@ -34,15 +34,10 @@ from numpy.typing import ArrayLike, DTypeLike  # noqa: E402
 
 from openmodalpy.core.base import (  # noqa: E402
     BaseAnalyzer,
-    add_inset_colorbar,
     canonical_eigenvalue_order,
     compute_reduced_svd,
-    format_mode_title,
-    get_fig_aspect_ratio,
-    plot_modes_3d,
     reshape_mode_to_volume,
     resolve_volume_layout,
-    style_spatial_axes,
 )
 from openmodalpy.core.config import (  # noqa: E402
     CMAP_DIV,
@@ -50,6 +45,13 @@ from openmodalpy.core.config import (  # noqa: E402
     FIG_DPI,
     FIGURES_DIR_DMD,
     RESULTS_DIR_DMD,
+)
+from openmodalpy.core.plotting import (  # noqa: E402
+    add_inset_colorbar,
+    format_mode_title,
+    get_fig_aspect_ratio,
+    plot_modes_3d,
+    style_spatial_axes,
 )
 from openmodalpy.core.threads import apply_blas_limit  # noqa: E402
 

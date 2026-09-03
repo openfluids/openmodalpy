@@ -32,23 +32,20 @@ from fftkit import find_peaks, periodogram_rfft
 from numpy.typing import ArrayLike
 
 import openmodalpy.core.decomposition as decomposition
-from openmodalpy.core.base import (
-    BaseAnalyzer,
-    _as_spatial_weight_column,
-    add_inset_colorbar,
-    format_mode_title,
-    get_fig_aspect_ratio,
-    plot_modes_3d,
-    reshape_mode_to_volume,
-    resolve_volume_layout,
-    style_spatial_axes,
-)
+from openmodalpy.core.base import BaseAnalyzer, _as_spatial_weight_column, reshape_mode_to_volume, resolve_volume_layout
 from openmodalpy.core.config import (
     CMAP_DIV,
     CMAP_SEQ,
     FIG_DPI,
     FIGURES_DIR_POD,
     RESULTS_DIR_POD,
+)
+from openmodalpy.core.plotting import (
+    add_inset_colorbar,
+    format_mode_title,
+    get_fig_aspect_ratio,
+    plot_modes_3d,
+    style_spatial_axes,
 )
 from openmodalpy.core.results import AnalysisResults
 from openmodalpy.specs import display_name_for
@@ -591,7 +588,7 @@ class PODAnalyzer(BaseAnalyzer):
                     field = np.ma.array(mode_2d, mask=mask)
                 else:
                     field = mode_2d
-                from openmodalpy.core.base import get_robust_clim
+                from openmodalpy.core.plotting import get_robust_clim
 
                 vmin, vmax = get_robust_clim(field, method="percentile")
                 levels = np.linspace(vmin, vmax, 21)
@@ -757,7 +754,7 @@ class PODAnalyzer(BaseAnalyzer):
                     mode_plot = mode_2d
 
                 # Calculate contour levels with robust symmetric diverging scale
-                from openmodalpy.core.base import get_robust_clim
+                from openmodalpy.core.plotting import get_robust_clim
 
                 vmin, vmax = get_robust_clim(mode_plot, method="percentile")
                 levels = np.linspace(vmin, vmax, 21)
