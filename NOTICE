@@ -9,3 +9,14 @@ Contact: rasfrantz@gmail.com
 
 Modifications and derivative works must preserve the applicable copyright,
 license, and notice text as required by Apache-2.0.
+
+Optional extras and their licenses
+----------------------------------
+This package is Apache-2.0 and ships no third-party code. One optional extra
+installs a component under a different license:
+
+  openmodalpy[nek] installs pymech (https://github.com/eX-Mech/pymech), which
+  is GPL-3.0-or-later. It is required only to read Nek5000 field files. The
+  package does not import pymech unless you call the Nek5000 reader, and no
+  GPL code is distributed with openmodalpy. If you install this extra, the
+  combination on your machine is governed by the GPL-3.0 terms.

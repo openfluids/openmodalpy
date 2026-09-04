@@ -203,6 +203,14 @@ subclass.
   an explicit `schema=` forces the dNami loader)
 - **HDF5 `.h5` / `.hdf5`** — plain contract layout via `GenericDataLoader`
 - **directory** of dNami-family split NPZ files — via `DNamiDataLoader`
+- **Nek5000 field files `.f0*`** — via `NekDataLoader`, which needs the optional
+  `nek` extra (`uv pip install "openmodalpy[nek]"`). The extra installs pymech,
+  which is GPL-3.0-or-later; the package itself is Apache-2.0 and imports pymech
+  only when you read a Nek5000 file. See `NOTICE`. The loader reads the mesh with
+  the field and returns `spatial_weights` for the spectral-element grid: the
+  Gauss-Lobatto-Legendre quadrature weight of each point times the determinant of
+  the element Jacobian at that point. Each element gets its own Jacobian, so a mesh
+  of unequal elements integrates as accurately as a uniform one.
 - **Custom loader** — any callable `(file_path: str) -> dict`, see "Your own
   format" below
 

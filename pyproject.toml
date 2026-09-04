@@ -70,6 +70,10 @@ mkl = ["fftkit[mkl]"]
 # directly if you need a CUDA 11 build.
 gpu = ["fftkit[gpu]"]
 viz3d = ["pyvista>=0.46"]
+# Nek5000 field and mesh reading. pymech is GPL-3.0-or-later while this package
+# is Apache-2.0, so it is an extra and never a dependency: the core does not
+# import it, and nothing GPL ships in our wheel. See NOTICE.
+nek = ["pymech>=2.0.1"]
 
 [project.scripts]
 openmodalpy = "openmodalpy.cli:main"
@@ -86,6 +90,8 @@ Changelog = "https://github.com/openfluids/openmodalpy/blob/main/CHANGELOG.md"
 test = [
     "pytest>=7.0",
     "pytest-cov>=5.0",
+    # Exercises the Nek5000 reader; the package itself never imports pymech.
+    "pymech>=2.0.1",
 ]
 lint = [
     "ruff>=0.1",

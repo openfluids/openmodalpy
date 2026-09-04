@@ -1347,7 +1347,9 @@ class DataInterfaceManager:
     """Select and run the appropriate loader."""
 
     def __init__(self) -> None:
-        self.loaders = [MATDataLoader(), DNamiDataLoader(), GenericDataLoader()]
+        from openmodalpy.core.nek import NekDataLoader
+
+        self.loaders = [MATDataLoader(), DNamiDataLoader(), GenericDataLoader(), NekDataLoader()]
 
     def _select_file_loader(self, file_path: str, kwargs: dict[str, object]) -> DataLoader:
         """Pick the loader for a single file, sniffing .npz layout when needed."""
@@ -1372,8 +1374,13 @@ class DataInterfaceManager:
             raise FileNotFoundError(f"Data file not found: {file_path}")
 
         if loader_type:
-            loader_map: dict[str, type[MATDataLoader] | type[DNamiDataLoader] | type[GenericDataLoader]] = {
+            from openmodalpy.core.nek import NekDataLoader
+
+            loader_map: dict[
+                str, type[MATDataLoader] | type[DNamiDataLoader] | type[GenericDataLoader] | type[NekDataLoader]
+            ] = {
                 "mat": MATDataLoader,
+                "nek": NekDataLoader,
                 "dnami": DNamiDataLoader,
                 "dnami_npz": DNamiDataLoader,
                 "dnamiX_npz": DNamiDataLoader,
@@ -1404,6 +1411,7 @@ class DataInterfaceManager:
             ".npz": "NumPy NPZ files — plain contract layout (GenericDataLoader) or dNami-family layouts (auto-detected)",
             ".h5": "Generic HDF5 files with named q/x/y[/z/t/dt] datasets",
             ".hdf5": "Generic HDF5 files with named q/x/y[/z/t/dt] datasets",
+            ".f0*": "Nek5000 field files, read through the optional nek extra",
             "directory": "dNami-family split NPZ dataset directories",
         }
 

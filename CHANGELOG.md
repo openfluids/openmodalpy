@@ -33,6 +33,17 @@ exports, string dispatch and the docs before it went.
 
 ### Added
 
+- A reader for Nek5000 field files. `load_data(path, loader_type="nek")`, or a
+  directory of `.f0*` files, gives the field and the mesh together. The reader
+  returns `spatial_weights` for the spectral-element grid: the
+  Gauss-Lobatto-Legendre quadrature weight of each point times the determinant
+  of the element Jacobian there. Each element gets its own Jacobian, so a mesh
+  of unequal elements integrates as accurately as a uniform one. The reader
+  needs the new `nek` extra, which installs pymech. pymech is
+  GPL-3.0-or-later while this package is Apache-2.0, so it is never a
+  dependency and nothing imports it until you read a Nek5000 file. See
+  `NOTICE`.
+
 - A speed and memory tripwire test runs three cases and measures each one:
   DMD with a delay embedding, POD, and SPOD. Each case has a wall-time
   ceiling and a peak-memory ceiling taken from measured numbers, with a wide
