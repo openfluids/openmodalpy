@@ -5,25 +5,75 @@
 [![Python](https://img.shields.io/pypi/pyversions/openmodalpy.svg)](https://pypi.org/project/openmodalpy/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-`openmodalpy` puts nine modal decomposition methods for spatiotemporal data
-behind one API. Extract coherent structures from simulation or experimental
-data — energy-ranked POD modes, frequency-resolved SPOD modes, DMD eigenvalues,
-nonlinear BSMD triads — without switching libraries or rewriting your loading
-code for each method.
+`openmodalpy` loads your snapshots once and runs every modal decomposition on
+them, so you can compare. Nine methods for spatiotemporal data sit behind one
+interface: energy-ranked POD modes, frequency-resolved SPOD modes, DMD
+eigenvalues with growth rates, nonlinear BSMD triads. One data contract feeds
+all of them, one config file runs any subset, and every method writes the same
+kind of result file. It runs on NumPy and SciPy. There is no compiled solver
+toolchain to install.
 
-## Why this package
+## Who this is for
 
-Most Python tools here specialise: [PyDMD](https://github.com/PyDMD/PyDMD) covers DMD
-variants in depth, [PySPOD](https://github.com/MathEXLab/PySPOD) covers SPOD. That depth
-is real, and if you only need one method they are excellent choices.
+**You have snapshots and need a decomposition you can defend.** From a solver,
+an experiment, or a public dataset. Every method here is checked against cases
+with a known answer, and every result file records how it was made. See
+[How we know it is right](#how-we-know-it-is-right).
 
-OpenModalPy trades some of that depth for breadth. Nine methods share one analyzer
-interface, one data contract and one config file, so running POD, SPOD, DMD and BSMD over
-the same dataset — and comparing them directly — is a single command rather than four
-integrations. Bispectral mode decomposition (BSMD) in particular has little open-source
-coverage elsewhere.
+**You have a new decomposition and want to try it on real data.** Subclass one
+base class, write the maths, and get loading, spatial weights, saving,
+reloading, provenance and plots for free. The cost of adding a method is
+measured, not guessed. See [Add your own method](#add-your-own-method).
 
-It runs on the NumPy/SciPy stack. No compiled solver toolchain (PETSc, SLEPc) to install.
+**You are learning what these methods do.** The bundled examples generate their
+own data with the answer known in closed form, so you can see a method get the
+shedding frequency right, or wrong, before you trust it on your own flow. See
+[A path through the examples](#a-path-through-the-examples).
+
+## Why one framework
+
+Most Python tools here specialise. [PyDMD](https://github.com/PyDMD/PyDMD)
+covers DMD variants in depth, [PySPOD](https://github.com/MathEXLab/PySPOD)
+covers SPOD, [MODULO](https://github.com/mendezVKI/MODULO) covers multiscale
+POD. That depth is real. If you only ever need one method, they are excellent
+choices.
+
+Modal decompositions fall into three families. You can split them by the
+question they answer, by what they do to the snapshots, or by the statistic
+they use. All three splits give the same three groups:
+
+| Ask | Family | What it does to the snapshots | Statistic | Methods here |
+|---|---|---|---|---|
+| Which structures dominate? | Energy (POD family) | diagonalizes the snapshot correlation | second-order | POD, mPOD, PSD-POD, SPOD, ST-POD |
+| How do they evolve? | Dynamics (DMD family) | fits a linear map from each snapshot to the next | linear operator | DMD, HODMD, TLS-HODMD |
+| How do they feed each other? | Interactions (bispectral) | correlates triads of frequencies | third-order | BSMD |
+
+**Energy.** The POD family diagonalizes the correlation of the snapshots, so
+its modes are orthogonal and ranked by the energy they carry. Time enters only
+as an ensemble (POD), a frequency band (SPOD, PSD-POD, mPOD) or a delay window
+(ST-POD). Nothing assumes the flow obeys a rule.
+
+**Dynamics.** The DMD family fits one linear map that takes each snapshot to
+the next. The eigenvalues of that map give every mode a frequency and a growth
+rate. The modes are not orthogonal and not ranked by energy, because that is
+not what they are for.
+
+**Interactions.** Bispectral mode decomposition looks for triples of
+frequencies where two combine into a third. Second-order statistics cannot
+see this, so the first two families cannot either.
+
+A modal analysis usually asks these three questions in that order, on the same
+data. That is what the load-once loop below is for. The split is not perfectly
+clean. SPOD resolves frequency, so it says something about dynamics, and on
+statistically stationary data it agrees with DMD. DMD modes carry amplitudes,
+so they say something about energy. The labels name what each family is built
+to answer, not everything it can tell you.
+
+No other open package spans all three families behind one analyzer lifecycle,
+one data contract and one result format. That span is the reason this package
+exists. Running POD, SPOD, DMD and BSMD over one dataset and comparing them is
+a loop in Python or one command line, not four integrations. Bispectral mode
+decomposition in particular has little open-source coverage elsewhere.
 
 ## Installation
 
@@ -39,13 +89,14 @@ Optional extras:
 | `openmodalpy[viz3d]` | 3D slice and isosurface plotting (PyVista) |
 | `openmodalpy[mkl]` | Intel MKL FFT backend |
 | `openmodalpy[gpu]` | CuPy / PyTorch FFT backends |
+| `openmodalpy[nek]` | Nek5000 field and mesh reader (pymech, GPL-3.0-or-later; see NOTICE) |
 
-## Quick Start
+## Sixty seconds
 
-Nothing to download: the built-in generators produce a synthetic dataset in memory, and
-their returned metadata carries the analytic ground truth (keys like `expected_freq`, `St`,
-`f_shed`, `dmd_eigenvalue`, `decay_rate`), so you can check the package's output against its
-own stated truth.
+Nothing to download. The built-in generators build a dataset in memory, and
+the metadata they return carries the analytic answer (keys like
+`expected_freq`, `St`, `f_shed`, `dmd_eigenvalue`, `decay_rate`), so you can
+check the package against its own stated truth.
 
 ```python
 from openmodalpy import PODAnalyzer, generate_double_gyre
@@ -58,37 +109,84 @@ fractions = pod.eigenvalues / pod.total_energy
 print(fractions)  # leading mode energy fractions
 ```
 
-`run_analysis` writes the mode file into `results/` (and, unless `plots=False`, the figures
-into `figures/`) under the current directory.
+`run_analysis` writes the mode file into `results/` and, unless `plots=False`,
+the figures into `figures/` under the current directory.
 
-With your own data on disk:
+## One loader, every method
+
+Load once, hand the same dictionary to each analyzer through `data=`, and
+nothing re-reads the disk. Everything else in the package exists to make this
+loop work.
 
 ```python
-from openmodalpy import PODAnalyzer, SPODAnalyzer, DMDAnalyzer
+from openmodalpy import DMDAnalyzer, PODAnalyzer, SPODAnalyzer, generate_cylinder_wake
 
-pod = PODAnalyzer(file_path="data.mat", n_modes_save=10)
-pod.run_analysis()
+d = generate_cylinder_wake()          # or your own loader, see "Your data"
 
-spod = SPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5)
-spod.run_analysis()
-
-# DMD is driven in two steps, so the fit method can be chosen after loading.
-dmd = DMDAnalyzer(file_path="data.mat", n_modes_save=10)
-dmd.load_and_preprocess()
-dmd.perform_dmd(method="ls")
+for cls, perform, kw in ((PODAnalyzer, "perform_pod", {}),
+                         (SPODAnalyzer, "perform_spod", {}),
+                         (DMDAnalyzer, "perform_dmd", {"rank": "svht"})):
+    a = cls(data=d, **kw)
+    a.load_and_preprocess()
+    getattr(a, perform)()
+    a.save_results()
 ```
 
-## Configuration-Driven Workflow
+Adding a fourth method is one more line in the tuple. DMD asks for a
+truncation rank because there is no safe default. `"svht"` picks it from the
+singular values. Every analyzer also takes `file_path=` for the shipped
+readers and `run_analysis()` for the full load, decompose, save, plot
+sequence.
 
-One JSONC file runs several methods over the same dataset — the main reason to reach for
-this package over a single-method library:
+`examples/compare_pod_spod.py` is the worked version. It runs POD and SPOD on
+one dataset and plots them side by side. Its docstring explains what the
+figure shows, and why the two leading POD modes come out as a near-equal pair
+while SPOD gives one mode at one frequency.
+
+## Methods
+
+These are the names `openmodalpy methods list` reports and the values the
+`method` field takes in a config file.
+
+| `method` | Family | What it extracts | Reference |
+|----------|--------|------------------|-----------|
+| `pod` | energy | energy-ranked spatial modes | Lumley (1967); Sirovich (1987) |
+| `mpod` | energy | modes separated by time-scale band | Mendez et al. (2019) |
+| `psd-pod` | energy | POD of blockwise Fourier realizations | |
+| `spod` | energy | modes at each frequency, from Welch blocks | Towne, Schmidt & Colonius (2018) |
+| `stpod` | energy | space-time structures via delay embedding | |
+| `dmd` | dynamics | modes with frequency and growth rate | Schmid (2010); Tu et al. (2014) |
+| `hodmd` | dynamics | delay-embedded (Hankel) DMD | Le Clainche & Vega (2017) |
+| `tls-hodmd` | dynamics | delay-embedded DMD, total-least-squares fit | Hemati et al. (2017) |
+| `bsmd` | interactions | nonlinear triad structures | Schmidt (2020) |
+
+`dmd` accepts `method: "ls"` (least squares) or `method: "tls"` (total least
+squares, de-biased for noisy data). The TLS advantage on noisy data holds at
+`embedding_dim=1` and decays as the embedding grows. By `embedding_dim=5`
+plain LS is closer on average, so do not combine `tls` with a large embedding
+to fight noise.
+
+`hodmd` and `tls-hodmd` are `DMDAnalyzer` with a delay embedding. Call
+`perform_dmd(embedding_dim=<d>, method="ls")` or `method="tls"`, where `<d>`
+is the embedding depth.
+
+The BSMD implementation follows Schmidt (2020) and was inspired by the
+reference [MATLAB implementation](https://github.com/olivertschmidt/bmd).
+
+`DOC.md` has one section per method with the equations, the output shapes
+and the known limits of each implementation.
+
+## Configuration and CLI
+
+One JSONC file runs several methods over the same dataset:
 
 ```jsonc
 {
   "case": {
     "name": "my_case",
     "data": { "kind": "file", "path": "data.mat" },
-    "n_modes_save": 10, "nfft": 128, "overlap": 0.5
+    "n_modes_save": 10, "nfft": 128, "overlap": 0.5,
+    "rank": "svht"
   },
   "runs": [
     { "id": "pod",   "method": "pod" },
@@ -101,117 +199,159 @@ this package over a single-method library:
 ```
 
 ```bash
-openmodalpy run --config analysis.jsonc
+openmodalpy run --config analysis.jsonc            # full suite
+openmodalpy run --config analysis.jsonc --dry-run  # preview without computing
+openmodalpy analyze pod --config analysis.jsonc    # one method
+openmodalpy methods list                           # supported methods
+openmodalpy examples list                          # bundled examples
+openmodalpy results inspect output.hdf5            # inspect a result file
 ```
 
-## CLI
+## Bundled examples
+
+Nine configs ship with the package, each running every method on one case. Three build their data from a closed-form field and run with nothing
+to download. The others read a dataset from the path in their config, relative
+to the config file.
+
+| Example | Data | Case |
+|---|---|---|
+| `double_gyre` | generated | time-periodic double gyre, forcing frequency known |
+| `cylinder_wake` | generated | von Karman cylinder wake, shedding Strouhal number known |
+| `taylor_green` | generated | decaying Taylor-Green vortex, decay rate and DMD eigenvalue known |
+| `cavity` | `.mat` file | experimental PIV of an open cavity |
+| `jet` | `.mat` file | LES of a turbulent jet |
+| `jet_small` | `.mat` file | reduced jet LES, for quick runs |
+| `cylinder` | dNami NPZ directory | cylinder wake with spatial stride-2 loading |
+| `cylinder_wake_compressible` | dNamiX NPZ | compressible cylinder wake |
+| `run_benchmarks` | suite | runs the three generated cases in one go |
 
 ```bash
-openmodalpy analyze pod --config case.jsonc     # one method
-openmodalpy run --config suite.jsonc            # full suite
-openmodalpy run --config suite.jsonc --dry-run  # preview without computing
-openmodalpy methods list                        # supported methods
-openmodalpy examples list                       # bundled examples
-openmodalpy results inspect output.hdf5         # inspect a result file
+openmodalpy examples list
+openmodalpy examples show double_gyre
+openmodalpy examples run double_gyre
 ```
 
-Three example cases ship with the package and need no external data — `double_gyre`,
-`cylinder_wake` and `taylor_green` generate their fields analytically. A fourth config,
-`run_benchmarks`, runs all three as a suite. So `openmodalpy examples list` gives you
-something runnable immediately, with nothing to download.
+## Your data
 
-## Methods
+The shipped readers auto-detect the file type:
 
-These are the names `openmodalpy methods list` reports and the values the `method` field
-takes in a config file.
+- MATLAB `.mat`
+- NumPy `.npz`, plain layout or the dNami family of consolidated and split layouts
+- HDF5 `.h5` / `.hdf5`
+- a directory of dNami split NPZ files
+- Nek5000 `.f0*` field files, with the spectral-element quadrature weights, via the `nek` extra
 
-| `method` | Class | What it extracts | Reference |
-|----------|-------|------------------|-----------|
-| `pod` | variance-optimal | energy-ranked spatial modes | Lumley (1967); Sirovich (1987) |
-| `mpod` | variance-optimal | scale-separated modes across non-overlapping bands | [Mendez et al. (2019)](https://doi.org/10.1017/jfm.2019.212) |
-| `psd-pod` | variance-optimal | POD of blockwise Fourier realizations | — |
-| `spod` | variance-optimal | frequency-local modes (Welch blocks) | [Towne, Schmidt & Colonius (2018)](https://doi.org/10.1017/jfm.2018.283) |
-| `stpod` | variance-optimal | space-time structures via delay embedding | — |
-| `dmd` | evolution-fit | modes with frequency and growth rate | [Schmid (2010)](https://doi.org/10.1017/S0022112010001217); [Tu et al. (2014)](https://doi.org/10.3934/jcd.2014.1.391) |
-| `hodmd` | evolution-fit | delay-embedded (Hankel) DMD | [Le Clainche & Vega (2017)](https://doi.org/10.1137/15M1054924) |
-| `tls-hodmd` | evolution-fit | delay-embedded DMD, total-least-squares fit | [Hemati et al. (2017)](https://doi.org/10.1007/s00162-017-0432-2) |
-| `bsmd` | triadic interaction | nonlinear triad structures | [Schmidt (2020)](https://doi.org/10.1007/s11071-020-06037-z) |
-
-`dmd` accepts `method: "ls"` (least squares) or `method: "tls"` (total least squares,
-de-biased for noisy data). The TLS advantage on noisy data is an `embedding_dim=1`
-property. It decays as `embedding_dim` grows, and by `embedding_dim=5` plain LS is closer on
-average. Do not choose `tls` and a large `embedding_dim` together to fight noise.
-
-`hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations.
-Call `perform_dmd(embedding_dim=<d>, method="ls")` or `perform_dmd(embedding_dim=<d>, method="tls")`
-where `<d>` is the delay embedding depth.
-
-The BSMD implementation follows Schmidt (2020) and was inspired by the reference
-[MATLAB implementation](https://github.com/olivertschmidt/bmd).
-
-To compare two methods on one dataset through the Python API, see
-`examples/compare_pod_spod.py`: it loads one dataset once, runs POD and SPOD
-on it, and plots both.
-
-## Data Format
-
-`.mat` and `.npz` files are auto-detected and must provide:
+Each must provide, or be readable as:
 
 ```python
 {
-    "q": np.ndarray,   # (Ns, Nspace) — snapshots × spatial points, required
+    "q": np.ndarray,   # (Ns, Nspace)  snapshots x spatial points, required
     "dt": float,       # time step, required
     "x": np.ndarray,   # x-coordinates, required
     "y": np.ndarray,   # y-coordinates, required
-    # "Nx": int,       # grid points in x — derived from q, x, y when absent
-    # "Ny": int,       # grid points in y — derived from q, x, y when absent
+    # "z", "t", "Nx", "Ny", "Nz", "Ns"   optional; derived when absent
 }
 ```
 
-Anything else can be read with a custom loader returning the same dictionary.
-Copy `examples/my_data_template.py` for a fully commented starting point, or
-write the dict by hand:
+Anything else is a plain function that returns that dictionary. Copy
+`examples/my_data_template.py` for a commented starting point, or write it by
+hand:
 
 ```python
 def my_loader(path):
-    return {"q": data, "dt": 0.01, "x": x, "y": y}
+    return {"q": q, "dt": 0.01, "x": x, "y": y}
 
-d = my_loader("run_001")        # one load — or build the dict yourself
-
-pod = PODAnalyzer(data=d)       # hand loaded data straight in; no fake path
+d = my_loader("run_001")        # one load
+pod = PODAnalyzer(data=d)       # hand loaded data straight in
 ```
 
-See `DOC.md`, "Your own format", for the full contract and the plug-in point
-this uses.
+Spatial weights come with the data: uniform, polar, or cell volumes on a
+stretched grid, and any prescribed weight vector you pass in. See `DOC.md`,
+"Data Contract" and "Spatial weights".
 
-## FFT Backend
+## How we know it is right
 
-FFT dispatch comes from [`fftkit`](https://github.com/openfluids/fftkit), installed
-automatically. It probes the available backends, picks the fastest, and falls back to
-SciPy when nothing else is present — so this section is optional reading.
+The package is meant to be the one whose numbers you can defend in a review
+response. That is a property of the tests, not of the prose.
 
-To pin a backend:
+- **Closed-form checks.** The tests run POD, SPOD, DMD and ST-POD on fields
+  whose modes, energies, frequencies and growth rates are known analytically,
+  and each test states its tolerance.
+- **Cross-checks against other packages.** The tests compare SPOD eigenvalues
+  with values PySPOD computed, and DMD eigenvalues with values PyDMD computed.
+  The repository stores those reference numbers with the exact package
+  versions that produced them. Neither package is a dependency.
+- **Save and reload on every method.** One loader feeds every analyzer, each
+  analyzer writes its result to HDF5 and reads it back, and the arrays must
+  match bit for bit.
+- **Mutation testing.** A monthly run alters the numerical core one line at a
+  time and checks that a test fails for each change.
+- **Speed tripwire.** A test fails when POD, SPOD or DMD gets far slower than
+  the recorded time.
+- **Provenance in every result.** Each HDF5 file carries the package
+  versions, FFT backend, thread count, config hash, seed, git commit and
+  timestamp that produced it.
+- **CI on three platforms.** Linux, macOS and Windows, Python 3.11 to 3.14,
+  with a coverage floor that only moves up.
+
+Where an implementation is partial, unweighted, or uses a simplification, the
+method section in `DOC.md` says so.
+
+## Add your own method
+
+A new decomposition is a subclass of `BaseAnalyzer` that implements one
+`perform_<method>()` and fills `modes`, `eigenvalues` and `time_coefficients`.
+The base handles loading, spatial weights, HDF5 save and reload, provenance,
+mode-count truncation and the plotting hooks.
+
+The cost is measured. `tests/toy_analyzer.py` is a deliberately trivial method
+written against the base, and it is 137 lines including docstrings. The same
+save-and-reload test that the shipped methods pass runs on it.
+
+Reaching the CLI takes three more edits in shipped code: an entry in the
+method registry, an import, and a dispatch line. `DOC.md`, "Adding an
+Analyzer", walks through both the Python path and the CLI path and names what
+is still clumsy about the second.
+
+## A path through the examples
+
+1. `openmodalpy examples run double_gyre`. One forcing frequency, so every
+   method should find it. Check the SPOD peak against `expected_freq`.
+2. Run `examples/compare_pod_spod.py`. Read its docstring first. It explains
+   why POD splits a travelling structure into a sine and cosine pair and SPOD
+   does not.
+3. Run `taylor_green`. The field decays with no oscillation, so DMD should
+   return one real eigenvalue equal to `dmd_eigenvalue` in the metadata.
+4. Run `cylinder_wake` with `dmd` at `method: "ls"` and `method: "tls"`, then
+   with `hodmd` at a few `embedding_dim` values, and watch the noise
+   sensitivity described under Methods.
+5. Open the matching section of `DOC.md` for the equations behind each step.
+
+## FFT backend
+
+FFT dispatch comes from [`fftkit`](https://github.com/openfluids/fftkit),
+installed automatically. It picks the fastest backend present and falls back
+to SciPy. To pin one:
 
 ```bash
 export FFTKIT_BACKEND=mkl      # or scipy, numpy, cupy, accelerate
 ```
 
-```python
-from openmodalpy.core import FFT_BACKEND
-print(FFT_BACKEND)   # the backend actually in use
-```
+## Documentation
 
-The legacy `PYMODAL_FFT_BACKEND` variable still works as a fallback, but
-`FFTKIT_BACKEND` is the supported name.
+- [`DOC.md`](DOC.md): technical reference. Architecture, data contract, one
+  section per method, config schema, CLI, output format, testing.
+- [`CHANGELOG.md`](CHANGELOG.md): every release, with breaking changes to
+  results noted as loudly as breaking changes to the API.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): setup and the checks CI runs.
 
 ## Contributing
 
 Contributions are welcome, and questions and bug reports count. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup and the checks CI runs, and the
-[openfluids Code of Conduct](https://github.com/openfluids/.github/blob/main/CODE_OF_CONDUCT.md)
-for how we work together.
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
+[openfluids Code of Conduct](https://github.com/openfluids/.github/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
-Apache-2.0. Originally developed by Ricardo A S Frantz — see [LICENSE](LICENSE) and
-[NOTICE](NOTICE) for terms and attribution.
+Apache-2.0. Originally developed by Ricardo A S Frantz. See [LICENSE](LICENSE)
+and [NOTICE](NOTICE) for terms and attribution.
