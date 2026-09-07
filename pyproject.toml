@@ -194,7 +194,13 @@ only_mutate = [
     "src/openmodalpy/core/decomposition.py",
     "src/openmodalpy/core/welch.py",
 ]
-# tests/test_external_reference.py loads this script by path relative to the
-# repo root; without it the run fails at test collection, not at a mutant.
-also_copy = ["scripts"]
+# These tests read repo-root paths through Path(__file__).parents[1], which
+# resolves inside mutants/ once mutmut copies the tests there. Anything they
+# read must be copied too, or the run fails on a missing file instead of on a
+# mutant. tests/test_external_reference.py and tests/test_external_spod.py read
+# scripts/; tests/test_compare_pod_spod_example.py,
+# tests/test_data_contract_derive_then_validate.py, tests/test_cli_commands.py
+# and tests/test_example_configs.py read examples/; and
+# tests/test_data_contract_derive_then_validate.py reads DOC.md.
+also_copy = ["scripts", "examples", "DOC.md"]
 pytest_add_cli_args_test_selection = ["tests/"]
