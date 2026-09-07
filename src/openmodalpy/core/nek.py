@@ -43,7 +43,21 @@ def gll_nodes_and_weights(n: int) -> tuple[np.ndarray, np.ndarray]:
     c[N] = 1.0  # Coefficients of P_N
 
     # Interior nodes: roots of P_N'
+    # Every root of P_N' is real and lies in (-1, 1). The solver behind
+    # legroots builds a companion matrix, and it can return a complex array
+    # whose imaginary parts are only rounding noise. NumPy 2.5 does this where
+    # NumPy 2.4 did not. Drop the imaginary part only after a check, so a root
+    # that is truly complex raises instead of casting away in silence.
     interior = legendre.legroots(legendre.legder(c))
+    if np.iscomplexobj(interior):
+        largest_imaginary = float(np.max(np.abs(interior.imag)))
+        if largest_imaginary > 1e-12:
+            raise ValueError(
+                f"GLL nodes for n={n} came out complex. The largest imaginary part is "
+                f"{largest_imaginary}, above the tolerance of 1e-12. Every root of the "
+                "Legendre derivative must be real."
+            )
+        interior = interior.real
     interior = np.sort(interior)
 
     # Prepend and append boundary points
@@ -177,25 +191,26 @@ class NekDataLoader(DataLoader):
         all_snapshots_list: list[np.ndarray] = []
 
         for file_idx, fpath in enumerate(file_paths):
-            data = pymech.readnek(fpath)
+            # The first file is already in memory from the metadata read above.
+            data = data_first if file_idx == 0 else pymech.readnek(fpath)
             if data.ndim != ndim or data.nel != nel or data.lr1 != lr1:
                 raise ValueError(f"File {fpath} has inconsistent mesh or order (expected nel={nel}, lr1={lr1})")
 
-            # Extract times for this file
-            if data.time:
-                all_times.extend(data.time)
-            else:
-                all_times.extend([float(file_idx)])
+            # The time of this file. pymech gives one float per file. A file
+            # written without a time carries 0.0, and a run of those leaves dt
+            # undefined. Pass the times through as they are: the shared
+            # _infer_dt_from_times returns None for a constant time vector, and
+            # a made-up unit step would rescale every frequency in silence.
+            all_times.append(float(data.time))
 
             # Extract field at this time across all elements
             snapshot = np.zeros((nel, nz1, ny1, nx1))
             for elem_idx, elem in enumerate(data.elem):
                 if var_name == "u":
                     snapshot[elem_idx] = elem.vel[comp_idx]
-                elif var_name == "p":
-                    snapshot[elem_idx] = elem.pres[0]
                 else:
-                    snapshot[elem_idx] = elem.scal[0]
+                    # _parse_field accepts "u" and "p" and nothing else.
+                    snapshot[elem_idx] = elem.pres[0]
 
             all_snapshots_list.append(snapshot)
 
@@ -209,8 +224,8 @@ class NekDataLoader(DataLoader):
 
         Ns = snapshots_stacked.shape[0]
 
-        # Get data from first file for mesh and compute weights once
-        data = pymech.readnek(file_paths[0])
+        # The mesh comes from the first file, which is already in memory.
+        data = data_first
 
         # Compute GLL nodes and weights for this order
         nodes_r, w_r = gll_nodes_and_weights(nx1)

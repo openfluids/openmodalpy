@@ -1,235 +1,215 @@
 #!/usr/bin/env python3
 """
-Tests for Nek5000 field reader with quadrature weight computation.
+Tests for the Nek5000 field reader and its quadrature weights.
 
-Tests verify that GLL weights combined with element Jacobians produce
-spectrally accurate integration over spectral element meshes, and that
-unequal element sizes are handled correctly.
+Each test writes a real Nek5000 field file with pymech and reads it back
+through ``load_data``. The field is sin(x) cos(y) on the box [0, pi]^2, so
+the weighted energy sum(w q^2) has the closed-form value pi^2 / 4. A wrong
+quadrature weight, a wrong element Jacobian, or a wrong flattening order all
+move that number.
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from openmodalpy.core.io import load_data
+from openmodalpy.core.nek import gll_nodes_and_weights
+
+# The integral of sin(x)^2 cos(y)^2 over [0, pi] x [0, pi].
+EXPECTED_ENERGY = (np.pi / 2.0) ** 2
+
+# Nine points a side. GLL quadrature is exact for polynomials only, and
+# sin(x)^2 is not one, so the order sets the accuracy floor: five points give
+# 2.0e-05 on this mesh and nine give 5.2e-14. Nine puts the mesh mapping, not
+# the polynomial order, on trial.
+ORDER = 9
 
 
-def test_nek_loader_equal_elements(tmp_path: Path) -> None:
+def _write_nek_case(
+    directory: Path,
+    *,
+    element_widths_x: list[float],
+    nel_y: int = 2,
+    order: int = ORDER,
+    times: tuple[float, ...] = (0.0,),
+) -> None:
     """
-    Test Nek loader with equal-sized elements.
+    Write one Nek5000 field file per time to a directory.
 
-    Assert that the integral of sin(x)^2 cos(y)^2 over [0, pi]^2 matches
-    the expected value pi^2/4 to high relative accuracy.
+    The mesh covers [0, pi] x [0, pi]. The elements divide x by the widths
+    given, which do not have to be equal, and divide y evenly. The x velocity
+    holds sin(x) cos(y) scaled by the index of the snapshot plus one, the y
+    velocity holds cos(x) sin(y), and the pressure holds x + 2y.
+
+    Args:
+        directory (Path): Where to write the files.
+        element_widths_x (list[float]): Element widths in x. They must add to pi.
+        nel_y (int): Number of elements in y.
+        order (int): Points per element in each direction.
+        times (tuple[float, ...]): Time stamp of each file.
     """
-    try:
-        import pymech  # noqa: F401
-    except ImportError:
-        pytest.skip("pymech not installed")
+    pymech = pytest.importorskip("pymech")
+    from pymech.core import HexaData
 
-    from openmodalpy.core.nek import gll_nodes_and_weights
+    assert sum(element_widths_x) == pytest.approx(np.pi)
 
-    test_dir = tmp_path / "nek_test"
-    test_dir.mkdir()
-
-    # Create a dummy .f00001 file so the loader can find something
-    dummy_file = test_dir / "case.f00001"
-    dummy_file.touch()
-
-    nx1, ny1, nel_x, nel_y = 5, 5, 2, 2
-    nodes_gll, _ = gll_nodes_and_weights(nx1)
+    nodes, _ = gll_nodes_and_weights(order)
+    nel_x = len(element_widths_x)
     nel = nel_x * nel_y
     nz1 = 1
-    ndim = 2
 
-    # Build test data
-    elem_list = []
-    for iy in range(nel_y):
-        y_start = 0.0 + iy * (np.pi / nel_y)
-        y_end = y_start + (np.pi / nel_y)
+    for snapshot_index, time in enumerate(times):
+        # var counts: (positions, velocities, pressures, temperatures, scalars).
+        data = HexaData(2, nel, (order, order, nz1), (2, 2, 1, 1, 0))
+        data.wdsz = 8
+        data.endian = "little"
+        data.time = time
+        data.istep = snapshot_index + 1
 
-        for ix in range(nel_x):
-            x_start = 0.0 + ix * (np.pi / nel_x)
-            x_end = x_start + (np.pi / nel_x)
+        element = 0
+        for iy in range(nel_y):
+            y_start = iy * (np.pi / nel_y)
+            y_half_width = (np.pi / nel_y) / 2.0
+            for ix in range(nel_x):
+                x_start = sum(element_widths_x[:ix])
+                x_half_width = element_widths_x[ix] / 2.0
 
-            x_scale = (x_end - x_start) / 2.0
-            y_scale = (y_end - y_start) / 2.0
+                x_phys = x_start + x_half_width * (nodes[None, None, :] + 1.0) * np.ones((nz1, order, 1))
+                y_phys = y_start + y_half_width * (nodes[None, :, None] + 1.0) * np.ones((nz1, 1, order))
 
-            x_phys = np.zeros((nz1, ny1, nx1))
-            y_phys = np.zeros((nz1, ny1, nx1))
+                elem = data.elem[element]
+                element += 1
+                elem.pos[0] = x_phys
+                elem.pos[1] = y_phys
+                elem.pos[2] = 0.0
+                # Each stored field is different, so a test that asks for one
+                # and gets another fails instead of passing on a look-alike.
+                elem.vel[0] = (snapshot_index + 1) * np.sin(x_phys) * np.cos(y_phys)
+                elem.vel[1] = np.cos(x_phys) * np.sin(y_phys)
+                elem.pres[0] = x_phys + 2.0 * y_phys
+                elem.temp[0] = 0.0
 
-            for j in range(ny1):
-                for i in range(nx1):
-                    x_phys[0, j, i] = x_start + x_scale * (nodes_gll[i] + 1.0)
-                    y_phys[0, j, i] = y_start + y_scale * (nodes_gll[j] + 1.0)
-
-            vel = np.zeros((3, nz1, ny1, nx1))
-            vel[0, 0, :, :] = np.sin(x_phys[0]) * np.cos(y_phys[0])
-
-            pres = np.zeros((1, nz1, ny1, nx1))
-            pres[0, 0, :, :] = np.sin(x_phys[0]) * np.cos(y_phys[0])
-
-            elem_data = MagicMock()
-            elem_data.pos = np.array([x_phys, y_phys, np.zeros_like(x_phys)])
-            elem_data.vel = vel
-            elem_data.pres = pres
-            elem_data.scal = vel[:1]
-
-            elem_list.append(elem_data)
-
-    hexa_data = MagicMock()
-    hexa_data.ndim = ndim
-    hexa_data.nel = nel
-    hexa_data.lr1 = (nx1, ny1, nz1)
-    hexa_data.var = ["u", "v", "w", "p", "t"]
-    hexa_data.time = [0.0]
-    hexa_data.istep = [1]
-    hexa_data.elem = elem_list
-
-    with patch("pymech.readnek", return_value=hexa_data):
-        # Load using interface
-        data = load_data(str(test_dir), loader_type="nek", field="u_1")
-
-        # Verify shapes
-        q = data["q"]
-        x = data["x"]
-        y = data["y"]
-        weights = data["spatial_weights"]
-
-        assert q.ndim == 2
-        assert q.shape[0] == 1  # One snapshot
-        Nspace = q.shape[1]
-        assert x.shape == (Nspace,)
-        assert y.shape == (Nspace,)
-        assert weights.shape == (Nspace,)
-
-        # Compute integral: sum(w * f^2)
-        f_values = q[0]  # sin(x) * cos(y)
-        integral = np.sum(weights * f_values**2)
-        expected = (np.pi / 2.0) ** 2  # (pi/2) * (pi/2)
-
-        rel_error = np.abs(integral - expected) / expected
-        print(f"Equal elements: integral={integral:.15e}, expected={expected:.15e}, rel_error={rel_error:.2e}")
-
-        assert rel_error < 1e-10, f"Integral {integral} does not match expected {expected}; relative error {rel_error}"
-
-        # Verify coordinates are consistent
-        assert np.all(x >= 0.0) and np.all(x <= np.pi)
-        assert np.all(y >= 0.0) and np.all(y <= np.pi)
+        pymech.writenek(str(directory / f"case0.f{snapshot_index + 1:05d}"), data)
 
 
-def test_nek_loader_unequal_elements(tmp_path: Path) -> None:
+def test_nek_round_trip_on_equal_elements(tmp_path: Path) -> None:
     """
-    Test Nek loader with unequal-sized elements in x.
+    Test the reader on a mesh of four equal elements.
 
-    The same integral should hold; this test catches errors in Jacobian
-    computation or reuse across elements.
+    The weighted energy must match pi^2 / 4 to spectral accuracy, and the
+    coordinates must stay inside the box.
     """
-    try:
-        import pymech  # noqa: F401
-    except ImportError:
-        pytest.skip("pymech not installed")
+    _write_nek_case(tmp_path, element_widths_x=[np.pi / 2.0, np.pi / 2.0])
 
-    from openmodalpy.core.nek import gll_nodes_and_weights
+    data = load_data(str(tmp_path), loader_type="nek", field="u_1")
 
-    test_dir = tmp_path / "nek_test_unequal"
-    test_dir.mkdir()
-    dummy_file = test_dir / "case.f00001"
-    dummy_file.touch()
+    q = data["q"]
+    x = data["x"]
+    y = data["y"]
+    weights = data["spatial_weights"]
 
-    # Nine points a side. GLL quadrature is exact only for polynomials, and
-    # sin(x)^2 is not one, so the order sets the floor: on this mesh five points
-    # give 2.0e-05 and nine give 5.2e-14. Nine puts the maths, not the
-    # resolution, on trial.
-    nx1, ny1, nel_x, nel_y = 9, 9, 2, 2
-    nodes_gll, _ = gll_nodes_and_weights(nx1)
-    nel = nel_x * nel_y
-    nz1 = 1
-    ndim = 2
+    assert q.ndim == 2
+    assert q.shape[0] == 1
+    n_space = q.shape[1]
+    assert n_space == 4 * ORDER * ORDER
+    assert x.shape == (n_space,)
+    assert y.shape == (n_space,)
+    assert weights.shape == (n_space,)
+    assert data["spatial_weight_type"] == "prescribed"
 
-    # Unequal element widths: first element 2*pi/3, second pi/3
-    element_widths_x = [2.0 * np.pi / 3.0, np.pi / 3.0]
+    # The weights must integrate the constant 1 over the box, which is pi^2.
+    assert np.sum(weights) == pytest.approx(np.pi**2, rel=1e-12)
 
-    elem_list = []
-    for iy in range(nel_y):
-        y_start = 0.0 + iy * (np.pi / nel_y)
-        y_end = y_start + (np.pi / nel_y)
+    energy = float(np.sum(weights * q[0] ** 2))
+    assert energy == pytest.approx(EXPECTED_ENERGY, rel=1e-10)
 
-        for ix in range(nel_x):
-            x_start = sum(element_widths_x[:ix])
-            x_end = x_start + element_widths_x[ix]
+    assert np.all(x >= -1e-12) and np.all(x <= np.pi + 1e-12)
+    assert np.all(y >= -1e-12) and np.all(y <= np.pi + 1e-12)
 
-            x_scale = (x_end - x_start) / 2.0
-            y_scale = (y_end - y_start) / 2.0
+    # The field must round-trip point by point, which pins the flattening order.
+    np.testing.assert_allclose(q[0], np.sin(x) * np.cos(y), atol=1e-12)
 
-            x_phys = np.zeros((nz1, ny1, nx1))
-            y_phys = np.zeros((nz1, ny1, nx1))
 
-            for j in range(ny1):
-                for i in range(nx1):
-                    x_phys[0, j, i] = x_start + x_scale * (nodes_gll[i] + 1.0)
-                    y_phys[0, j, i] = y_start + y_scale * (nodes_gll[j] + 1.0)
+def test_nek_round_trip_on_unequal_elements(tmp_path: Path) -> None:
+    """
+    Test the reader on a mesh whose elements have different widths.
 
-            vel = np.zeros((3, nz1, ny1, nx1))
-            vel[0, 0, :, :] = np.sin(x_phys[0]) * np.cos(y_phys[0])
+    The energy is the same number, so this catches a Jacobian that is computed
+    once and reused, or scaled by the wrong element width.
+    """
+    _write_nek_case(tmp_path, element_widths_x=[2.0 * np.pi / 3.0, np.pi / 3.0])
 
-            pres = np.zeros((1, nz1, ny1, nx1))
-            pres[0, 0, :, :] = np.sin(x_phys[0]) * np.cos(y_phys[0])
+    data = load_data(str(tmp_path), loader_type="nek", field="u_1")
 
-            elem_data = MagicMock()
-            elem_data.pos = np.array([x_phys, y_phys, np.zeros_like(x_phys)])
-            elem_data.vel = vel
-            elem_data.pres = pres
-            elem_data.scal = vel[:1]
+    q = data["q"]
+    x = data["x"]
+    y = data["y"]
+    weights = data["spatial_weights"]
+    n_space = q.shape[1]
 
-            elem_list.append(elem_data)
+    assert x.shape == (n_space,)
+    assert y.shape == (n_space,)
+    assert weights.shape == (n_space,)
 
-    hexa_data = MagicMock()
-    hexa_data.ndim = ndim
-    hexa_data.nel = nel
-    hexa_data.lr1 = (nx1, ny1, nz1)
-    hexa_data.var = ["u", "v", "w", "p", "t"]
-    hexa_data.time = [0.0]
-    hexa_data.istep = [1]
-    hexa_data.elem = elem_list
+    assert np.sum(weights) == pytest.approx(np.pi**2, rel=1e-12)
 
-    with patch("pymech.readnek", return_value=hexa_data):
-        # Load data
-        data = load_data(str(test_dir), loader_type="nek", field="u_1")
+    energy = float(np.sum(weights * q[0] ** 2))
+    assert energy == pytest.approx(EXPECTED_ENERGY, rel=1e-10)
 
-        q = data["q"]
-        x = data["x"]
-        y = data["y"]
-        weights = data["spatial_weights"]
-        Nspace = q.shape[1]
+    np.testing.assert_allclose(q[0], np.sin(x) * np.cos(y), atol=1e-12)
 
-        assert x.shape == (Nspace,)
-        assert y.shape == (Nspace,)
-        assert weights.shape == (Nspace,)
 
-        # Integral should still be pi^2/4
-        f_values = q[0]
-        integral = np.sum(weights * f_values**2)
-        expected = (np.pi / 2.0) ** 2
+def test_nek_reads_a_sequence_of_snapshots(tmp_path: Path) -> None:
+    """
+    Test that several files become several snapshots in file order.
 
-        rel_error = np.abs(integral - expected) / expected
-        print(f"Unequal elements: integral={integral:.15e}, expected={expected:.15e}, rel_error={rel_error:.2e}")
+    The reader must take the time of each file and get the step from those
+    times.
+    """
+    times = (0.0, 0.25, 0.5, 0.75, 1.0)
+    _write_nek_case(tmp_path, element_widths_x=[np.pi / 2.0, np.pi / 2.0], order=5, times=times)
 
-        assert rel_error < 1e-10, (
-            f"Integral {integral} does not match expected {expected} (unequal elements); relative error {rel_error}"
-        )
+    data = load_data(str(tmp_path), loader_type="nek", field="u_1")
+
+    q = data["q"]
+    assert q.shape[0] == len(times)
+    np.testing.assert_allclose(data["t"], np.array(times))
+    assert data["dt"] == pytest.approx(0.25)
+
+    # Snapshot k holds (k + 1) times the field of snapshot 0.
+    for k in range(1, len(times)):
+        np.testing.assert_allclose(q[k], (k + 1) * q[0], atol=1e-12)
+
+
+def test_uniform_weights_would_get_the_energy_wrong(tmp_path: Path) -> None:
+    """
+    Test that the computed weights are not interchangeable with ones.
+
+    This states what the weights buy. Replacing them with ones must move the
+    energy far away from the closed-form value.
+    """
+    _write_nek_case(tmp_path, element_widths_x=[np.pi / 2.0, np.pi / 2.0])
+
+    data = load_data(str(tmp_path), loader_type="nek", field="u_1")
+    q = data["q"]
+    weights = data["spatial_weights"]
+
+    correct = float(np.sum(weights * q[0] ** 2))
+    uniform = float(np.sum(np.ones_like(weights) * q[0] ** 2))
+
+    assert correct == pytest.approx(EXPECTED_ENERGY, rel=1e-10)
+    assert abs(uniform - EXPECTED_ENERGY) / EXPECTED_ENERGY > 1.0
 
 
 def test_nek_loader_without_pymech() -> None:
-    """
-    Test that a clear error is raised when pymech is missing.
-
-    Use monkeypatch to make pymech import fail.
-    """
+    """Test that a missing pymech gives an error that names the extra."""
     with patch.dict(sys.modules, {"pymech": None}):
         from openmodalpy.core.nek import NekDataLoader
 
@@ -238,93 +218,151 @@ def test_nek_loader_without_pymech() -> None:
             loader.load("/dummy/path", field="u_1")
 
 
-def test_nek_loader_weights_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("n", [3, 5, 7, 9, 15])
+def test_gll_nodes_and_weights_are_real(n: int) -> None:
     """
-    Test that incorrect weights produce a large integral error.
+    Test that the GLL nodes and weights are real numbers.
 
-    Temporarily replace computed weights with all-ones, verify the test
-    fails, then check that correct weights pass.
+    The roots of the Legendre derivative are real, but the solver can return
+    them in a complex array. A complex node makes every later array complex,
+    and the assignment into a float mesh then discards the imaginary part
+    without a word. NumPy 2.5 showed this where NumPy 2.4 did not.
     """
-    try:
-        import pymech  # noqa: F401
-    except ImportError:
-        pytest.skip("pymech not installed")
+    nodes, weights = gll_nodes_and_weights(n)
 
-    from openmodalpy.core.nek import gll_nodes_and_weights
+    assert not np.iscomplexobj(nodes), f"GLL nodes for n={n} are complex"
+    assert not np.iscomplexobj(weights), f"GLL weights for n={n} are complex"
 
-    test_dir = tmp_path / "nek_test_weights"
-    test_dir.mkdir()
-    dummy_file = test_dir / "case.f00001"
-    dummy_file.touch()
+    # The nodes hold the two endpoints and rise from -1 to 1.
+    assert nodes[0] == pytest.approx(-1.0)
+    assert nodes[-1] == pytest.approx(1.0)
+    assert np.all(np.diff(nodes) > 0.0)
 
-    # Setup: equal-element test data
-    nx1, ny1, nel_x, nel_y = 5, 5, 2, 2
-    nodes_gll, _ = gll_nodes_and_weights(nx1)
-    nel = nel_x * nel_y
-    nz1 = 1
-    ndim = 2
+    # The weights integrate the constant 1 over [-1, 1], which is 2.
+    assert np.sum(weights) == pytest.approx(2.0, rel=1e-13)
 
-    elem_list = []
-    for iy in range(nel_y):
-        y_start = 0.0 + iy * (np.pi / nel_y)
-        y_end = y_start + (np.pi / nel_y)
 
-        for ix in range(nel_x):
-            x_start = 0.0 + ix * (np.pi / nel_x)
-            x_end = x_start + (np.pi / nel_x)
+def test_gll_nodes_drop_rounding_level_imaginary_parts() -> None:
+    """
+    Test that a complex root array with rounding-level noise is accepted.
 
-            x_scale = (x_end - x_start) / 2.0
-            y_scale = (y_end - y_start) / 2.0
+    This is what NumPy 2.5 returns. The nodes must come back real and correct.
+    """
+    from openmodalpy.core import nek
 
-            x_phys = np.zeros((nz1, ny1, nx1))
-            y_phys = np.zeros((nz1, ny1, nx1))
+    n = 5
+    expected_nodes, expected_weights = nek.gll_nodes_and_weights(n)
 
-            for j in range(ny1):
-                for i in range(nx1):
-                    x_phys[0, j, i] = x_start + x_scale * (nodes_gll[i] + 1.0)
-                    y_phys[0, j, i] = y_start + y_scale * (nodes_gll[j] + 1.0)
+    real_roots = nek.legendre.legroots(nek.legendre.legder(np.eye(n)[n - 1]))
+    noisy = real_roots.astype(np.complex128) + 1e-17j
 
-            vel = np.zeros((3, nz1, ny1, nx1))
-            vel[0, 0, :, :] = np.sin(x_phys[0]) * np.cos(y_phys[0])
+    with patch.object(nek.legendre, "legroots", return_value=noisy):
+        nodes, weights = nek.gll_nodes_and_weights(n)
 
-            pres = np.zeros((1, nz1, ny1, nx1))
-            pres[0, 0, :, :] = np.sin(x_phys[0]) * np.cos(y_phys[0])
+    assert not np.iscomplexobj(nodes)
+    np.testing.assert_allclose(nodes, expected_nodes, atol=1e-14)
+    np.testing.assert_allclose(weights, expected_weights, atol=1e-14)
 
-            elem_data = MagicMock()
-            elem_data.pos = np.array([x_phys, y_phys, np.zeros_like(x_phys)])
-            elem_data.vel = vel
-            elem_data.pres = pres
-            elem_data.scal = vel[:1]
 
-            elem_list.append(elem_data)
+def test_gll_nodes_reject_a_truly_complex_root() -> None:
+    """
+    Test that a root with a real imaginary part raises instead of casting.
 
-    hexa_data = MagicMock()
-    hexa_data.ndim = ndim
-    hexa_data.nel = nel
-    hexa_data.lr1 = (nx1, ny1, nz1)
-    hexa_data.var = ["u", "v", "w", "p", "t"]
-    hexa_data.time = [0.0]
-    hexa_data.istep = [1]
-    hexa_data.elem = elem_list
+    A silent cast would hide a broken solve behind plausible numbers.
+    """
+    from openmodalpy.core import nek
 
-    with patch("pymech.readnek", return_value=hexa_data):
-        # First, load with correct weights and verify it passes
-        data_correct = load_data(str(test_dir), loader_type="nek", field="u_1")
-        q = data_correct["q"]
-        weights = data_correct["spatial_weights"]
-        f_values = q[0]
-        integral_correct = np.sum(weights * f_values**2)
-        expected = (np.pi / 2.0) ** 2
-        rel_error_correct = np.abs(integral_correct - expected) / expected
+    n = 5
+    real_roots = nek.legendre.legroots(nek.legendre.legder(np.eye(n)[n - 1]))
+    broken = real_roots.astype(np.complex128)
+    broken[0] += 0.5j
 
-        print(f"Correct weights: integral={integral_correct:.15e}, rel_error={rel_error_correct:.2e}")
-        assert rel_error_correct < 1e-10
+    with patch.object(nek.legendre, "legroots", return_value=broken):
+        with pytest.raises(ValueError, match="came out complex"):
+            nek.gll_nodes_and_weights(n)
 
-        # Now test with uniform weights (should fail)
-        uniform_weights = np.ones_like(weights)
-        integral_uniform = np.sum(uniform_weights * f_values**2)
-        rel_error_uniform = np.abs(integral_uniform - expected) / expected
 
-        print(f"Uniform weights: integral={integral_uniform:.15e}, rel_error={rel_error_uniform:.2e}")
-        # Uniform weights should give a much larger error
-        assert rel_error_uniform > 0.01, "Uniform weights should produce large error but did not"
+def test_each_field_file_is_read_once(tmp_path: Path) -> None:
+    """
+    Test that the reader opens each file one time.
+
+    The mesh and the metadata both come from the first file. Taking them with
+    a second and a third read of that file costs the same again on a large
+    case, and the cost is invisible in the result.
+    """
+    pymech = pytest.importorskip("pymech")
+
+    times = (0.0, 0.25, 0.5)
+    _write_nek_case(tmp_path, element_widths_x=[np.pi / 2.0, np.pi / 2.0], order=5, times=times)
+
+    real_readnek = pymech.readnek
+    calls: list[str] = []
+
+    def counting_readnek(path: str, *args: object, **kwargs: object) -> object:
+        calls.append(str(path))
+        return real_readnek(path, *args, **kwargs)
+
+    with patch.object(pymech, "readnek", counting_readnek):
+        load_data(str(tmp_path), loader_type="nek", field="u_1")
+
+    assert len(calls) == len(times), f"Expected one read per file, got {len(calls)}: {calls}"
+    assert len(set(calls)) == len(times)
+
+
+def test_files_without_a_time_leave_the_step_undefined(tmp_path: Path) -> None:
+    """
+    Test a run whose files all carry the time 0.0.
+
+    Nek5000 stamps a time in each field file, but a file can be written
+    without one. Every snapshot then shares the time 0.0, and the step between
+    them is undefined. The reader must report dt as None and pass the times
+    through unchanged. A made-up step of 1 would put every frequency this
+    package reports on the wrong axis, and nothing downstream would say so.
+    """
+    _write_nek_case(
+        tmp_path,
+        element_widths_x=[np.pi / 2.0, np.pi / 2.0],
+        order=5,
+        times=(0.0, 0.0, 0.0, 0.0),
+    )
+
+    data = load_data(str(tmp_path), loader_type="nek", field="u_1")
+
+    np.testing.assert_allclose(data["t"], np.zeros(4))
+    assert data["dt"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("u_1", lambda x, y: np.sin(x) * np.cos(y)),
+        ("u_2", lambda x, y: np.cos(x) * np.sin(y)),
+        ("p", lambda x, y: x + 2.0 * y),
+    ],
+)
+def test_the_field_argument_picks_the_right_array(
+    tmp_path: Path,
+    field: str,
+    expected: Callable[[np.ndarray, np.ndarray], np.ndarray],
+) -> None:
+    """
+    Test that each field name reads the array it names.
+
+    The three stored fields differ, so a reader that takes the pressure when
+    asked for the second velocity component fails here.
+    """
+    _write_nek_case(tmp_path, element_widths_x=[np.pi / 2.0, np.pi / 2.0], order=5)
+
+    data = load_data(str(tmp_path), loader_type="nek", field=field)
+
+    x = data["x"]
+    y = data["y"]
+    np.testing.assert_allclose(data["q"][0], expected(x, y), atol=1e-12)
+
+
+def test_an_unknown_field_name_is_refused(tmp_path: Path) -> None:
+    """Test that a name the reader does not support gives a clear error."""
+    from openmodalpy.core.nek import NekDataLoader
+
+    with pytest.raises(ValueError, match="Unsupported variable"):
+        NekDataLoader()._parse_field("t")
