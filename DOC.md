@@ -1009,7 +1009,11 @@ res = read_results("path/to/result.hdf5")
 DMD and ST-POD, `nfft` is 1 and `overlap` is 0.0: those methods never form an
 FFT block, so the pair is a stamp, not a setting.
 
-DMD also records `dmd_variant`, `dmd_method`, `dmd_embedding_dim`, `dmd_named_variant`.
+DMD also records `dmd_variant`, `dmd_method`, `dmd_embedding_dim`, `dmd_named_variant`
+and `dmd_svd_route`. The route is `"iterative"` when the truncation rank is a small
+fraction of the smaller matrix dimension, which sends the solve to ARPACK, and
+`"dense"` otherwise. The two cost an order of magnitude apart on a delay-embedded
+case, so the field tells you why a run took the time it did.
 
 **Provenance** — every file written through `write_results` also carries a
 `prov_*` block describing the software that produced it. Read it as

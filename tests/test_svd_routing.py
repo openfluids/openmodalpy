@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from openmodalpy.core.operators import ARPACK_MAX_RANK_FRACTION, ARPACK_MIN_DIM, compute_reduced_svd, use_iterative_svd
+from openmodalpy.core.operators import (
+    ARPACK_MAX_RANK_FRACTION,
+    ARPACK_MIN_DIM,
+    compute_reduced_svd,
+    svd_route,
+    use_iterative_svd,
+)
 
 
 def test_near_full_rank_does_not_use_iterative():
@@ -61,3 +67,52 @@ def test_iterative_and_dense_agree_on_leading_triplets():
     s_dense = np.linalg.svd(X, full_matrices=False, compute_uv=False)[:rank]
 
     np.testing.assert_allclose(s_iter, s_dense, rtol=1e-8)
+
+
+def test_svd_route_names_the_route_the_rule_picks():
+    """``svd_route`` must report exactly what ``use_iterative_svd`` decides.
+
+    The two are separate functions, and a result file records what the first
+    one says. If they disagree, a saved run names a route it did not take.
+    """
+    for min_dim in (10, ARPACK_MIN_DIM - 1, ARPACK_MIN_DIM, 2000, 5000):
+        for rank in (1, 10, 100, 300, min_dim - 1):
+            if rank >= min_dim:
+                continue
+            expected = "iterative" if use_iterative_svd(min_dim, rank) else "dense"
+            assert svd_route(min_dim, rank) == expected, (min_dim, rank)
+
+
+def test_svd_route_reports_both_routes():
+    """The report must not be constant. Both routes must be reachable."""
+    assert svd_route(2000, 10) == "iterative"
+    assert svd_route(2000, 1999) == "dense"
+    assert svd_route(10, 2) == "dense"
+
+
+def test_a_forced_route_is_reported_as_forced():
+    """A caller that names a route gets that route in the report."""
+    assert svd_route(2000, 10, method="dense") == "dense"
+    assert svd_route(10, 2, method="iterative") == "iterative"
+    assert svd_route(2000, 10, method="randomized") == "randomized"
+
+
+def test_the_reported_route_is_the_route_that_runs():
+    """Pin the report to the code path, not to a second copy of the rule.
+
+    A dense solve returns every singular value it can. ARPACK returns exactly
+    the rank asked for. That difference tells the two apart from the outside.
+    """
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((4000, 300))
+
+    rank = 5
+    min_dim = min(x.shape)
+    assert svd_route(min_dim, rank) == "iterative"
+    _, s_iterative, _ = compute_reduced_svd(x, rank)
+    assert s_iterative.size == rank
+
+    rank_dense = min_dim - 1
+    assert svd_route(min_dim, rank_dense) == "dense"
+    _, s_dense, _ = compute_reduced_svd(x, rank_dense)
+    assert s_dense.size == min_dim

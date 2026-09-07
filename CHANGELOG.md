@@ -33,6 +33,13 @@ exports, string dispatch and the docs before it went.
 
 ### Added
 
+- DMD result files record `dmd_svd_route`, the SVD route the run took:
+  `"iterative"` for the ARPACK solve or `"dense"` for the LAPACK one. The
+  routing rule picks between them by truncation rank and matrix shape, and the
+  two cost an order of magnitude apart on a delay-embedded case. One function,
+  `core.operators.svd_route`, both reports the route and decides it, so a
+  recorded route cannot drift from the route that ran.
+
 - A reader for Nek5000 field files. `load_data(path, loader_type="nek")`, or a
   directory of `.f0*` files, gives the field and the mesh together. The reader
   returns `spatial_weights` for the spectral-element grid: the

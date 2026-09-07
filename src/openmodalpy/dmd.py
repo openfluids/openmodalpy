@@ -40,7 +40,11 @@ from openmodalpy.core.config import (  # noqa: E402
     FIGURES_DIR_DMD,
     RESULTS_DIR_DMD,
 )
-from openmodalpy.core.operators import canonical_eigenvalue_order, compute_reduced_svd  # noqa: E402
+from openmodalpy.core.operators import (  # noqa: E402
+    canonical_eigenvalue_order,
+    compute_reduced_svd,
+    svd_route,
+)
 from openmodalpy.core.plotting import (  # noqa: E402
     add_inset_colorbar,
     format_mode_title,
@@ -266,6 +270,12 @@ class DMDAnalyzer(BaseAnalyzer):
         self._dmd_method = "ls"
         self._dmd_embedding_dim = 1
         self._dmd_named_variant = "dmd"
+        # Which SVD route the last perform_dmd() took. The routing rule picks
+        # between a dense LAPACK solve and ARPACK by rank and matrix shape, and
+        # the two differ in cost by an order of magnitude on a delay-embedded
+        # case. A result file that does not name the route cannot say why it
+        # took the time it did.
+        self._dmd_svd_route = "dense"
 
     def _svd_request_rank(self, shape: Sequence[int]) -> int:
         """How many singular triplets to request from ``compute_reduced_svd``.
@@ -395,6 +405,7 @@ class DMDAnalyzer(BaseAnalyzer):
         X2 = X[:, 1:]
 
         r_svd = self._svd_request_rank(X1.shape)
+        self._dmd_svd_route = svd_route(min(X1.shape), r_svd)
         u, s, vh = compute_reduced_svd(X1, r_svd)
         rcond = DMD_PINV_RCOND(X1.shape, s.dtype if s.size else X1.dtype)
         r, r_requested = self._resolve_rank(s, X1.shape, rcond)
@@ -500,6 +511,7 @@ class DMDAnalyzer(BaseAnalyzer):
             "dmd_named_variant": named_variant,
             "dmd_method": method,
             "dmd_embedding_dim": embedding_dim,
+            "dmd_svd_route": self._dmd_svd_route,
         }
 
     def _result_payload(self) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -552,6 +564,7 @@ class DMDAnalyzer(BaseAnalyzer):
         self._dmd_method = str(res.attrs.get("dmd_method", "ls"))
         self._dmd_embedding_dim = int(res.attrs.get("dmd_embedding_dim", 1))
         self._dmd_named_variant = str(res.attrs.get("dmd_named_variant", "dmd"))
+        self._dmd_svd_route = str(res.attrs.get("dmd_svd_route", "dense"))
 
         # Cap n_modes_save to actual modes available (for narrow files loaded into wide cap).
         n_modes_available = self.modes.shape[1] if self.modes.ndim >= 2 else self.modes.size

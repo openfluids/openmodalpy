@@ -57,6 +57,35 @@ def use_iterative_svd(min_dim: int, rank: int) -> bool:
     return rank < ARPACK_MAX_RANK_FRACTION * min_dim and min_dim >= ARPACK_MIN_DIM
 
 
+def svd_route(min_dim: int, rank: int, method: str = "auto") -> str:
+    """Return the route :func:`compute_reduced_svd` takes for these arguments.
+
+    The routing rule lives in one place. This function reads it, and
+    :func:`compute_reduced_svd` calls this function, so a recorded route
+    cannot drift away from the route that ran.
+
+    Parameters
+    ----------
+    min_dim : int
+        The smaller of the two matrix dimensions.
+    rank : int
+        How many singular triplets the caller asks for.
+    method : str, default "auto"
+        The caller's route request. ``"auto"`` consults
+        :func:`use_iterative_svd`; the other names force their route.
+
+    Returns
+    -------
+    str
+        One of ``"dense"``, ``"iterative"`` or ``"randomized"``.
+    """
+    if method == "randomized":
+        return "randomized"
+    if method == "auto":
+        return "iterative" if use_iterative_svd(min_dim, rank) else "dense"
+    return "iterative" if method == "iterative" else "dense"
+
+
 def compute_reduced_svd(
     X: np.ndarray,
     rank: int,
@@ -93,8 +122,7 @@ def compute_reduced_svd(
 
     with apply_blas_limit():
         min_dim = min(X.shape)
-        use_iter = use_iterative_svd(min_dim, rank) if method == "auto" else method == "iterative"
-        if use_iter:
+        if svd_route(min_dim, rank, method) == "iterative":
             # ARPACK does one matrix-vector product per iteration, so it reads
             # the whole matrix tens of times. A non-contiguous view makes every
             # one of those reads stride through memory, and the caller usually
