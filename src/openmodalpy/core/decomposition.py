@@ -500,7 +500,13 @@ def _solve_eigh_complex(
     # matches the historical unweighted formula; where w == 0 the mode is 0.
     weighted_modes = (data_weighted.conj().T @ eigenvectors) / np.sqrt(safe_eigs * n_samples)
     modes = _unweight_modes(weighted_modes, weights)
-    coeffs = data.conj() @ (weights[:, np.newaxis] * modes)
+    # Project the ensemble itself, not its conjugate. The modes are
+    # W-orthonormal and span the row space of ``data``, so ``data @ (W Phi)``
+    # gives coefficients that satisfy both properties a POD expansion must
+    # have: mean_t |a_k|^2 equals lambda_k, and ``a @ Phi^H`` returns the
+    # ensemble. Conjugating the data first breaks both, because the conjugate
+    # rows do not lie in the span the modes cover.
+    coeffs = data @ (weights[:, np.newaxis] * modes)
     modes, coeffs = canonicalize_modes(modes, coeffs)
     return modes, np.asarray(eigenvalues), coeffs
 

@@ -175,20 +175,52 @@ def test_canonicalize_modes_complex_phase_and_reconstruction():
 
 
 def test_complex_route_coeffs_remain_weighted_projection():
-    """Complex eigh coeffs stay conj(data) @ (W * modes) after canonicalize.
+    """Complex eigh coeffs stay data @ (W * modes) after canonicalize.
 
-    Reference is the projection formula only — no library helper on that side.
+    The projection uses the ensemble, not its conjugate. The modes span the row
+    space of the ensemble, and the conjugate rows do not lie in that span, so
+    conjugating first gives coefficients that neither carry the modal energy
+    nor rebuild the field.
+
+    The second assertion states the energy that the first one cannot: with
+    W-orthonormal modes the coefficients hold ``N * sum(lambda_kept)`` of
+    squared energy. It is derived from the eigenvalues the solver returns, so
+    it stays a claim about the arithmetic rather than a number copied out of a
+    previous run.
     """
     rng = np.random.default_rng(7)
     ens = rng.standard_normal((12, 8)) + 1j * rng.standard_normal((12, 8))
     w = np.linspace(0.5, 2.0, 8)
-    modes, _eig, coeffs = weighted_second_order(ens, SpatialMetric(w), method="eigh", n_keep=3)
-    expected = ens.conj() @ (w[:, np.newaxis] * modes)
+    n_keep = 3
+    modes, eig, coeffs = weighted_second_order(ens, SpatialMetric(w), method="eigh", n_keep=n_keep)
+
+    expected = ens @ (w[:, np.newaxis] * modes)
     scale = float(np.linalg.norm(ens))
     rel = float(np.linalg.norm(coeffs - expected) / scale)
     assert rel <= 1e-14, f"projection residual {rel:.3e} exceeds 1e-14"
-    recon = float(np.linalg.norm(coeffs @ modes.conj().T))
-    assert recon == pytest.approx(8.423251717664, abs=1e-10)
+
+    n_samples = ens.shape[0]
+    assert float(np.linalg.norm(coeffs) ** 2) == pytest.approx(n_samples * float(np.sum(eig)), rel=1e-12)
+
+
+def test_complex_route_full_expansion_returns_the_ensemble():
+    """Keeping every mode must rebuild the field and account for all its energy.
+
+    A truncated set cannot say this, and the projection test above compares
+    against a formula rather than against the data. This one closes both: the
+    sum over the complete basis is the ensemble to rounding, and the total
+    weighted energy equals ``N`` times the sum of the eigenvalues.
+    """
+    rng = np.random.default_rng(7)
+    ens = rng.standard_normal((12, 8)) + 1j * rng.standard_normal((12, 8))
+    w = np.linspace(0.5, 2.0, 8)
+    n_samples = ens.shape[0]
+
+    modes, eig, coeffs = weighted_second_order(ens, SpatialMetric(w), method="eigh", n_keep=n_samples)
+
+    np.testing.assert_allclose(coeffs @ modes.conj().T, ens, atol=1e-12)
+    total_energy = float(np.sum(w * np.abs(ens) ** 2))
+    assert total_energy == pytest.approx(n_samples * float(np.sum(eig)), rel=1e-12)
 
 
 def test_canonicalize_modes_near_tie_stable_under_ulp_noise():

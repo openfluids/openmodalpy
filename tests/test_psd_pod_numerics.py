@@ -6,11 +6,17 @@ normalization, still leaves that suite green.
 
 NOTE: ``reference_psd_pod`` is a twin of ``_solve_eigh_complex`` (weighted
 mode build + unweight, the openmodalpy-era zero-measure policy), kept as a
-refactoring guard against the shared solver. Where w > 0 it is algebraically
-identical to the pre-refactor formula (commands.py at 3102d9a). It is a
-characterization test, NOT an independent physics oracle — it only proves the
-shared path stays consistent with this expression. Correctness of the PSD-POD
-construction itself is not claimed here.
+refactoring guard against the shared solver. It is a characterization test,
+NOT an independent physics oracle — it only proves the shared path stays
+consistent with this expression.
+
+That limit was not theoretical. The twin carried the same conjugate on the
+ensemble that the solver did, so both agreed on time coefficients that were
+wrong. The last two tests in this file state the two properties a POD
+expansion must have, and neither one reads the twin: the variance of the k-th
+coefficient is the k-th eigenvalue, and the coefficients times the modes
+return the ensemble. Both hold to about 1e-15 now and failed by a factor of
+five before.
 """
 
 from __future__ import annotations
@@ -43,7 +49,7 @@ def reference_psd_pod(ensemble: np.ndarray, weights: np.ndarray, n_modes_save: i
     safe_eigs = np.maximum(np.real(eigenvalues), 1e-16)
     weighted_modes = (ensemble_weighted.conj().T @ eigenvectors) / np.sqrt(safe_eigs * n_realizations)
     modes = _unweight_modes(weighted_modes, weights)
-    time_coefficients = ensemble.conj() @ (weights[:, np.newaxis] * modes)
+    time_coefficients = ensemble @ (weights[:, np.newaxis] * modes)
     return modes, eigenvalues, time_coefficients
 
 
@@ -210,3 +216,51 @@ def test_psd_pod_negative_weight_station_raises():
 
     with pytest.raises(ValueError, match="negative weight"):
         _run_solver(ensemble, weights, n_keep=4)
+
+
+def test_the_coefficient_variance_is_the_eigenvalue() -> None:
+    """The k-th eigenvalue is the mean energy of the k-th coefficient.
+
+    This is what an eigenvalue of the POD kernel means, and it does not depend
+    on any sign or phase convention, so it holds whatever the solver decides
+    about either. It is the check the twin above cannot make, because the twin
+    computes its coefficients the same way the solver does.
+    """
+    ensemble, weights = _fourier_ensemble()
+    n_keep = 4
+
+    _, eigenvalues, coefficients = _run_solver(ensemble, weights, n_keep)
+
+    measured = (np.abs(coefficients) ** 2).mean(axis=0)
+    np.testing.assert_allclose(measured, np.real(eigenvalues), rtol=1e-10)
+
+
+def test_the_coefficients_and_modes_rebuild_the_ensemble() -> None:
+    """A full set of coefficients and modes must return the field.
+
+    ``n_keep`` is the number of realizations here, so the expansion is
+    complete and the sum has to be exact to rounding. This is the second
+    convention-free property, and it is the one that says the coefficients
+    belong to these modes and not to their conjugates.
+    """
+    ensemble, weights = _fourier_ensemble()
+    n_keep = ensemble.shape[0]
+
+    modes, _, coefficients = _run_solver(ensemble, weights, n_keep)
+
+    np.testing.assert_allclose(coefficients @ modes.conj().T, ensemble, atol=1e-10)
+
+
+def test_the_modes_are_orthonormal_under_the_spatial_weight() -> None:
+    """The modes must be orthonormal in the inner product the grid defines.
+
+    Without this the eigenvalue is not an energy and the coefficient variance
+    identity above would hold for the wrong reason.
+    """
+    ensemble, weights = _fourier_ensemble()
+    n_keep = 4
+
+    modes, _, _ = _run_solver(ensemble, weights, n_keep)
+
+    gram = modes.conj().T @ (weights[:, np.newaxis] * modes)
+    np.testing.assert_allclose(gram, np.eye(n_keep), atol=1e-10)

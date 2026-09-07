@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- PSD-POD time coefficients change. `_solve_eigh_complex` projected the
+  conjugate of the Fourier ensemble onto the modes. The modes span the row
+  space of the ensemble and the conjugate rows do not lie in that span, so the
+  coefficients it returned had neither property a POD expansion must have:
+  the mean energy of the k-th coefficient was not the k-th eigenvalue, and the
+  coefficients times the modes did not return the field. On a rank-3 test case
+  the measured coefficient energies were 22.1, 5.2 and 13.2 against
+  eigenvalues of 106.1, 26.3 and 11.8 — out of order as well as wrong in size.
+  Both properties now hold to about 1e-15. Modes and eigenvalues are
+  unchanged, so mode shapes and energy rankings from earlier runs stand; a
+  saved `time_coefficients` array does not, and any reconstruction or phase
+  read from one must be recomputed.
+
 - `perform_dmd` now takes `embedding_dim` in place of `delays`. The old keyword raises TypeError.
 - Config run params now use `embedding_dim` in place of `delays`.
 - Saved DMD results now store `dmd_embedding_dim` in place of `dmd_delays`.
