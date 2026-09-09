@@ -46,6 +46,16 @@ exports, string dispatch and the docs before it went.
 
 ### Added
 
+- The mutation-testing baseline in `DOC.md` is measured again, and the harness
+  can run. It had not completed a run since 2026-08-27: a stale `mutants/`
+  tree and a `also_copy` list that did not name `examples/` or `DOC.md` both
+  failed it at collection. New numbers over the same scope: 810 mutants, 745
+  killed, 65 survived, a kill rate of 92% against the 86% recorded before.
+  New tests state what the rank floor is for, what the two solver routes
+  promise each other, what the return for a spectrum with no significant mode
+  must look like on both the real and the complex path, and what
+  `spod_single_frequency` does with `num_modes`.
+
 - DMD result files record `dmd_svd_route`, the SVD route the run took:
   `"iterative"` for the ARPACK solve or `"dense"` for the LAPACK one. The
   routing rule picks between them by truncation rank and matrix shape, and the

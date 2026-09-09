@@ -1100,32 +1100,49 @@ timeout 5400 flock -w 900 ~/.heavy.lock scripts/mutation.sh mutation-report.txt
 
 mutmut forks one test process per mutant, up to `--max-children`. The default
 is the CPU count, which saturates a shared box. The script caps it at 4. Set
-`MUTMUT_MAX_CHILDREN` to change the cap.
+`MUTMUT_MAX_CHILDREN` to change the cap. Memory, not cores, is usually the
+binding limit: each child loads the full test process, and a 24-core machine
+with 15 GB of RAM needs `MUTMUT_MAX_CHILDREN=2`.
+
+mutmut copies the source into `mutants/` and runs the tests from there.
+Two things follow. Delete `mutants/` before a run, because a copy left by an
+earlier one can hold files a later refactor moved or removed, and the run then
+fails at collection instead of on a mutant. And a test that reads a repo-root
+path through `Path(__file__).parents[1]` resolves that path inside `mutants/`,
+so whatever it reads must be listed in `also_copy` in `[tool.mutmut]`;
+`source_paths` copies the package alone.
 
 #### Recorded baseline
 
-Run of 2026-08-27, on the two scoped files, 812 mutants:
+Run of 2026-09-09, on the two scoped files, 810 mutants:
 
 | Status | Count |
 |--------|------|
-| killed | 699 |
-| survived | 109 |
-| timeout | 4 |
+| killed | 745 |
+| survived | 65 |
+| timeout | 0 |
 
-The kill rate is 86%. The 109 survivors are a measured result, not a clean
-result. They group in the solver routing and the tolerance helpers:
+The kill rate is 92%. The previous entry here recorded 2026-08-27 and stood
+for eleven days and four refactors, because the harness could not complete a
+run in between: a stale `mutants/` tree and a too-narrow `also_copy` both
+failed it at collection. Both are fixed, and the note above says how to avoid
+them.
+
+Where the 65 survivors sit:
 
 | Function | Survivors |
 |----------|----------|
-| `_solve_eigh_complex` | 13 |
-| `_solve_eigh` | 11 |
-| `_solve_svd` | 10 |
-| `_significant_singular_value_mask` | 9 |
-| `_significant_eigenvalue_mask` | 9 |
+| `_solve_svd` | 8 |
 | `BandFilteredLift.mask` | 7 |
 | `windowed_block_fft` (welch) | 6 |
-| `spod_single_frequency` | 6 |
-| `_working_eps` | 6 |
+| `_solve_eigh` | 5 |
+| `SpatialMetric.__init__` | 5 |
+| `welch_nblocks` (welch) | 4 |
+| `weighted_second_order` | 4 |
+| `_row_mean_to_std_ratio` | 4 |
+| `BandFilteredLift.apply` | 4 |
+| `SpatialMetric.tile` | 3 |
+| the remaining 15 | 1 or 2 each |
 
 Two causes are expected, and one is not. A mutant in a solver route can
 survive because a different route gives the same answer to the stated
@@ -1133,6 +1150,38 @@ tolerance. A mutant in a threshold constant can survive because no test sits
 close enough to the threshold to see the change. The second cause is a real
 gap in the suite. Treat this table as the number to improve, and compare a
 later run against it.
+
+Where the count moved, and what it cost:
+
+| Run | Mutants | Survived | Kill rate |
+|-----|---------|----------|-----------|
+| 2026-08-27 (last completed before the harness broke) | 812 | 109 | 86% |
+| 2026-09-07, harness repaired | 810 | 116 | 85.7% |
+| after the rank-floor and solver-route claims | 810 | 86 | 89.4% |
+| after the complex empty path and `num_modes` | 810 | 65 | 92.0% |
+
+#### What a surviving mutant is worth, and what a killed one is not
+
+Three of the four gaps closed above were a claim the suite had never made,
+not a line it had never run:
+
+- `_working_eps` returns the same number from both of its branches on
+  float64, so no float64 test can tell a correct implementation from one that
+  ignores the dtype. On float32 the two answers are 5.4e8 apart.
+- The return for a spectrum with no significant mode was never reached, on
+  the real path or the complex one, so its array shapes and its dtype were
+  free to be wrong.
+- `spod_single_frequency` offers `num_modes` and nothing in the package
+  passes it, because the SPOD loop truncates for itself after the call.
+
+The reverse also holds, and it is the sharper lesson. Fixing a real bug in
+the PSD-POD time coefficients on 2026-09-09 changed the mutation score by
+nothing at all: the survivor set before and after was identical, mutant for
+mutant. The line was already covered, by a test that restated the same wrong
+formula. Mutation testing finds a line no test constrains. It cannot find a
+line that every test agrees with and all of them are wrong. For that, assert
+a property the implementation does not mention: an energy identity, a
+reconstruction, a known analytical limit.
 
 ---
 
