@@ -27,8 +27,8 @@ EXPECTED_ENERGY = (np.pi / 2.0) ** 2
 
 # Nine points a side. GLL quadrature is exact for polynomials only, and
 # sin(x)^2 is not one, so the order sets the accuracy floor: five points give
-# 2.0e-05 on this mesh and nine give 5.2e-14. Nine puts the mesh mapping, not
-# the polynomial order, on trial.
+# 2.0e-05 on this mesh and nine give 5.2e-14. At nine points the error that
+# remains comes from the mesh mapping, not from the polynomial order.
 ORDER = 9
 
 

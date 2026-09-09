@@ -549,8 +549,8 @@ closed form exactly (ratio 1.000000); power sits at 0.7337695 of it, which is
 exactly `0.54² / (0.54² + 0.5·0.46²)`. `fullspectrum` changes only the
 returned bin count (16 vs 9), not the values at bins 3 and 5.
 
-Which check carries the weight on the clean field: the closed-form comparison
-is the tight one, at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is
+Which check is the tighter one on the clean field: the closed-form comparison
+runs at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is
 held at 5e-3 by the window difference above, so it corroborates the convention
 mapping and catches a convention mistake — dropping the Strouhal division moves
 the answer by 8×, the wrong window normalisation by 0.734 — but an error

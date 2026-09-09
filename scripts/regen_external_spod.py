@@ -279,9 +279,9 @@ def _build_document(standard_cls, pyspod_version: str) -> dict:
             elif shift < NOISE_MIN_SHIFT:
                 # The noisy field has no closed form, so there is nothing to
                 # check the value against. What must be checked is that the
-                # case earns its place: if the noise moves the answer less than
-                # the window residual, the closed form still describes it and
-                # the vendored number adds nothing.
+                # case is useful: if the noise moves the answer less than the
+                # window residual, the closed form still describes it and the
+                # vendored number adds nothing.
                 raise SystemExit(
                     f"REFUSING TO WRITE: noisy bin={bin_idx} mode={mode_idx} sits "
                     f"{shift:.3e} from the noiseless closed form, below the "
