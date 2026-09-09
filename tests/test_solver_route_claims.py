@@ -122,3 +122,31 @@ def test_the_mode_count_matches_the_rank_of_the_data(method: str) -> None:
 
     assert eigenvalues.size == 4
     assert np.all(eigenvalues > 0.0)
+
+
+@pytest.mark.parametrize(
+    ("n_samples", "n_space"),
+    [(6, 10), (10, 6), (8, 8)],
+    ids=["more_space", "more_samples", "square"],
+)
+def test_a_complex_ensemble_with_no_mode_keeps_its_shape_and_its_dtype(
+    n_samples: int,
+    n_space: int,
+) -> None:
+    """The complex path must return empty arrays that are still complex.
+
+    PSD-POD hands this path a Fourier ensemble. A caller that stacks the
+    result, or writes it to a file with a declared type, needs the second
+    dimension and the dtype to survive a case with no significant mode. The
+    real path is covered above; this is the same claim for the complex one.
+    """
+    data = np.zeros((n_samples, n_space), dtype=np.complex128)
+    weights = np.ones(n_space)
+
+    modes, eigenvalues, coefficients = weighted_second_order(data, weights, method="eigh")
+
+    assert modes.shape == (n_space, 0)
+    assert eigenvalues.shape == (0,)
+    assert coefficients.shape == (n_samples, 0)
+    assert np.iscomplexobj(modes)
+    assert np.iscomplexobj(coefficients)

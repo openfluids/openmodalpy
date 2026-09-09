@@ -214,3 +214,47 @@ def test_spod_save_reapplies_the_fft_cache_stamp(tmp_path):
             else:
                 got = str(got)
             assert got == want
+
+
+def test_spod_single_frequency_num_modes_truncates_after_sorting():
+    """``num_modes`` keeps the leading modes, in energy order.
+
+    The docstring offers this parameter and nothing used it: the shipped SPOD
+    loop truncates for itself after the call, so no test and no caller in the
+    package reached the branch. An external caller can, and it must agree with
+    the untruncated result rather than return a different set.
+    """
+    rng = np.random.default_rng(11)
+    n_space, n_blocks = 12, 6
+    qhat = rng.standard_normal((n_space, n_blocks)) + 1j * rng.standard_normal((n_space, n_blocks))
+    w = np.ones((n_space, 1))
+    nblocks, dst = n_blocks, 0.25
+
+    phi_all, lam_all, psi_all = spod_single_frequency(qhat, nblocks, dst, w, return_psi=True)
+    keep = 3
+    phi, lam, psi = spod_single_frequency(qhat, nblocks, dst, w, num_modes=keep, return_psi=True)
+
+    assert phi.shape == (n_space, keep)
+    assert lam.shape == (keep,)
+    assert psi.shape == (n_blocks, keep)
+
+    # The kept modes are the leading ones and are unchanged by the truncation.
+    np.testing.assert_allclose(lam, lam_all[:keep], rtol=1e-12)
+    np.testing.assert_allclose(phi, phi_all[:, :keep], atol=1e-10)
+    np.testing.assert_allclose(psi, psi_all[:, :keep], atol=1e-10)
+
+    # Descending energy, which is what "after sorting" means here.
+    assert np.all(np.diff(lam) <= 0.0)
+
+
+def test_spod_single_frequency_num_modes_above_the_available_count():
+    """Asking for more modes than exist returns every mode, not an error."""
+    rng = np.random.default_rng(12)
+    n_space, n_blocks = 8, 4
+    qhat = rng.standard_normal((n_space, n_blocks)) + 1j * rng.standard_normal((n_space, n_blocks))
+    w = np.ones((n_space, 1))
+
+    phi, lam = spod_single_frequency(qhat, n_blocks, 0.5, w, num_modes=99)
+
+    assert lam.shape == (n_blocks,)
+    assert phi.shape == (n_space, n_blocks)
