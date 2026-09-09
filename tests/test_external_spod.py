@@ -38,7 +38,8 @@ tone; the mode whose block coefficients turn one full revolution is
 orthogonal to that leakage and matches to 1e-6. So the residual is bin-
 and mode-dependent, bounded here by ~2e-3.
 
-``5e-3`` for every mapped comparison (~2.5x the worst measured residual).
+``5e-3`` for every mapped comparison on the clean field (~2.5x the worst
+measured residual).
 It still discriminates: dropping the Strouhal division moves the answer by
 8x, and the power normalisation by 0.734 — both orders above 5e-3.
 
@@ -47,6 +48,56 @@ normalised Hamming recovers that closed form exactly (ratio 1.000000);
 this is the same FFT-plus-Gram round-off bound the oracle already uses.
 Do not tighten the mapped bound past 5e-3: that is what the measured
 window residual supports, not a pasted power of ten.
+
+The noisy case, and why it exists
+---------------------------------
+On the clean field the closed form is known to (nfft + nblocks)*eps while the
+PySPOD comparison is held at 5e-3 by the window difference. A 1e-3 error in the
+eigenvalues reds the closed-form assertions and leaves the PySPOD one green, so
+on that field the external number confirms the convention mapping and supplies
+no evidence that nothing else has.
+
+``noise_2e-1`` adds Gaussian noise at 0.2 of the field RMS, seeded in the
+generator. There is no closed form for the SPOD estimate of a noisy field, so
+the vendored PySPOD number is the only available truth and the comparison
+carries the check rather than corroborating it. Both packages see the same
+vendored snapshots, so they should still agree to about the window residual.
+
+0.2 is not a round number picked for looking large. Measured shifts away from
+the noiseless closed form, by occupied entry: 1.25e-2, 2.21e-2 and 4.43e-3.
+It is the smallest level at which all three clear the ~2e-3 window residual,
+which is what stops the closed form from being a substitute. Lower levels move
+one entry or another by less than the two packages already disagree: at 0.1 the
+bin 5 entry shifts only 6.8e-4, and at 0.001 every entry shifts about 5e-5.
+The generator refuses to write a case that fails this.
+
+The bound is ``1.6e-2``, 2.5x the worst measured residual of 6.36e-3 at
+noise 0.2, the same margin the clean bound uses. It is looser than 5e-3
+because the window difference and the noise interact; the same three residuals
+are 1.09e-3, 9.0e-7 and 1.95e-3 with no noise. Do not paste a tighter number:
+re-measure if you want one.
+
+What this case does and does not buy
+------------------------------------
+It does not catch a different bug. Both cases run the same code, and the noisy
+bound is looser than the clean one, so any error that moves both fields reds
+the clean assertions first. Measured: a 0.5 percent scale error in the
+spectral normalisation reds every clean assertion and passes the noisy one.
+
+What it buys is that three numbers now have a check at all. The noisy
+eigenvalues sit 1.25e-2, 2.21e-2 and 4.43e-3 away from the clean closed form,
+so no analytic expression describes them, and this comparison is the only
+thing asserting them. A change that altered SPOD only on broadband input would
+pass every analytic test in the suite and would have to get past this one.
+
+Already ruled out, do not chase: the noise-only sub-leading modes. On the
+clean field they are machine zero (1e-15 at bin 3 modes 2 and 3), and under
+noise they carry real energy (3.79e-2 and 1.48e-2), which makes them look like
+the ideal load-bearing target. They are not. Measured against mapped PySPOD
+they disagree by 2.4e-2, 3.9e-2, 1.7e-2, 2.4e-2 and 1.6e-1: the window
+difference is coherent leakage, and on a low-energy mode the leakage is the
+signal. A comparison there would need a 40 percent bound and would
+discriminate nothing.
 
 Already ruled out, do not chase: PySPOD's ``fullspectrum`` changes only
 the returned bin count (16 vs 9), not the values at bins 3 and 5;
@@ -130,9 +181,9 @@ def _rel_err(got: float, want: float) -> float:
     return float(abs(got - want) / abs(want))
 
 
-def _field_snapshots(fixture_doc: dict) -> np.ndarray:
-    """Manufactured snapshots taken FROM the fixture (not rebuilt)."""
-    return np.asarray(fixture_doc["cases"]["manufactured"]["snapshots"], dtype=np.float64)
+def _field_snapshots(fixture_doc: dict, case: str = "manufactured") -> np.ndarray:
+    """Snapshots of one case taken FROM the fixture (not rebuilt)."""
+    return np.asarray(fixture_doc["cases"][case]["snapshots"], dtype=np.float64)
 
 
 def _openmodalpy_eigs(
@@ -350,3 +401,87 @@ def test_regen_script_names_pinned_pyspod_when_absent() -> None:
     assert result.returncode != 0
     text = result.stdout + result.stderr
     assert "pyspod==2.0.0" in text
+
+
+NOISY_CASE = "noise_2e-1"
+
+
+def test_rebuilt_noisy_field_matches_vendored_numerically(regen, fixture_doc) -> None:
+    """The seeded noise must rebuild exactly, or the vendored numbers are orphaned.
+
+    The test never regenerates the field it measures; it reads the snapshots
+    from the fixture. This check is what ties those snapshots to the generator,
+    so a change to the noise seed or level cannot pass unnoticed.
+    """
+    vendored = _field_snapshots(fixture_doc, NOISY_CASE)
+    level = float(fixture_doc["cases"][NOISY_CASE]["noise_relative_rms"])
+    rebuilt = regen.manufactured_field(noise_relative_rms=level)
+    assert np.allclose(rebuilt, vendored, rtol=1e-12, atol=0.0), (
+        "rebuilt noisy field does not match the vendored snapshots; the seed or the noise level changed"
+    )
+
+
+def test_the_noisy_case_carries_more_noise_than_the_clean_one(fixture_doc) -> None:
+    """The two cases must be different fields, at the recorded level."""
+    clean = _field_snapshots(fixture_doc)
+    noisy = _field_snapshots(fixture_doc, NOISY_CASE)
+    level = float(fixture_doc["cases"][NOISY_CASE]["noise_relative_rms"])
+
+    assert level > 0.0
+    assert clean.shape == noisy.shape
+    measured = float(np.sqrt(np.mean((noisy - clean) ** 2)) / np.sqrt(np.mean(clean**2)))
+    assert measured == pytest.approx(level, rel=0.1)
+
+
+@pytest.mark.parametrize(("bin_idx", "mode_idx"), OCCUPIED)
+def test_openmodalpy_matches_vendored_pyspod_under_noise(
+    fixture_doc,
+    tmp_path: Path,
+    bin_idx: int,
+    mode_idx: int,
+) -> None:
+    """The load-bearing comparison: nothing else knows these numbers.
+
+    The noisy SPOD estimate has no closed form, so this assertion is the only
+    check on the values. A change to the block FFT, the window handling or the
+    spectral normalisation that survives every analytic test would have to get
+    past PySPOD here.
+    """
+    q = _field_snapshots(fixture_doc, NOISY_CASE)
+    got = float(_openmodalpy_eigs(q, fixture_doc, tmp_path)[bin_idx, mode_idx])
+    raw = float(_occupied_item(fixture_doc["cases"][NOISY_CASE]["occupied"], bin_idx, mode_idx)["pyspod_eigenvalue"])
+    mapped = raw * _mapping_factor(fixture_doc)
+    err = _rel_err(got, mapped)
+    tol = _tol(fixture_doc, "mapped_vs_pyspod_noisy")
+    assert err <= tol, (
+        f"noisy bin {bin_idx} mode {mode_idx}: openmodalpy {got:.6g} vs mapped "
+        f"PySPOD {mapped:.6g} relative error {err:.3e} exceeds {tol:.3e}"
+    )
+
+
+@pytest.mark.parametrize(("bin_idx", "mode_idx"), OCCUPIED)
+def test_the_closed_form_does_not_describe_the_noisy_answer(
+    fixture_doc,
+    tmp_path: Path,
+    bin_idx: int,
+    mode_idx: int,
+) -> None:
+    """The noisy case must not be answerable from the clean closed form.
+
+    This is what makes the vendored number load-bearing rather than
+    corroborating. Every occupied entry has to sit further from the noiseless
+    closed form than the two packages disagree with each other; otherwise the
+    closed form would still describe the answer and PySPOD would add nothing.
+    If someone lowers the noise, this fails and says so.
+    """
+    closed = float(_occupied_item(fixture_doc["construction"]["closed_form"], bin_idx, mode_idx)["value"])
+    q = _field_snapshots(fixture_doc, NOISY_CASE)
+    got = float(_openmodalpy_eigs(q, fixture_doc, tmp_path)[bin_idx, mode_idx])
+
+    shift = _rel_err(got, closed)
+    window_residual = _tol(fixture_doc, "mapped_vs_pyspod")
+    assert shift > window_residual / 2.5, (
+        f"noisy bin {bin_idx} mode {mode_idx} sits {shift:.3e} from the noiseless "
+        f"closed form {closed:.6g}. The window residual already covers that, so "
+        "this case corroborates instead of carrying the check"
+    )

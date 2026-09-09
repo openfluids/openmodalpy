@@ -46,6 +46,16 @@ exports, string dispatch and the docs before it went.
 
 ### Added
 
+- The SPOD external cross-check gains a noisy case. On the clean manufactured
+  field the closed form is tighter than the PySPOD comparison, so the vendored
+  number confirmed the convention mapping and asserted nothing on its own.
+  `noise_2e-1` adds Gaussian noise at 0.2 of the field RMS from a recorded
+  seed; a noisy SPOD estimate has no closed form, so the vendored PySPOD
+  eigenvalues are the only check on those numbers. The level is the smallest
+  at which every occupied entry moves further from the clean closed form than
+  the window residual between the two packages, and the generator refuses to
+  write a case that fails that test.
+
 - The mutation-testing baseline in `DOC.md` is measured again, and the harness
   can run. It had not completed a run since 2026-08-27: a stale `mutants/`
   tree and a `also_copy` list that did not name `examples/` or `DOC.md` both

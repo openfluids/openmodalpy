@@ -549,14 +549,35 @@ closed form exactly (ratio 1.000000); power sits at 0.7337695 of it, which is
 exactly `0.54² / (0.54² + 0.5·0.46²)`. `fullspectrum` changes only the
 returned bin count (16 vs 9), not the values at bins 3 and 5.
 
-Which check carries the weight: the closed-form comparison is the tight one,
-at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is held at 5e-3 by the
-window difference above, so it corroborates the convention mapping and catches
-a convention mistake — dropping the Strouhal division moves the answer by 8×,
-the wrong window normalisation by 0.734 — but an error smaller than 5e-3 is
-caught by the closed form, not by the external number. On this field the
-closed form is known, so PySPOD confirms the mapping rather than supplying
-evidence nothing else has.
+Which check carries the weight on the clean field: the closed-form comparison
+is the tight one, at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is
+held at 5e-3 by the window difference above, so it corroborates the convention
+mapping and catches a convention mistake — dropping the Strouhal division moves
+the answer by 8×, the wrong window normalisation by 0.734 — but an error
+smaller than 5e-3 is caught by the closed form, not by the external number.
+
+**The noisy case.** A second case, `noise_2e-1`, adds Gaussian noise at 0.2 of
+the field RMS from a seed recorded in the fixture. A noisy SPOD estimate has no
+closed form, so the vendored PySPOD number is the only thing asserting those
+eigenvalues. The bound is 1.6e-2, which is 2.5× the worst measured residual of
+6.36e-3 — the same margin the clean bound uses, looser because the window
+difference and the noise interact.
+
+0.2 is the smallest level at which every occupied entry moves further from the
+clean closed form (1.25e-2, 2.21e-2, 4.43e-3) than the ~2e-3 window residual,
+which is what stops the closed form being a substitute. The generator refuses
+to write a case that fails that test.
+
+This case does not catch a different bug: both cases run the same code and the
+noisy bound is looser, so a shared error reds the clean assertions first. What
+it buys is that those three numbers have a check at all, and that a change
+affecting SPOD only on broadband input would have to get past it.
+
+Do not move the comparison to the noise-only sub-leading modes. They look ideal
+— machine zero on the clean field, real energy under noise — but the window
+difference is coherent leakage, and on a low-energy mode the leakage *is* the
+signal. Measured disagreement there is 1.7e-2 to 1.6e-1, so a comparison would
+need a 40% bound and discriminate nothing.
 
 ### 5. ST-POD — Delay-Embedded Space-Time POD
 

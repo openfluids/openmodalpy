@@ -63,6 +63,19 @@ OCCUPIED: tuple[tuple[int, int, float], ...] = (
     (K_BIN2, 0, A3),
 )
 
+# The noisy case. On the clean field the closed form is known and tighter than
+# the PySPOD comparison, so the external number confirms the convention mapping
+# and supplies no evidence of its own. Additive noise removes the closed form,
+# and PySPOD becomes the only available truth.
+NOISE_SEED = 20260909
+NOISE_RELATIVE_RMS = 0.2
+# Every occupied entry must move further from the noiseless closed form than
+# the window residual between the two packages, or the closed form would still
+# describe the answer and the noisy case would add nothing. Measured shifts at
+# this level: 1.25e-2 (bin 3 mode 0), 2.21e-2 (bin 3 mode 1), 4.43e-3
+# (bin 5 mode 0). 0.2 is the smallest level at which all three clear it.
+NOISE_MIN_SHIFT = 2.0e-3
+
 # Derived bounds: see tests/test_external_spod.py for the prose.
 TOLERANCES: dict[str, dict[str, object]] = {
     "mapped_vs_pyspod": {
@@ -77,6 +90,21 @@ TOLERANCES: dict[str, dict[str, object]] = {
             "worst measured residual. Dropping the Strouhal division moves the "
             "answer by 8x; power vs amplitude by 0.734 — both orders above "
             "5e-3. This bound is also the write-gate."
+        ),
+    },
+    "mapped_vs_pyspod_noisy": {
+        "value": 1.6e-2,
+        "kind": "relative",
+        "applies": "openmodalpy vs mapped PySPOD at occupied interior bins, noisy case",
+        "reason": (
+            "There is no closed form on the noisy field, so this bound is the "
+            "only check on those numbers. Measured worst residual at noise "
+            "0.2 rms: 6.36e-3 (bin 3 mode 1); the other two are 2.58e-3 and "
+            "2.55e-3. The bound is 2.5x the worst, the same margin the "
+            "noiseless bound uses. It is looser than 5e-3 because the window "
+            "difference and the noise interact: the same three residuals are "
+            "1.09e-3, 9.0e-7 and 1.95e-3 with no noise. Both packages see the "
+            "same snapshots, so nothing else should differ."
         ),
     },
     "closed_form": {
@@ -136,11 +164,15 @@ def assert_written_field_is_passed_field(payload, passed: np.ndarray, *, label: 
         raise SystemExit(f"REFUSING TO WRITE: {label} JSON float64 round-trip is not bit-identical")
 
 
-def manufactured_field() -> np.ndarray:
+def manufactured_field(*, noise_relative_rms: float = 0.0) -> np.ndarray:
     """Rank-2 tone at ``K_BIN`` plus a third tone at ``K_BIN2``.
 
     Identical construction to ``tests/test_spod_oracle.py``: mode 1 has
     constant phase across blocks; mode 2 advances one full turn.
+
+    ``noise_relative_rms`` adds Gaussian noise of that fraction of the field
+    RMS, from ``NOISE_SEED``. The default of zero gives the clean field, so a
+    caller that wants the original construction needs no argument.
     """
     n_snapshots = NBLOCKS * NFFT
     field = np.zeros((n_snapshots, N_SPACE))
@@ -153,6 +185,10 @@ def manufactured_field() -> np.ndarray:
             + A2 * np.outer(np.cos(2.0 * np.pi * K_BIN * time / NFFT + phase2), PHI2)
             + A3 * np.outer(np.cos(2.0 * np.pi * K_BIN2 * time / NFFT), PHI3)
         )
+    if noise_relative_rms > 0.0:
+        rms = float(np.sqrt(np.mean(field**2)))
+        noise_rng = np.random.default_rng(NOISE_SEED)
+        field = field + (noise_relative_rms * rms) * noise_rng.standard_normal(field.shape)
     return field
 
 
@@ -214,33 +250,51 @@ def _pyspod_eigs(standard_cls, snapshots: np.ndarray) -> np.ndarray:
 def _build_document(standard_cls, pyspod_version: str) -> dict:
     import scipy
 
-    snapshots = manufactured_field()
-    eigs = _pyspod_eigs(standard_cls, snapshots)
-    payload = snapshots_to_json(snapshots)
-    assert_written_field_is_passed_field(payload, snapshots, label="manufactured")
     factor = mapping_factor()
-    occupied: list[dict] = []
+    cases: dict[str, dict] = {}
     closed_form: list[dict] = []
-    for bin_idx, mode_idx, amplitude in OCCUPIED:
-        raw = _clean_float(float(eigs[bin_idx, mode_idx]))
-        closed = _clean_float(expected_lambda(amplitude))
-        mapped = raw * factor
-        err = abs(mapped - closed) / abs(closed)
-        if err > WRITE_GATE:
-            raise SystemExit(
-                f"REFUSING TO WRITE: mapped PySPOD bin={bin_idx} mode={mode_idx} "
-                f"is {mapped:.6g} vs closed form {closed:.6g} "
-                f"(relative {err:.3e}, gate {WRITE_GATE:.0e}). The mapping is "
-                "wrong or PySPOD changed; a bad number must not reach the fixture."
-            )
-        occupied.append(
-            {
-                "bin": bin_idx,
-                "mode": mode_idx,
-                "pyspod_eigenvalue": raw,
-            }
-        )
-        closed_form.append({"bin": bin_idx, "mode": mode_idx, "value": closed})
+
+    for case_name, noise in (("manufactured", 0.0), ("noise_2e-1", NOISE_RELATIVE_RMS)):
+        snapshots = manufactured_field(noise_relative_rms=noise)
+        eigs = _pyspod_eigs(standard_cls, snapshots)
+        payload = snapshots_to_json(snapshots)
+        assert_written_field_is_passed_field(payload, snapshots, label=case_name)
+        occupied: list[dict] = []
+        for bin_idx, mode_idx, amplitude in OCCUPIED:
+            raw = _clean_float(float(eigs[bin_idx, mode_idx]))
+            closed = _clean_float(expected_lambda(amplitude))
+            mapped = raw * factor
+            shift = abs(mapped - closed) / abs(closed)
+            if noise == 0.0:
+                # The clean field has a closed form, so the mapping is checked
+                # against it before anything is written.
+                if shift > WRITE_GATE:
+                    raise SystemExit(
+                        f"REFUSING TO WRITE: mapped PySPOD bin={bin_idx} mode={mode_idx} "
+                        f"is {mapped:.6g} vs closed form {closed:.6g} "
+                        f"(relative {shift:.3e}, gate {WRITE_GATE:.0e}). The mapping is "
+                        "wrong or PySPOD changed; a bad number must not reach the fixture."
+                    )
+                closed_form.append({"bin": bin_idx, "mode": mode_idx, "value": closed})
+            elif shift < NOISE_MIN_SHIFT:
+                # The noisy field has no closed form, so there is nothing to
+                # check the value against. What must be checked is that the
+                # case earns its place: if the noise moves the answer less than
+                # the window residual, the closed form still describes it and
+                # the vendored number adds nothing.
+                raise SystemExit(
+                    f"REFUSING TO WRITE: noisy bin={bin_idx} mode={mode_idx} sits "
+                    f"{shift:.3e} from the noiseless closed form, below the "
+                    f"{NOISE_MIN_SHIFT:.0e} the window residual already covers. "
+                    "Raise NOISE_RELATIVE_RMS or drop the case; as written it "
+                    "would corroborate rather than carry the check."
+                )
+            occupied.append({"bin": bin_idx, "mode": mode_idx, "pyspod_eigenvalue": raw})
+        cases[case_name] = {
+            "noise_relative_rms": noise,
+            "snapshots": payload,
+            "occupied": occupied,
+        }
 
     document = {
         "description": (
@@ -253,6 +307,8 @@ def _build_document(standard_cls, pyspod_version: str) -> dict:
             "numpy_version": np.__version__,
             "scipy_version": scipy.__version__,
             "generation_date": GENERATION_DATE,
+            "noise_seed": NOISE_SEED,
+            "noise_relative_rms": NOISE_RELATIVE_RMS,
             "pinned_pyspod": f"pyspod=={PINNED_PYSPOD}",
         },
         "construction": {
@@ -326,13 +382,14 @@ def _build_document(standard_cls, pyspod_version: str) -> dict:
             },
         },
         "tolerances": TOLERANCES,
-        "cases": {"manufactured": {"snapshots": payload, "occupied": occupied}},
+        "cases": cases,
     }
-    assert_written_field_is_passed_field(
-        document["cases"]["manufactured"]["snapshots"],
-        snapshots,
-        label="manufactured",
-    )
+    for case_name, case in document["cases"].items():
+        assert_written_field_is_passed_field(
+            case["snapshots"],
+            manufactured_field(noise_relative_rms=float(case["noise_relative_rms"])),
+            label=case_name,
+        )
     return document
 
 
