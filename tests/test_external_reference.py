@@ -13,6 +13,51 @@ and additive Gaussian noise at 1e-3 of the field rms. Each is compared at
 matched truncation rank 5 for ``method="ls"`` and ``method="tls"``, as
 sorted sets (``tests.test_dmd._eig_set_err``).
 
+A third case, ``cylinder_wake``, is a field the package ships and documents:
+500 snapshots over 5000 spatial points, against 40 over 12 for the
+constructed system. One dataset can be tuned against; two of this different a
+shape cannot both be. The generator states the shedding Strouhal number in
+closed form, so this case carries a physical anchor as well as the external
+one. The field is rebuilt on both sides rather than vendored, because 2.5
+million float64 numbers do not belong in a JSON fixture; what pins it is the
+generator parameters plus five reduced statistics. A checksum would be the
+obvious choice and is the wrong one: ``np.sin`` and ``np.exp`` can differ by
+one unit in the last place between platforms, so the bits are not portable
+while the sums are, to far better than the bound they are compared at.
+
+On the shipped case the comparison is over the PHYSICAL modes, the three
+carrying the most amplitude: the mean and the shedding pair. The full sorted
+set is not well posed here. The spectrum spans 1.0 down to 1.6e-3, and where
+the truncation rank cuts into the noise floor both packages place spurious
+modes, differently. Measured at rank 4 TLS, openmodalpy puts one at
+``|lambda| = 3.61`` where PyDMD puts one at 1.0, which makes the sorted-set
+error 3.6 while every physical mode still agrees to 1.6e-7. Those spurious
+modes carry amplitude 1.1e-2 to 4.5e-2 against 57.8 for the mean and 3.35 for
+the shedding pair, three to four orders below the physical content, and a
+growth rate no bounded field can support. They are an artifact of rank
+truncation, not a defect in either package.
+
+Why these tolerances, shipped case
+----------------------------------
+Measured on the pinned stack, physical modes, matched to the nearest vendored
+eigenvalue:
+
+* rank 6 LS vs PyDMD: 2.8e-15 (1.4e-15 and 3.3e-15 at ranks 4 and 8)
+* rank 6 TLS vs PyDMD: 1.9e-6 (1.6e-7 and 5.4e-6 at ranks 4 and 8)
+* rank 6 TLS vs LS, same modes: 3.4e-5
+* shedding frequency vs the generator's St: 6.3e-5 to 7.4e-5 over ranks
+  4, 6 and 8 and both methods
+
+``1e-12`` for LS, the same bound and reasoning as the constructed system.
+``1e-5`` for TLS, inside the measured interval (1.9e-6, 3.4e-5): 5.2x above
+the route residual and 3.4x below the TLS-LS split. That is narrower headroom
+than the 30x and 600x on the constructed system, because the interval itself
+is narrower here; the field is ill-conditioned and the two TLS formulations
+diverge further as the rank grows. The residual is set by the algebra, not by
+rounding, so a different BLAS cannot move it across the bound.
+``3e-4`` for the Strouhal anchor, four times the worst measured residual. The
+residual is the time discretisation of the field, not a solver error.
+
 Why these tolerances
 --------------------
 Measured on the prescribed stack (Python 3.12, pydmd 2025.8.1, NumPy 2.5.2,
@@ -216,7 +261,7 @@ def test_fixture_provenance_records_both_solvers_and_the_pinned_pydmd(fixture_do
     assert construction["n_space"] == 12
     assert construction["n_snapshots"] == 40
     assert construction["rank"] == 5
-    assert set(fixture_doc["cases"]) == {"noiseless", "noise_1e-3"}
+    assert set(fixture_doc["cases"]) == {"noiseless", "noise_1e-3", "cylinder_wake"}
     for case in CASES:
         snapshots = _vendored_space_time(fixture_doc, case)
         assert snapshots.shape == (construction["n_space"], construction["n_snapshots"])
@@ -260,3 +305,172 @@ def test_regen_script_names_pinned_pydmd_when_absent() -> None:
     assert result.returncode != 0
     text = result.stdout + result.stderr
     assert "pydmd==2025.8.1" in text
+
+
+SHIPPED_CASE = "cylinder_wake"
+
+
+def _shipped(fixture_doc: dict) -> dict:
+    return fixture_doc["cases"][SHIPPED_CASE]
+
+
+# The shipped field is 500 x 5000 and every test below needs it, so build it
+# and each DMD run once per session rather than once per test.
+_SHIPPED_CACHE: dict[str, object] = {}
+
+
+def _shipped_data(fixture_doc: dict) -> dict:
+    """The shipped dataset, built once."""
+    if "data" not in _SHIPPED_CACHE:
+        from openmodalpy import generate_cylinder_wake
+
+        _SHIPPED_CACHE["data"] = generate_cylinder_wake(**_shipped(fixture_doc)["generator_params"])
+    return _SHIPPED_CACHE["data"]
+
+
+def _shipped_field(fixture_doc: dict) -> tuple[np.ndarray, float]:
+    """Rebuild the shipped field from the recorded generator parameters."""
+    data = _shipped_data(fixture_doc)
+    return np.asarray(data["q"], dtype=np.float64), float(data["dt"])
+
+
+def _physical_modes(eigenvalues: np.ndarray, amplitudes: np.ndarray, count: int = 3) -> np.ndarray:
+    """The ``count`` eigenvalues carrying the most amplitude.
+
+    On this field those are the mean and the shedding pair. The rest sit at
+    the noise floor, where rank truncation places them differently in the two
+    packages, so they are not a comparable quantity.
+    """
+    return eigenvalues[np.argsort(-amplitudes)[:count]]
+
+
+def _shipped_openmodalpy(fixture_doc: dict, method: str) -> tuple[np.ndarray, np.ndarray, float]:
+    """Run openmodalpy DMD on the shipped field at the recorded rank, once."""
+    key = f"run:{method}"
+    if key not in _SHIPPED_CACHE:
+        from openmodalpy import DMDAnalyzer
+
+        case = _shipped(fixture_doc)
+        data = _shipped_data(fixture_doc)
+        rank = int(case["rank"])
+        analyzer = DMDAnalyzer(data=data, n_modes_save=rank, rank=rank)
+        analyzer.load_and_preprocess()
+        analyzer.perform_dmd(method=method)
+        _SHIPPED_CACHE[key] = (
+            np.asarray(analyzer.eigenvalues, dtype=np.complex128),
+            np.asarray(analyzer.amplitudes, dtype=np.float64),
+            float(data["dt"]),
+        )
+    return _SHIPPED_CACHE[key]
+
+
+def test_the_shipped_field_still_matches_the_vendored_statistics(fixture_doc) -> None:
+    """The generator must still build the field the vendored numbers describe.
+
+    Five reduced statistics stand in for the 2.5 million numbers, which do not
+    belong in a fixture. The index weight makes them sensitive to a reordering
+    as well as to a change of value.
+    """
+    case = _shipped(fixture_doc)
+    q, dt = _shipped_field(fixture_doc)
+
+    assert list(q.shape) == case["shape"]
+    assert dt == pytest.approx(float(case["dt"]), rel=1e-12)
+
+    index = np.arange(q.size, dtype=np.float64).reshape(q.shape)
+    measured = {
+        "sum": float(q.sum()),
+        "sum_of_squares": float((q**2).sum()),
+        "min": float(q.min()),
+        "max": float(q.max()),
+        "index_weighted_sum": float((q * index).sum()),
+    }
+    rtol = float(case["field_rtol"])
+    for name, want in case["field_statistics"].items():
+        assert measured[name] == pytest.approx(float(want), rel=rtol), (
+            f"shipped field statistic {name} is {measured[name]!r} against the vendored "
+            f"{want!r}; the generator changed and the vendored PyDMD numbers no longer "
+            "describe this field"
+        )
+
+
+@pytest.mark.parametrize("method", ("ls", "tls"))
+def test_openmodalpy_matches_vendored_pydmd_on_the_shipped_field(fixture_doc, method: str) -> None:
+    """The second dataset. A field the package ships, checked against PyDMD.
+
+    The comparison is over the physical modes, matched to the nearest vendored
+    eigenvalue. See the module docstring for why the full sorted set is not a
+    well-posed quantity on this spectrum.
+    """
+    case = _shipped(fixture_doc)
+    got, amplitudes, _ = _shipped_openmodalpy(fixture_doc, method)
+    vendored = _as_eigs(case["methods"][method]["pydmd_eigenvalues"])
+
+    worst = max(float(np.min(np.abs(vendored - lam))) for lam in _physical_modes(got, amplitudes))
+    tol = _tol(fixture_doc, f"shipped_{method}_vs_pydmd")
+    assert worst <= tol, (
+        f"shipped case {method}: worst physical-mode distance to a vendored PyDMD "
+        f"eigenvalue is {worst:.3e}, above {tol:.3e}"
+    )
+
+
+@pytest.mark.parametrize("method", ("ls", "tls"))
+def test_the_shipped_case_recovers_the_documented_shedding_frequency(fixture_doc, method: str) -> None:
+    """The physical anchor: the generator states St, and DMD must find it.
+
+    This is what the second dataset adds beyond another external number. The
+    constructed system has an invented spectrum; this one has a quantity the
+    package documents and a user would check.
+    """
+    case = _shipped(fixture_doc)
+    got, amplitudes, dt = _shipped_openmodalpy(fixture_doc, method)
+    physical = _physical_modes(got, amplitudes)
+
+    oscillating = physical[np.abs(np.angle(physical)) > 1e-9]
+    assert oscillating.size > 0, "no oscillating mode among the physical modes"
+    leading = oscillating[np.argmax(np.abs(oscillating))]
+    measured = float(abs(np.angle(leading)) / (2.0 * np.pi * dt))
+
+    strouhal = float(case["strouhal"])
+    err = abs(measured - strouhal) / strouhal
+    tol = _tol(fixture_doc, "shipped_vs_strouhal")
+    assert err <= tol, (
+        f"shipped case {method}: shedding frequency {measured:.8f} against the "
+        f"generator's St {strouhal:.8f}, relative {err:.3e}, above {tol:.3e}"
+    )
+
+
+def test_the_shipped_tls_bound_sits_inside_the_measured_gap(fixture_doc) -> None:
+    """The TLS bound must discriminate, not just pass.
+
+    It has to sit above the gap between the two TLS routes and below the gap
+    between TLS and LS. If it drifted outside that interval it would either
+    fail on a correct run or stop noticing a TLS that had degraded to LS.
+    """
+    ls, ls_amp, _ = _shipped_openmodalpy(fixture_doc, "ls")
+    tls, tls_amp, _ = _shipped_openmodalpy(fixture_doc, "tls")
+    physical_ls = _physical_modes(ls, ls_amp)
+    physical_tls = _physical_modes(tls, tls_amp)
+
+    split = max(float(np.min(np.abs(physical_ls - lam))) for lam in physical_tls)
+    tol = _tol(fixture_doc, "shipped_tls_vs_pydmd")
+    assert tol < split, (
+        f"the TLS bound {tol:.3e} is not below the TLS-LS split {split:.3e}; a TLS "
+        "that silently degraded to LS would pass"
+    )
+
+
+def test_the_shipped_case_is_a_different_dataset(fixture_doc) -> None:
+    """Two datasets, or the check can be satisfied by tuning against one.
+
+    The point of the second case is that it is not the first one rescaled: a
+    different generator, a spatial dimension three orders larger, and more
+    snapshots.
+    """
+    shipped = _shipped(fixture_doc)
+    constructed = np.asarray(fixture_doc["cases"]["noiseless"]["snapshots"], dtype=np.float64)
+
+    n_snapshots, n_space = shipped["shape"]
+    assert n_space > 100 * constructed.shape[0]
+    assert n_snapshots > constructed.shape[1]
+    assert shipped["generator"] == SHIPPED_CASE

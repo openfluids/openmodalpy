@@ -46,6 +46,16 @@ exports, string dispatch and the docs before it went.
 
 ### Added
 
+- The DMD external cross-check gains a second dataset: the shipped cylinder
+  wake, 500 snapshots over 5000 spatial points against 40 over 12 for the
+  constructed linear system. One dataset can be tuned against; two of this
+  different a shape cannot both be. The generator states the shedding Strouhal
+  number in closed form, so the case anchors to a physical quantity as well as
+  to PyDMD. The comparison is over the three modes carrying the most
+  amplitude, because where rank truncation cuts into the noise floor both
+  packages place spurious modes differently and the full sorted set stops
+  being comparable.
+
 - The SPOD external cross-check gains a noisy case. On the clean manufactured
   field the closed form is tighter than the PySPOD comparison, so the vendored
   number confirmed the convention mapping and asserted nothing on its own.

@@ -47,6 +47,28 @@ FIELD_SEED = 20260815
 NOISE_SEED = 20260816
 NOISE_RELATIVE_RMS = 1e-3
 
+# The shipped analytic case. The constructed system above is a linear operator
+# invented for this check; a second dataset stops the comparison from being
+# satisfied by tuning against one fixture. This one is a field the package
+# ships and documents, on a grid three orders larger, with a physical quantity
+# the generator states in closed form: the shedding Strouhal number.
+#
+# The field is rebuilt on both sides rather than vendored. 500 x 5000 float64
+# is 2.5 million numbers, and the same reason drives the existing regression
+# fixture tests/fixtures/reference/cylinder_wake.json, which records the
+# generator parameters and compares derived quantities. The generator uses
+# elementwise numpy only, so the parameters below fix the field, and a checksum
+# is deliberately not used: np.sin and np.exp can differ by one unit in the
+# last place between platforms.
+SHIPPED_GENERATOR = "cylinder_wake"
+SHIPPED_PARAMS: dict[str, int] = {"Nx": 100, "Ny": 50, "Nt": 500, "seed": 42}
+SHIPPED_RANK = 6
+# Reduced statistics that pin the field without pinning its bits. A sum over
+# 2.5e6 values carries at most about 1.6e-13 relative rounding spread, four
+# orders below this bound, while any real change to the generator moves them
+# far above it.
+SHIPPED_FIELD_RTOL = 1e-9
+
 # Two conjugate pairs plus one real; spectral radius 0.95.
 CHOSEN_POLAR: tuple[tuple[float, float], ...] = (
     (0.95, 0.6),
@@ -75,6 +97,43 @@ TOLERANCES: dict[str, dict[str, object]] = {
         "reason": (
             "Noiseless PyDMD and openmodalpy both recover the constructed "
             "spectrum to ~1e-15. The same 1e-12 write-gate is the bound."
+        ),
+    },
+    "shipped_ls_vs_pydmd": {
+        "value": 1e-12,
+        "applies": "cylinder wake, LS physical modes vs PyDMD",
+        "reason": (
+            "Measured 2.8e-15 at rank 6 on the pinned stack, and 1.4e-15 to "
+            "3.3e-15 across ranks 4, 6 and 8. Same bound and same reasoning as "
+            "the constructed system: three orders of BLAS headroom over a "
+            "comparison that is algebraically the same operator."
+        ),
+    },
+    "shipped_tls_vs_pydmd": {
+        "value": 1e-5,
+        "applies": "cylinder wake, TLS physical modes vs PyDMD",
+        "reason": (
+            "The two TLS routes are the same estimator written differently, and "
+            "on this field that algebraic gap measures 1.9e-6 at rank 6. The "
+            "TLS-LS split on the same modes is 3.4e-5, so the bound sits inside "
+            "the measured interval (1.9e-6, 3.4e-5): 5.2x above the route "
+            "residual and 3.4x below the split. That headroom is narrower than "
+            "the constructed system's because the interval itself is narrower "
+            "here; the field is ill-conditioned and the gap grows with rank. "
+            "The residual is set by the algebra, not by rounding, so a "
+            "different BLAS cannot move it across the bound."
+        ),
+    },
+    "shipped_vs_strouhal": {
+        "value": 3e-4,
+        "applies": "cylinder wake, shedding frequency vs the generator's St",
+        "reason": (
+            "The generator states St in closed form and the DMD estimate "
+            "recovers it to 6.3e-5 to 7.4e-5 across ranks 4, 6 and 8 and both "
+            "methods. The residual is the time discretisation of the field, not "
+            "a solver error. Four times the worst measured value. Like the noisy "
+            "sanity floor above, this anchors the answer to a physical quantity; "
+            "the PyDMD comparison is what catches a wrong operator."
         ),
     },
     "noisy_tls_vs_pydmd": {
@@ -176,6 +235,55 @@ def snapshots_time_space(*, noise_relative_rms: float) -> np.ndarray:
     return snapshots_space_time(noise_relative_rms=noise_relative_rms).T
 
 
+def shipped_field() -> tuple[np.ndarray, float, float]:
+    """Build the shipped cylinder-wake field, and return it with dt and St.
+
+    The reference environment holds pydmd, numpy and scipy and nothing else.
+    Importing openmodalpy would pull in h5py and matplotlib, so the generator
+    module is loaded on its own path; it imports numpy and nothing further.
+    That keeps the reference environment free of the package it checks.
+    """
+    import importlib.util
+
+    path = ROOT / "src" / "openmodalpy" / "example_data.py"
+    spec = importlib.util.spec_from_file_location("openmodalpy_example_data", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load the generator at {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    data = module.generate_cylinder_wake(**SHIPPED_PARAMS)
+    q = np.asarray(data["q"], dtype=np.float64)
+    return q, float(data["dt"]), float(data["metadata"]["St"])
+
+
+def field_statistics(q: np.ndarray) -> dict[str, float]:
+    """Reduced numbers that pin the field without pinning its bits.
+
+    A checksum would be exact and would also be wrong to use: np.sin and np.exp
+    can differ by one unit in the last place between platforms, so the bits are
+    not portable while these sums are, to far better than the bound they are
+    compared at. The index weight makes the set sensitive to a reordering as
+    well as to a change of value.
+    """
+    index = np.arange(q.size, dtype=np.float64).reshape(q.shape)
+    return {
+        "sum": float(q.sum()),
+        "sum_of_squares": float((q**2).sum()),
+        "min": float(q.min()),
+        "max": float(q.max()),
+        "index_weighted_sum": float((q * index).sum()),
+    }
+
+
+def dominant_frequency(eigenvalues: np.ndarray, dt: float) -> float:
+    """Frequency of the oscillating eigenvalue with the largest modulus."""
+    oscillating = eigenvalues[np.abs(np.angle(eigenvalues)) > 1e-9]
+    if oscillating.size == 0:
+        raise SystemExit("REFUSING TO WRITE: the shipped case has no oscillating eigenvalue.")
+    leading = oscillating[np.argmax(np.abs(oscillating))]
+    return float(abs(np.angle(leading)) / (2.0 * np.pi * dt))
+
+
 def _clean_float(value: float) -> float:
     number = float(value)
     return 0.0 if number == 0.0 else number
@@ -208,6 +316,18 @@ def _require_pydmd():
             f"REFUSING TO WRITE: pydmd version is {version!r}; this script is pinned to pydmd=={PINNED_PYDMD}."
         )
     return DMD, version
+
+
+def _pydmd_eigs_at(dmd_cls, snapshots: np.ndarray, *, rank: int, tls: bool) -> np.ndarray:
+    """PyDMD eigenvalues at an explicit truncation rank."""
+    kwargs: dict[str, int] = {"svd_rank": rank}
+    if tls:
+        kwargs["tlsq_rank"] = rank
+    dmd = dmd_cls(**kwargs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        dmd.fit(snapshots)
+    return np.asarray(dmd.eigs, dtype=np.complex128)
 
 
 def _pydmd_eigs(dmd_cls, snapshots: np.ndarray, *, tls: bool) -> np.ndarray:
@@ -251,6 +371,39 @@ def _build_document(dmd_cls, pydmd_version: str) -> dict:
             "snapshots": payload,
             "methods": methods,
         }
+
+    # The shipped analytic case: a field the package ships, on a grid three
+    # orders larger than the constructed system, with a physical quantity the
+    # generator states in closed form.
+    shipped_q, shipped_dt, shipped_st = shipped_field()
+    shipped_methods: dict[str, dict] = {}
+    for method, tls in (("ls", False), ("tls", True)):
+        eigs = _pydmd_eigs_at(dmd_cls, shipped_q.T, rank=SHIPPED_RANK, tls=tls)
+        measured_st = dominant_frequency(eigs, shipped_dt)
+        gate = float(TOLERANCES["shipped_vs_strouhal"]["value"])
+        err = abs(measured_st - shipped_st) / shipped_st
+        if err > gate:
+            raise SystemExit(
+                f"REFUSING TO WRITE: shipped case method={method} puts the shedding "
+                f"frequency at {measured_st:.8f} against the generator's "
+                f"St={shipped_st:.8f} (relative {err:.3e}, gate {gate:.0e}). The "
+                "generator changed or PyDMD did; a bad number must not reach the fixture."
+            )
+        shipped_methods[method] = {
+            "pydmd_eigenvalues": _cplx_pairs(eigs),
+            "pydmd_shedding_frequency": _clean_float(measured_st),
+        }
+    cases[SHIPPED_GENERATOR] = {
+        "generator": SHIPPED_GENERATOR,
+        "generator_params": dict(SHIPPED_PARAMS),
+        "dt": _clean_float(shipped_dt),
+        "strouhal": _clean_float(shipped_st),
+        "rank": SHIPPED_RANK,
+        "shape": list(shipped_q.shape),
+        "field_statistics": {k: _clean_float(v) for k, v in field_statistics(shipped_q).items()},
+        "field_rtol": SHIPPED_FIELD_RTOL,
+        "methods": shipped_methods,
+    }
 
     document = {
         "description": (

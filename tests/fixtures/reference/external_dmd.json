@@ -108,6 +108,21 @@
       "applies": "noiseless LS/TLS vs the constructed eigenvalues",
       "reason": "Noiseless PyDMD and openmodalpy both recover the constructed spectrum to ~1e-15. The same 1e-12 write-gate is the bound."
     },
+    "shipped_ls_vs_pydmd": {
+      "value": 1e-12,
+      "applies": "cylinder wake, LS physical modes vs PyDMD",
+      "reason": "Measured 2.8e-15 at rank 6 on the pinned stack, and 1.4e-15 to 3.3e-15 across ranks 4, 6 and 8. Same bound and same reasoning as the constructed system: three orders of BLAS headroom over a comparison that is algebraically the same operator."
+    },
+    "shipped_tls_vs_pydmd": {
+      "value": 1e-05,
+      "applies": "cylinder wake, TLS physical modes vs PyDMD",
+      "reason": "The two TLS routes are the same estimator written differently, and on this field that algebraic gap measures 1.9e-6 at rank 6. The TLS-LS split on the same modes is 3.4e-5, so the bound sits inside the measured interval (1.9e-6, 3.4e-5): 5.2x above the route residual and 3.4x below the split. That headroom is narrower than the constructed system's because the interval itself is narrower here; the field is ill-conditioned and the gap grows with rank. The residual is set by the algebra, not by rounding, so a different BLAS cannot move it across the bound."
+    },
+    "shipped_vs_strouhal": {
+      "value": 0.0003,
+      "applies": "cylinder wake, shedding frequency vs the generator's St",
+      "reason": "The generator states St in closed form and the DMD estimate recovers it to 6.3e-5 to 7.4e-5 across ranks 4, 6 and 8 and both methods. The residual is the time discretisation of the field, not a solver error. Four times the worst measured value. Like the noisy sanity floor above, this anchors the answer to a physical quantity; the PyDMD comparison is what catches a wrong operator."
+    },
     "noisy_tls_vs_pydmd": {
       "value": 1e-08,
       "applies": "noise 1e-3 rms, TLS vs PyDMD",
@@ -1235,6 +1250,90 @@
               0.5364043049635755
             ]
           ]
+        }
+      }
+    },
+    "cylinder_wake": {
+      "generator": "cylinder_wake",
+      "generator_params": {
+        "Nx": 100,
+        "Ny": 50,
+        "Nt": 500,
+        "seed": 42
+      },
+      "dt": 0.11996025380902596,
+      "strouhal": 0.167056,
+      "rank": 6,
+      "shape": [
+        500,
+        5000
+      ],
+      "field_statistics": {
+        "sum": 2022661.1963324156,
+        "sum_of_squares": 1684539.2244089004,
+        "min": 0.35006016218314273,
+        "max": 1.1002552102761005,
+        "index_weighted_sum": 2528338818986.038
+      },
+      "field_rtol": 1e-09,
+      "methods": {
+        "ls": {
+          "pydmd_eigenvalues": [
+            [
+              -0.012941461323579782,
+              -0.03805597828928898
+            ],
+            [
+              -0.012941461323579782,
+              0.03805597828928898
+            ],
+            [
+              0.08560413041283887,
+              0.0
+            ],
+            [
+              0.9920488496332966,
+              -0.12558693055875242
+            ],
+            [
+              0.9920488496332966,
+              0.12558693055875242
+            ],
+            [
+              1.00000200558437,
+              0.0
+            ]
+          ],
+          "pydmd_shedding_frequency": 0.16706678308230313
+        },
+        "tls": {
+          "pydmd_eigenvalues": [
+            [
+              -0.17549668991855688,
+              0.0
+            ],
+            [
+              0.03769471508431434,
+              -0.058919139998462544
+            ],
+            [
+              0.03769471508431434,
+              0.058919139998462544
+            ],
+            [
+              0.9920808232370839,
+              -0.12559134327413435
+            ],
+            [
+              0.9920808232370839,
+              0.12559134327413435
+            ],
+            [
+              1.0000021122105285,
+              0.0
+            ]
+          ],
+          "pydmd_shedding_frequency": 0.16706726359101934
         }
       }
     }

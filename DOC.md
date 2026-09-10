@@ -693,6 +693,32 @@ leading right singular vectors. Same estimator, different algebra — they agree
 to ~1e-15 on noiseless data and only to ~3e-10 under 1e-3 rms noise. That
 residual is not a bug.
 
+**A second dataset: the shipped cylinder wake.** One dataset can be tuned
+against, so the fixture also carries `cylinder_wake` — a field the package
+ships and documents, 500 snapshots over 5000 spatial points against 40 over 12
+for the constructed system, at rank 6. The generator states the shedding
+Strouhal number in closed form, so this case anchors to a physical quantity as
+well as to PyDMD. The field is rebuilt on both sides rather than vendored: 2.5
+million float64 numbers do not belong in a JSON fixture, so the generator
+parameters plus five reduced statistics pin it. A checksum is deliberately not
+used — `np.sin` and `np.exp` can differ by one unit in the last place between
+platforms, so the bits are not portable while the sums are.
+
+The comparison on that case is over the **physical modes**, the three carrying
+the most amplitude: the mean and the shedding pair. The full sorted set is not
+a well-posed quantity there. The spectrum spans 1.0 down to 1.6e-3, and where
+the truncation rank cuts into the noise floor both packages place spurious
+modes, differently — at rank 4 TLS openmodalpy puts one at `|λ| = 3.61` where
+PyDMD puts one at 1.0, which makes the sorted-set error 3.6 while every
+physical mode still agrees to 1.6e-7. Those spurious modes carry amplitude
+1.1e-2 to 4.5e-2 against 57.8 for the mean and 3.35 for the shedding pair, and
+a growth rate no bounded field can support. Measured: LS agrees to 2.8e-15,
+TLS to 1.9e-6 against a TLS–LS split of 3.4e-5, and the shedding frequency
+recovers the documented St to 6.3e-5.
+
+The generator refuses to write this case if PyDMD's own shedding frequency
+misses the documented St.
+
 ### 7. HODMD — Higher-Order DMD
 
 `hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations, not separate
@@ -1085,7 +1111,7 @@ Key test categories:
 | `test_dnami_loader.py` | NPZ loading, schema handling |
 | `test_weights.py` | Polar and uniform weight computation |
 | `test_reference_fixtures.py` | POD/DMD spectra vs committed analytic fixtures |
-| `test_external_reference.py` | Vendored PyDMD eigenvalues (LS/TLS, noiseless/noisy) |
+| `test_external_reference.py` | Vendored PyDMD eigenvalues (LS/TLS; constructed system noiseless and noisy, plus the shipped cylinder wake) |
 | `test_external_spod.py` | Vendored PySPOD eigenvalues (mapped Hamming, closed form) |
 
 Run all: `uv run pytest tests/ -q`
