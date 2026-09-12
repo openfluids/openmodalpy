@@ -133,3 +133,22 @@ def windowed_block_fft(
         q_hat[:, :, iblk] = (cw / nfft) * rfft(block_centered * window_broadcast, axis=0)
 
     return q_hat
+
+
+def validate_nfft_overlap(nfft: int, overlap: float) -> None:
+    """Check that ``nfft`` is positive and ``overlap`` is in [0, 1).
+
+    Shared by every analyzer that forms Welch FFT blocks (SPOD, BSMD),
+    so the same input raises the same message everywhere.
+
+    Args:
+        nfft (int): Number of points per FFT block.
+        overlap (float): Overlap fraction between blocks.
+
+    Raises:
+        ValueError: If ``overlap`` is not in [0, 1) or ``nfft`` is not positive.
+    """
+    if not (0 <= overlap < 1):
+        raise ValueError("Overlap must be between 0 (inclusive) and 1 (exclusive).")
+    if nfft <= 0:
+        raise ValueError("NFFT must be positive.")

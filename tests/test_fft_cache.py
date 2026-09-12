@@ -363,7 +363,7 @@ def test_malformed_sibling_cache_recomputes_instead_of_raising(tmp_path, caplog)
     attribute that will not cast to its expected type. Both used to escape the
     OSError-only guard as IndexError and ValueError respectively.
     """
-    from openmodalpy.core.base import _write_qhat_stamp
+    from openmodalpy.core.fftcache import _write_qhat_stamp
 
     rng = np.random.default_rng(11)
     q = rng.standard_normal((32, 8))

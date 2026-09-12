@@ -93,3 +93,16 @@ def apply_blas_limit() -> Iterator[None]:
     else:
         with threadpool_limits(limits=n):
             yield
+
+
+def get_num_threads() -> int:
+    """Return thread count from ``OMP_NUM_THREADS`` or ``os.cpu_count()``."""
+    env = os.environ.get("OMP_NUM_THREADS")
+    try:
+        val = int(env) if env is not None else None
+    except (TypeError, ValueError):
+        val = None
+    if val is not None and val > 0:
+        return val
+    cpu = os.cpu_count() or 1
+    return cpu

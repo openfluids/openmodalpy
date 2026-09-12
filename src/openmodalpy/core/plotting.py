@@ -530,3 +530,41 @@ def subset_volume_focus_3d(
     else:
         focused = values[np.ix_(x_mask, y_mask, z_mask)]
     return focused, x_focus, y_focus, z_focus
+
+
+def resolve_volume_layout(data: dict, mode_size: int) -> tuple[int, int, int, int] | None:
+    """Return `(Nx, Ny, Nz, multiplier)` when `mode_size` matches a 3D layout."""
+    nx = int(data.get("Nx", 0) or 0)
+    ny = int(data.get("Ny", 0) or 0)
+    z_value = data.get("Nz")
+    if z_value is None:
+        z_coords = data.get("z")
+        nz = int(len(z_coords)) if z_coords is not None else 1
+    else:
+        nz = int(z_value)
+    nz = max(nz, 1)
+    physical_nspace = nx * ny * nz
+    if nx <= 1 or ny <= 1 or nz <= 1 or physical_nspace <= 0:
+        return None
+    if mode_size % physical_nspace != 0:
+        return None
+    return nx, ny, nz, mode_size // physical_nspace
+
+
+def reshape_mode_to_volume(mode_values: np.ndarray, data: dict, *, block_index: int = 0) -> np.ndarray:
+    """Reshape a flattened spatial mode into a 3D volume, selecting one block if needed.
+
+    The flattened layout is the data contract (C-order, ``index =
+    iz*Ny*Nx + iy*Nx + ix``); the returned array is indexed ``[ix, iy, iz]``
+    because the PyVista slice plots downstream are built on
+    ``RectilinearGrid(x, y, z)``.
+    """
+    mode_arr = np.asarray(mode_values)
+    layout = resolve_volume_layout(data, mode_arr.size)
+    if layout is None:
+        raise ValueError(f"Mode of length {mode_arr.size} does not match a volumetric layout.")
+    nx, ny, nz, multiplier = layout
+    if not 0 <= block_index < multiplier:
+        raise ValueError(f"Requested block_index={block_index} but multiplier={multiplier}.")
+    blocks = mode_arr.reshape((multiplier, nz, ny, nx))  # contract C-order
+    return blocks[block_index].transpose(2, 1, 0)

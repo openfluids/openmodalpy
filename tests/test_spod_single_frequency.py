@@ -3,12 +3,9 @@ import numpy as np
 import pytest
 
 from openmodalpy import SPODAnalyzer
-from openmodalpy.core.base import (
-    _QHAT_STAMP_ATTR_PREFIX,
-    _qhat_cache_stamp,
-    make_result_filename,
-)
 from openmodalpy.core.decomposition import spod_single_frequency
+from openmodalpy.core.fftcache import _QHAT_STAMP_ATTR_PREFIX, _qhat_cache_stamp
+from openmodalpy.core.results import make_result_filename
 from tests.reference_helpers import reference_pivot_index
 
 

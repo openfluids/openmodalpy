@@ -32,7 +32,7 @@ warnings.filterwarnings("ignore", message="No contour levels were found within t
 import numpy as np  # noqa: E402
 from numpy.typing import ArrayLike, DTypeLike  # noqa: E402
 
-from openmodalpy.core.base import BaseAnalyzer, reshape_mode_to_volume, resolve_volume_layout  # noqa: E402
+from openmodalpy.core.base import BaseAnalyzer  # noqa: E402
 from openmodalpy.core.config import (  # noqa: E402
     CMAP_DIV,
     CMAP_SEQ,
@@ -45,11 +45,13 @@ from openmodalpy.core.operators import (  # noqa: E402
     compute_reduced_svd,
     svd_route,
 )
-from openmodalpy.core.plotting import (  # noqa: E402
+from openmodalpy.core.plotting import (  # noqa: E402  # noqa: E402
     add_inset_colorbar,
     format_mode_title,
     get_fig_aspect_ratio,
     plot_modes_3d,
+    reshape_mode_to_volume,
+    resolve_volume_layout,
     style_spatial_axes,
 )
 from openmodalpy.core.threads import apply_blas_limit  # noqa: E402

@@ -46,14 +46,7 @@ from fftkit import rfftfreq
 from numpy.typing import ArrayLike, NDArray
 from tqdm import tqdm
 
-from openmodalpy.core.base import (
-    BaseAnalyzer,
-    _hdf5_write_mode,
-    make_result_filename,
-    reshape_mode_to_volume,
-    resolve_volume_layout,
-    validate_nfft_overlap,
-)
+from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.config import (
     CMAP_DIV,
     CMAP_SEQ,
@@ -62,10 +55,18 @@ from openmodalpy.core.config import (
     RESULTS_DIR_BSMD,
 )
 from openmodalpy.core.operators import canonical_tie_groups, canonicalize_modes
-from openmodalpy.core.plotting import add_inset_colorbar, get_fig_aspect_ratio, plot_modes_3d, style_spatial_axes
-from openmodalpy.core.results import AnalysisResults
+from openmodalpy.core.plotting import (
+    add_inset_colorbar,
+    get_fig_aspect_ratio,
+    plot_modes_3d,
+    reshape_mode_to_volume,
+    resolve_volume_layout,
+    style_spatial_axes,
+)
+from openmodalpy.core.results import AnalysisResults, _hdf5_write_mode, make_result_filename
 from openmodalpy.core.threads import apply_blas_limit
 from openmodalpy.core.weights import require_spatial_metric
+from openmodalpy.core.welch import validate_nfft_overlap
 
 logger = logging.getLogger(__name__)
 

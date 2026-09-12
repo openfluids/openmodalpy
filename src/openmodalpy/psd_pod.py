@@ -23,7 +23,7 @@ import numpy as np
 from fftkit import rfftfreq
 
 import openmodalpy.core.decomposition as decomposition
-from openmodalpy.core.base import BaseAnalyzer, reshape_mode_to_volume, resolve_volume_layout
+from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.config import (
     FIGURES_DIR,
     RESULTS_DIR,
@@ -36,6 +36,8 @@ from openmodalpy.core.plotting import (
     get_robust_clim,
     plot_isometric_slices_3d,
     plot_orthogonal_slices_3d,
+    reshape_mode_to_volume,
+    resolve_volume_layout,
     style_spatial_axes,
 )
 from openmodalpy.core.results import AnalysisResults

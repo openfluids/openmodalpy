@@ -35,13 +35,7 @@ from fftkit import rfftfreq
 from numpy.typing import ArrayLike
 from tqdm import tqdm
 
-from openmodalpy.core.base import (
-    BaseAnalyzer,
-    _write_qhat_stamp,
-    reshape_mode_to_volume,
-    resolve_volume_layout,
-    validate_nfft_overlap,
-)
+from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.config import (
     CMAP_DIV,
     FIG_DPI,
@@ -52,14 +46,18 @@ from openmodalpy.core.config import (
     WINDOW_TYPE,
 )
 from openmodalpy.core.decomposition import spod_single_frequency
+from openmodalpy.core.fftcache import _write_qhat_stamp
 from openmodalpy.core.plotting import (
     add_inset_colorbar,
     format_mode_title,
     get_fig_aspect_ratio,
     plot_modes_3d,
+    reshape_mode_to_volume,
+    resolve_volume_layout,
     style_spatial_axes,
 )
 from openmodalpy.core.results import AnalysisResults
+from openmodalpy.core.welch import validate_nfft_overlap
 
 logger = logging.getLogger(__name__)
 

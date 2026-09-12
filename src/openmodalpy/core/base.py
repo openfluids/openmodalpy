@@ -8,7 +8,6 @@ All imports are centralized here to keep the code clean and consistent.
 from __future__ import annotations
 
 import glob
-import hashlib
 import logging
 import os
 import time
@@ -25,11 +24,13 @@ if TYPE_CHECKING:
 from openmodalpy.core.config import (
     FFT_BACKEND,
 )
+from openmodalpy.core.fftcache import _verify_qhat_stamp, _write_qhat_stamp
 from openmodalpy.core.io import derive_grid_and_snapshot_counts
 from openmodalpy.core.io import load_data as di_load_data
 from openmodalpy.core.io import load_jetles_data as di_load_jetles_data
 from openmodalpy.core.io import load_mat_data as di_load_mat_data
 from openmodalpy.core.operators import blocksfft
+from openmodalpy.core.results import _hdf5_write_mode, make_result_filename
 from openmodalpy.core.weights import (
     _as_spatial_weight_column,
     calculate_cell_volume_weights,
@@ -51,161 +52,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def get_num_threads() -> int:
-    """Return thread count from ``OMP_NUM_THREADS`` or ``os.cpu_count()``."""
-    env = os.environ.get("OMP_NUM_THREADS")
-    try:
-        val = int(env) if env is not None else None
-    except (TypeError, ValueError):
-        val = None
-    if val is not None and val > 0:
-        return val
-    cpu = os.cpu_count() or 1
-    return cpu
-
-
 T = TypeVar("T")
 R = TypeVar("R")
-
-
-def validate_nfft_overlap(nfft: int, overlap: float) -> None:
-    """Check that ``nfft`` is positive and ``overlap`` is in [0, 1).
-
-    Shared by every analyzer that forms Welch FFT blocks (SPOD, BSMD),
-    so the same input raises the same message everywhere.
-
-    Args:
-        nfft (int): Number of points per FFT block.
-        overlap (float): Overlap fraction between blocks.
-
-    Raises:
-        ValueError: If ``overlap`` is not in [0, 1) or ``nfft`` is not positive.
-    """
-    if not (0 <= overlap < 1):
-        raise ValueError("Overlap must be between 0 (inclusive) and 1 (exclusive).")
-    if nfft <= 0:
-        raise ValueError("NFFT must be positive.")
-
-
-def make_result_filename(root: str, nfft: int, overlap: float, Ns: int, analysis: str) -> str:
-    """
-    Generate a harmonized result filename for analysis outputs.
-    Args:
-        root (str): Base name of the dataset (no extension)
-        nfft (int): FFT block size
-        overlap (float): Overlap fraction (0-1)
-        Ns (int): Number of snapshots
-        analysis (str): Analysis type (e.g., 'spod', 'bsmd')
-    Returns:
-        str: Result filename (always .hdf5)
-    """
-    return f"{root}_Nfft{nfft}_ovlap{overlap}_{Ns}snapshots_{analysis}.hdf5"
-
-
-_QHAT_STAMP_ATTR_PREFIX = "_fftcache_"
-
-
-def _qhat_content_digest(q: np.ndarray) -> str:
-    """Return a blake2b digest of ``q``'s raw bytes (plus shape/dtype).
-
-    A full hash is O(n), i.e. cheaper than the O(n log n) FFT it lets us
-    avoid recomputing, so hashing the exact content is affordable here and a
-    sampled/strided checksum is not worth the false-negative risk of two
-    different arrays colliding.
-    """
-    arr = np.ascontiguousarray(q)
-    # ``arr.data`` is a memoryview onto the array's own buffer, so hashing it copies
-    # nothing. ``tobytes()`` would duplicate the whole snapshot matrix just to hash it.
-    h = hashlib.blake2b(arr.data.cast("B"), digest_size=16)
-    h.update(str(arr.shape).encode())
-    h.update(arr.dtype.str.encode())
-    return h.hexdigest()
-
-
-def _qhat_cache_stamp(analyzer: BaseAnalyzer, q: np.ndarray) -> dict[str, str | float | int | bool]:
-    """Return the parameters that determine the FFT blocks produced for ``q``.
-
-    Note: ``spatial_weight_type`` is deliberately excluded. ``blocksfft`` (see
-    below) only ever receives ``q``, ``nfft``, ``nblocks``, ``novlap``,
-    ``blockwise_mean``, ``normvar``, ``window_norm`` and ``window_type`` — the
-    spatial weights are applied later, in the SPOD/BSMD eigenproblem, never in
-    the FFT block computation. So it cannot affect ``qhat`` and does not need
-    to be stamped.
-    """
-    return {
-        "window_type": str(getattr(analyzer, "window_type", "hamming")),
-        "window_norm": str(getattr(analyzer, "window_norm", "power")),
-        "overlap": float(analyzer.overlap),
-        "nfft": int(analyzer.nfft),
-        "blockwise_mean": bool(getattr(analyzer, "blockwise_mean", False)),
-        "normvar": bool(getattr(analyzer, "normvar", False)),
-        "q_digest": _qhat_content_digest(q),
-    }
-
-
-def _write_qhat_stamp(h5file: h5py.File, analyzer: BaseAnalyzer, q: np.ndarray) -> None:
-    """Stamp the parameters that produced ``qhat`` into ``h5file``'s attrs."""
-    for key, value in _qhat_cache_stamp(analyzer, q).items():
-        h5file.attrs[f"{_QHAT_STAMP_ATTR_PREFIX}{key}"] = value
-
-
-def _verify_qhat_stamp(h5file: h5py.File, analyzer: BaseAnalyzer, q: np.ndarray) -> bool:
-    """Return whether ``h5file``'s stamped FFT parameters match ``analyzer``/``q``.
-
-    On any mismatch — or an absent stamp (e.g. a cache file from an older
-    build) — this returns False rather than raising. That is the opposite
-    policy from result files (which must raise on staleness): FFT blocks are
-    cheaply re-derivable from the raw data, so silently recomputing them is
-    correct and non-destructive. Do not "harmonise" this with the stricter
-    policy used for saved results/modes.
-    """
-    expected = _qhat_cache_stamp(analyzer, q)
-    for key, exp_value in expected.items():
-        attr_name = f"{_QHAT_STAMP_ATTR_PREFIX}{key}"
-        if attr_name not in h5file.attrs:
-            logger.warning("FFT cache stamp missing '%s' (older cache file) — recomputing FFT blocks.", key)
-            return False
-        actual = h5file.attrs[attr_name]
-        if isinstance(exp_value, bool):
-            actual = bool(actual)
-        elif isinstance(exp_value, int):
-            actual = int(actual)
-        elif isinstance(exp_value, float):
-            actual = float(actual)
-        else:
-            actual = str(actual)
-        if actual != exp_value:
-            logger.warning(
-                "FFT cache stamp mismatch on '%s': cached=%r != current=%r — recomputing FFT blocks.",
-                key,
-                actual,
-                exp_value,
-            )
-            return False
-    return True
-
-
-def _hdf5_write_mode(path: str) -> str:
-    """Return ``"a"`` if ``path`` is a readable HDF5 file, else ``"w"``.
-
-    File existence is the wrong predicate: a truncated or otherwise corrupt
-    cache still exists on disk, so ``os.path.exists`` would open it in append
-    mode and die with an uncaught ``OSError``.
-
-    ``h5py.is_hdf5`` is the first filter (False for a missing path → ``"w"``).
-    It is not sufficient alone: a truncated file often still carries a valid
-    HDF5 signature at offset 0, so ``is_hdf5`` returns True even though any
-    open in ``"a"``/``"r"`` raises. Probe a read-only open and only then
-    return ``"a"``; on ``OSError`` return ``"w"`` so the caller overwrites.
-    """
-    if not h5py.is_hdf5(path):
-        return "w"
-    try:
-        with h5py.File(path, "r"):
-            pass
-    except OSError:
-        return "w"
-    return "a"
 
 
 def print_summary(analysis: str, results_dir: str, figures_dir: str) -> None:
@@ -218,136 +66,10 @@ def print_summary(analysis: str, results_dir: str, figures_dir: str) -> None:
     logger.info("Figures: %s", figures_dir)
 
 
-def resolve_volume_layout(data: dict, mode_size: int) -> tuple[int, int, int, int] | None:
-    """Return `(Nx, Ny, Nz, multiplier)` when `mode_size` matches a 3D layout."""
-    nx = int(data.get("Nx", 0) or 0)
-    ny = int(data.get("Ny", 0) or 0)
-    z_value = data.get("Nz")
-    if z_value is None:
-        z_coords = data.get("z")
-        nz = int(len(z_coords)) if z_coords is not None else 1
-    else:
-        nz = int(z_value)
-    nz = max(nz, 1)
-    physical_nspace = nx * ny * nz
-    if nx <= 1 or ny <= 1 or nz <= 1 or physical_nspace <= 0:
-        return None
-    if mode_size % physical_nspace != 0:
-        return None
-    return nx, ny, nz, mode_size // physical_nspace
-
-
-def reshape_mode_to_volume(mode_values: np.ndarray, data: dict, *, block_index: int = 0) -> np.ndarray:
-    """Reshape a flattened spatial mode into a 3D volume, selecting one block if needed.
-
-    The flattened layout is the data contract (C-order, ``index =
-    iz*Ny*Nx + iy*Nx + ix``); the returned array is indexed ``[ix, iy, iz]``
-    because the PyVista slice plots downstream are built on
-    ``RectilinearGrid(x, y, z)``.
-    """
-    mode_arr = np.asarray(mode_values)
-    layout = resolve_volume_layout(data, mode_arr.size)
-    if layout is None:
-        raise ValueError(f"Mode of length {mode_arr.size} does not match a volumetric layout.")
-    nx, ny, nz, multiplier = layout
-    if not 0 <= block_index < multiplier:
-        raise ValueError(f"Requested block_index={block_index} but multiplier={multiplier}.")
-    blocks = mode_arr.reshape((multiplier, nz, ny, nx))  # contract C-order
-    return blocks[block_index].transpose(2, 1, 0)
-
-
 # Re-export data loading functions
 load_jetles_data = di_load_jetles_data
 load_mat_data = di_load_mat_data
 load_data = di_load_data
-
-
-def generate_dummy_data_like_jetles(
-    output_path: str,
-    Ns: int = 100,
-    Nx: int = 30,
-    Ny: int = 20,
-    dt: float = 0.01,
-    f1: float = 5.0,
-    f2: float = 2.0,
-    noise_level: float = 0.05,
-    save_mat: bool = False,
-    seed: int = 0,
-) -> str:
-    """Create a small JetLES-like dataset with simple coherent content.
-
-    This utility generates a synthetic pressure field composed of a few
-    low-frequency modes rather than purely random noise.  It is intended for
-    quick demonstrations when no real dataset is available.
-
-    Parameters
-    ----------
-    output_path : str
-        Path to the file to create.
-    Ns : int, optional
-        Number of snapshots (time samples).
-    Nx : int, optional
-        Number of points in the ``x`` direction.
-    Ny : int, optional
-        Number of points in the radial ``r`` direction.
-    dt : float, optional
-        Time step between snapshots.
-    f1, f2 : float, optional
-        Dominant temporal frequencies of the two synthetic modes.
-    noise_level : float, optional
-        Amplitude of added Gaussian noise relative to the signal.
-    save_mat : bool, optional
-        If ``True`` the file is created with ``.mat`` extension, otherwise an
-        HDF5 ``.h5`` file is created.  The function does not require SciPy and
-        always uses ``h5py`` for writing.
-    seed : int, optional
-        Seed for the local noise RNG. Same seed yields identical arrays.
-    Returns
-    -------
-    str
-        Path to the generated dummy file.
-    """
-
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    # Coordinates stored as 2-D arrays as in the real dataset
-    x = np.linspace(0.0, 1.0, Nx)[:, None]
-    r = np.linspace(0.0, 1.0, Ny)[None, :]
-
-    # Temporal vector
-    t = np.arange(Ns) * dt
-
-    # Simple spatial modes
-    mode1 = np.sin(np.pi * x) * np.cos(np.pi * r)
-    mode2 = np.cos(0.5 * np.pi * x) * np.sin(2.0 * np.pi * r)
-
-    # Construct coherent pressure field (shape: Nx, Ny, Ns)
-    signal = (
-        np.sin(2 * np.pi * f1 * t)[:, None, None] * mode1[None, :, :]
-        + 0.5 * np.sin(2 * np.pi * f2 * t)[:, None, None] * mode2[None, :, :]
-    )
-
-    rng = np.random.default_rng(seed)
-    noise = noise_level * rng.standard_normal((Ns, Nx, Ny))
-    p = np.transpose(signal + noise, (1, 2, 0))  # (Nx, Ny, Ns)
-
-    with h5py.File(output_path, "w") as f:
-        f.create_dataset("p", data=p)
-        f.create_dataset("x", data=x)
-        f.create_dataset("r", data=r)
-        f.create_dataset("dt", data=np.array([[dt]]))
-
-    # Optionally save a ``.mat`` file for compatibility with some loaders
-    if save_mat and not output_path.endswith(".mat"):
-        mat_path = os.path.splitext(output_path)[0] + ".mat"
-        with h5py.File(mat_path, "w") as f:
-            f.create_dataset("p", data=p)
-            f.create_dataset("x", data=x)
-            f.create_dataset("r", data=r)
-            f.create_dataset("dt", data=np.array([[dt]]))
-
-    return output_path
 
 
 def _reported_grid(data: Mapping[str, Any]) -> tuple[int, int, int] | None:
