@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- Five module-level functions left `openmodalpy.core.base`. There are no
+  re-exports, so `from openmodalpy.core.base import <name>` raises
+  `ImportError` for each. The new paths:
+
+  | Name | New module |
+  |---|---|
+  | `get_num_threads` | `openmodalpy.core.threads` |
+  | `validate_nfft_overlap` | `openmodalpy.core.welch` |
+  | `resolve_volume_layout` | `openmodalpy.core.plotting` |
+  | `reshape_mode_to_volume` | `openmodalpy.core.plotting` |
+  | `generate_dummy_data_like_jetles` | `openmodalpy.example_data` |
+
+  The FFT block cache stamp moved too: `_qhat_cache_stamp`,
+  `_qhat_content_digest` and `_QHAT_STAMP_ATTR_PREFIX` are now in
+  `openmodalpy.core.fftcache`. None of these names was ever exported from the
+  `openmodalpy` package, and each function body is unchanged. Result files,
+  numbers and figures are unaffected.
+
 - PSD-POD time coefficients change. `_solve_eigh_complex` projected the
   conjugate of the Fourier ensemble onto the modes. The modes span the row
   space of the ensemble and the conjugate rows do not lie in that span, so the

@@ -11,14 +11,22 @@ contract, the configuration system, the CLI, and extension paths.
 ```
 src/openmodalpy/
 ├── __init__.py          # public exports: analyzers + set/get/blas_threads policy
+├── __main__.py          # python -m openmodalpy
 ├── core/
-│   ├── base.py          # BaseAnalyzer, compute_reduced_svd, blocksfft,
-│   │                    #   weight calculation, plot helpers
+│   ├── base.py          # BaseAnalyzer: the shared lifecycle and its state
+│   ├── operators.py     # reduced SVD and its routing, blocksfft, sign convention
 │   ├── decomposition.py # lift / metric / weighted_second_order seam
 │   │                    #   (POD, mPOD, ST-POD, PSD-POD share this) and
 │   │                    #   spod_single_frequency, the SPOD eigenproblem
+│   ├── weights.py       # uniform, polar, prescribed and cell-volume weights
+│   ├── welch.py         # window, hop, scaling, and the windowed-block FFT
+│   ├── fftcache.py      # the stamp that says a saved FFT block cache is reusable
+│   ├── results.py       # HDF5 result contract: one name table, writer, reader
+│   ├── provenance.py    # versions, backend, threads, seed, git SHA in every file
+│   ├── plotting.py      # contour, slice and isometric rendering of modes
 │   ├── io.py            # MATDataLoader, DNamiDataLoader, GenericDataLoader,
-│   │                    #   _slice_block_in_time
+│   │                    #   DataInterfaceManager, _slice_block_in_time
+│   ├── nek.py           # Nek5000 reader with Gauss-Lobatto-Legendre weights
 │   ├── config.py        # FFT_BACKEND, FIG_DPI, directory defaults
 │   ├── threads.py       # process-wide BLAS thread policy (default 1)
 │   └── parallel.py      # polar weight and block-FFT entry points
@@ -45,6 +53,71 @@ among scipy/numpy/mkl/cupy. `core.config.FFT_BACKEND` re-exports the backend fft
 resolved. Override it with the `FFTKIT_BACKEND` environment variable. fftkit also has an
 `accelerate` backend, but that one supplies no `rfft`, so `FFTKIT_BACKEND=accelerate`
 stops the Welch transform.
+
+### Module size
+
+A target of 600 lines per module was set when eight modules were above 900 and
+the SPOD eigenproblem sat in a file called `base` inside a directory called
+`core`. Three rounds of splitting moved the shared numerics into
+`core/operators.py`, `core/decomposition.py`, `core/weights.py`,
+`core/welch.py`, `core/results.py`, `core/provenance.py` and
+`core/fftcache.py`. The equation for each method now lives in the module named
+for that method, or one import away from it: the import block of `spod.py`
+reads `from openmodalpy.core.decomposition import spod_single_frequency`, so
+the name of the eigenproblem is visible without opening `core/base.py`.
+
+Nine modules stay above 600 lines. The measurement, at the 2026-09-12 commit:
+
+| Module | Lines | Of which plot methods | What the rest is |
+|---|---|---|---|
+| `core/io.py` | 1451 | 0 | `DNamiDataLoader` 491, `MATDataLoader` 161, `_assemble_contract_data` 91, `derive_grid_and_snapshot_counts` 90 |
+| `pod.py` | 1354 | 772 (57%) | `PODAnalyzer`, whose `perform_pod` is 137 lines |
+| `bsmd.py` | 1117 | 214 (19%) | `BSMDAnalyzer`, including the out-of-core `qhat` store |
+| `dmd.py` | 1114 | 521 (47%) | `DMDAnalyzer`: LS, TLS, delay embedding, HODMD |
+| `core/base.py` | 1018 | 28 (3%) | `BaseAnalyzer` 866, `_fill_contract_counts` 53 |
+| `spod.py` | 940 | 460 (49%) | `SPODAnalyzer` |
+| `commands.py` | 889 | 0 | 37 top-level functions, longest 74 lines |
+| `stpod.py` | 824 | 405 (49%) | `STPODAnalyzer` |
+| `core/decomposition.py` | 635 | 0 | the lift/metric seam and `spod_single_frequency` |
+
+Each is above 600 for one of three reasons, and none of the three is fixed by
+a further split.
+
+**A class is one unit.** `BaseAnalyzer` is 866 of base.py's 1018 lines. Every
+analyzer subclasses it, and its methods share mutable state that the subclasses
+read and write. Cutting it into two classes does not reduce what a reader must
+hold; it adds an inheritance level or a delegation layer between the state and
+the code that uses it. The same holds for `DNamiDataLoader` at 491 lines and
+for each analyzer class. The 600-line rule measures files. The thing a reader
+must understand here is a class, and the file is already one class plus its
+imports.
+
+**Plot methods are half of four analyzers.** In `pod.py`, `dmd.py`, `spod.py`
+and `stpod.py`, between 47% and 57% of the file is `plot_*` methods. They were
+left in place on purpose. Each one reads the analyzer's own attributes — modes,
+eigenvalues, frequencies, the grid — and calls the shared renderers in
+`core/plotting.py` for the parts that are generic. Moving them to a fifth
+plotting module would turn attribute access into an argument list of ten or
+more items per call, and a reader looking for "how is a POD mode drawn" would
+have one more file to open, not one fewer. The measured cost of leaving them is
+visible instead in the coverage split: `pod.py` 78%, `core/plotting.py` 52%,
+against 97% for `core/decomposition.py` and 93% for `core/operators.py`. The
+untested part of this codebase is the rendering, and the numbers now say so.
+
+**`core/io.py` and `commands.py` are flat.** Neither has a nesting problem.
+`commands.py` is 37 top-level functions whose longest is 74 lines;
+`core/io.py` is four loader classes, a manager, and 28 module-level
+functions. A reader opens them at a name, not at the top. Splitting a flat
+file of small functions moves the import lines and nothing else.
+
+The remaining case for a split is `bsmd.py`: its out-of-core `qhat` store —
+an `h5py` handle, a bin cache, and a `__del__` — is memory management inside a
+mathematical analyzer, and that is a genuine mixture of concerns. It is left as
+one file because the store's lifetime is the analyzer's lifetime, and a
+separate module would have to hand ownership of an open file handle across a
+module boundary. If it moves, it moves together with a test that a partially
+written cache is detected, which is what `core/fftcache.py` already does for
+the SPOD path.
 
 ## FFT batching
 
