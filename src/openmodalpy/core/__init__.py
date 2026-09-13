@@ -4,14 +4,8 @@ from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.config import (
     FFT_BACKEND,
     FIG_DPI,
-    FIGURES_DIR_BSMD,
-    FIGURES_DIR_DMD,
-    FIGURES_DIR_POD,
-    FIGURES_DIR_SPOD,
-    RESULTS_DIR_BSMD,
-    RESULTS_DIR_DMD,
-    RESULTS_DIR_POD,
-    RESULTS_DIR_SPOD,
+    FIGURES_DIR,
+    RESULTS_DIR,
 )
 from openmodalpy.core.provenance import collect_provenance
 from openmodalpy.core.results import AnalysisResults, read_results, write_results
@@ -27,12 +21,6 @@ __all__ = [
     "collect_provenance",
     "FFT_BACKEND",
     "FIG_DPI",
-    "RESULTS_DIR_POD",
-    "RESULTS_DIR_DMD",
-    "RESULTS_DIR_SPOD",
-    "RESULTS_DIR_BSMD",
-    "FIGURES_DIR_POD",
-    "FIGURES_DIR_DMD",
-    "FIGURES_DIR_SPOD",
-    "FIGURES_DIR_BSMD",
+    "RESULTS_DIR",
+    "FIGURES_DIR",
 ]

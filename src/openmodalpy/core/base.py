@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import h5py
 import numpy as np
@@ -25,10 +25,7 @@ from openmodalpy.core.config import (
     FFT_BACKEND,
 )
 from openmodalpy.core.fftcache import _verify_qhat_stamp, _write_qhat_stamp
-from openmodalpy.core.io import derive_grid_and_snapshot_counts
-from openmodalpy.core.io import load_data as di_load_data
-from openmodalpy.core.io import load_jetles_data as di_load_jetles_data
-from openmodalpy.core.io import load_mat_data as di_load_mat_data
+from openmodalpy.core.io import derive_grid_and_snapshot_counts, load_data
 from openmodalpy.core.operators import blocksfft
 from openmodalpy.core.results import _hdf5_write_mode, make_result_filename
 from openmodalpy.core.weights import (
@@ -50,26 +47,6 @@ except ImportError:
     pass
 
 logger = logging.getLogger(__name__)
-
-
-T = TypeVar("T")
-R = TypeVar("R")
-
-
-def print_summary(analysis: str, results_dir: str, figures_dir: str) -> None:
-    """Log a short summary of where results and figures were saved.
-
-    No longer called by ``run_analysis``; kept only for compatibility.
-    """
-    logger.info("%s analysis finished", analysis)
-    logger.info("Results: %s", results_dir)
-    logger.info("Figures: %s", figures_dir)
-
-
-# Re-export data loading functions
-load_jetles_data = di_load_jetles_data
-load_mat_data = di_load_mat_data
-load_data = di_load_data
 
 
 def _reported_grid(data: Mapping[str, Any]) -> tuple[int, int, int] | None:

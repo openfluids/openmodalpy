@@ -40,8 +40,8 @@ from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.config import (
     CMAP_DIV,
     FIG_DPI,
-    FIGURES_DIR_STPOD,
-    RESULTS_DIR_STPOD,
+    FIGURES_DIR,
+    RESULTS_DIR,
 )
 from openmodalpy.core.plotting import get_fig_aspect_ratio, plot_modes_3d, reshape_mode_to_volume, resolve_volume_layout
 from openmodalpy.core.results import AnalysisResults
@@ -81,8 +81,8 @@ class STPODAnalyzer(BaseAnalyzer):
         *,
         embedding_dim: int = 10,
         n_modes_save: int = 10,
-        results_dir: str = RESULTS_DIR_STPOD,
-        figures_dir: str = FIGURES_DIR_STPOD,
+        results_dir: str = RESULTS_DIR,
+        figures_dir: str = FIGURES_DIR,
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         spatial_weights: np.ndarray | None = None,

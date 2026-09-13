@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from openmodalpy import BSMDAnalyzer, DMDAnalyzer, MPODAnalyzer, PODAnalyzer, SPODAnalyzer, STPODAnalyzer
-from openmodalpy.core.base import BaseAnalyzer, print_summary
+from openmodalpy.core.base import BaseAnalyzer
 from openmodalpy.core.io import MATDataLoader
 
 
@@ -79,16 +79,6 @@ def test_compute_fft_blocks_is_quiet_on_stdout(tmp_path, capsys):
     analyzer.load_and_preprocess()
     capsys.readouterr()
     analyzer.compute_fft_blocks()
-    captured = capsys.readouterr()
-    assert captured.out == ""
-
-
-def test_print_summary_is_quiet(capsys):
-    """Smoke test: asserts execution and artifact only, not numerical values.
-
-    print_summary routes through the module logger; stdout stays empty.
-    """
-    print_summary("POD", "/tmp/results", "/tmp/figures")
     captured = capsys.readouterr()
     assert captured.out == ""
 

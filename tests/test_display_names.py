@@ -187,8 +187,8 @@ def test_pod_py_3d_titles_have_no_bare_pod_mode_literal():
 def test_run_analysis_completion_log_uses_display_name(tmp_path, caplog):
     """The unified run_analysis epilogue logs the resolved display name.
 
-    The old per-class epilogues called print_summary; the unified seam keeps
-    the display-name discipline in its start/complete banners instead.
+    The unified run_analysis seam keeps the display-name discipline
+    in its start/complete banners.
     """
     analyzer = _make_mpod(tmp_path, _synthetic_2d())
     with caplog.at_level("INFO"):

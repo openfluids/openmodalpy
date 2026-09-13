@@ -40,8 +40,8 @@ from openmodalpy.core.config import (
     CMAP_DIV,
     FIG_DPI,
     FIG_FORMAT,
-    FIGURES_DIR_SPOD,
-    RESULTS_DIR_SPOD,
+    FIGURES_DIR,
+    RESULTS_DIR,
     WINDOW_NORM,
     WINDOW_TYPE,
 )
@@ -116,8 +116,8 @@ class SPODAnalyzer(BaseAnalyzer):
         nfft: int = 128,
         overlap: float = 0.5,
         n_modes_save: int | None = None,
-        results_dir: str = RESULTS_DIR_SPOD,
-        figures_dir: str = FIGURES_DIR_SPOD,
+        results_dir: str = RESULTS_DIR,
+        figures_dir: str = FIGURES_DIR,
         blockwise_mean: bool = False,
         normvar: bool = False,
         window_norm: str = WINDOW_NORM,
@@ -147,9 +147,9 @@ class SPODAnalyzer(BaseAnalyzer):
                 ``RuntimeWarning``. Eigenvalues always keep every block, because
                 the spectrum plot draws one line per block.
             results_dir (str, optional): Directory to save analysis results (HDF5 files).
-                                         Defaults to `RESULTS_DIR_SPOD` from `configs.py`.
+                                         Defaults to `RESULTS_DIR` from `core/config.py`.
             figures_dir (str, optional): Directory to save generated plots.
-                                         Defaults to `FIGURES_DIR_SPOD` from `configs.py`.
+                                         Defaults to `FIGURES_DIR` from `core/config.py`.
             blockwise_mean (bool, optional): If True, subtracts the mean of each block before FFT.
                                            If False, subtracts the global mean. Defaults to False.
             normvar (bool, optional): If True, divide each FFT block pointwise

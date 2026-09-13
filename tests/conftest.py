@@ -34,7 +34,7 @@ def _run_tests_in_tmp_cwd(tmp_path, monkeypatch):
     ./figures). BaseAnalyzer makedirs those on construct; most tests build an
     analyzer without overriding them, so a full suite otherwise leaves
     results/ and figures/ in the repo root (gitignored, so invisible to git).
-    Monkeypatching the RESULTS_DIR_* constants does not help: they are bound
+    Monkeypatching the RESULTS_DIR and FIGURES_DIR constants does not help: they are bound
     as default argument values at function definition time. Changing CWD once
     here makes the defaults resolve under the temp dir instead.
     """

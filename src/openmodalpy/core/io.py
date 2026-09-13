@@ -1431,21 +1431,3 @@ data_manager = DataInterfaceManager()
 def load_data(file_path: str, loader_type: Optional[str] = None, **kwargs: object) -> Dict[str, Any]:
     """Convenience entry point for loading data."""
     return data_manager.load_data(file_path, loader_type, **kwargs)
-
-
-def get_weight_type(data: Dict[str, Any], file_path: str) -> str:
-    """Convenience function for determining weight type."""
-    return data_manager.get_weight_type(data, file_path)
-
-
-def load_jetles_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
-    """Legacy alias for ``load_mat_data``."""
-    return load_mat_data(file_path, **kwargs)
-
-
-def load_mat_data(file_path: str, **kwargs: object) -> Dict[str, Any]:
-    """Legacy compatibility function for .mat data."""
-    return load_data(file_path, loader_type="mat", **kwargs)
-
-
-DNamiXNPZLoader = DNamiDataLoader

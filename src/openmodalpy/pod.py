@@ -37,8 +37,8 @@ from openmodalpy.core.config import (
     CMAP_DIV,
     CMAP_SEQ,
     FIG_DPI,
-    FIGURES_DIR_POD,
-    RESULTS_DIR_POD,
+    FIGURES_DIR,
+    RESULTS_DIR,
 )
 from openmodalpy.core.plotting import (
     add_inset_colorbar,
@@ -95,8 +95,8 @@ class PODAnalyzer(BaseAnalyzer):
         self,
         file_path: str | None = None,
         *,
-        results_dir: str = RESULTS_DIR_POD,
-        figures_dir: str = FIGURES_DIR_POD,
+        results_dir: str = RESULTS_DIR,
+        figures_dir: str = FIGURES_DIR,
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         n_modes_save: int = 10,
@@ -110,9 +110,9 @@ class PODAnalyzer(BaseAnalyzer):
             file_path (str | None): Path to the data file (e.g., .mat, .h5).
                 Optional when ``data`` carries the loaded dataset instead.
             results_dir (str, optional): Directory to save analysis results (HDF5 files).
-                                         Defaults to `RESULTS_DIR_POD` from `configs.py`.
+                                         Defaults to `RESULTS_DIR` from `core/config.py`.
             figures_dir (str, optional): Directory to save generated plots.
-                                         Defaults to `FIGURES_DIR_POD` from `configs.py`.
+                                         Defaults to `FIGURES_DIR` from `core/config.py`.
             data_loader (callable, optional): Custom function to load data from `file_path`.
                                               If None, `BaseAnalyzer` attempts to auto-detect.
                                               Defaults to None.

@@ -37,8 +37,8 @@ from openmodalpy.core.config import (  # noqa: E402
     CMAP_DIV,
     CMAP_SEQ,
     FIG_DPI,
-    FIGURES_DIR_DMD,
-    RESULTS_DIR_DMD,
+    FIGURES_DIR,
+    RESULTS_DIR,
 )
 from openmodalpy.core.operators import (  # noqa: E402
     canonical_eigenvalue_order,
@@ -229,8 +229,8 @@ class DMDAnalyzer(BaseAnalyzer):
         self,
         file_path: str | None = None,
         *,
-        results_dir: str = RESULTS_DIR_DMD,
-        figures_dir: str = FIGURES_DIR_DMD,
+        results_dir: str = RESULTS_DIR,
+        figures_dir: str = FIGURES_DIR,
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         n_modes_save: int = 10,

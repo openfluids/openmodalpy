@@ -51,8 +51,8 @@ from openmodalpy.core.config import (
     CMAP_DIV,
     CMAP_SEQ,
     FIG_DPI,
-    FIGURES_DIR_BSMD,
-    RESULTS_DIR_BSMD,
+    FIGURES_DIR,
+    RESULTS_DIR,
 )
 from openmodalpy.core.operators import canonical_tie_groups, canonicalize_modes
 from openmodalpy.core.plotting import (
@@ -194,8 +194,8 @@ class BSMDAnalyzer(BaseAnalyzer):
         *,
         nfft: int = 128,
         overlap: float = 0.5,
-        results_dir: str = RESULTS_DIR_BSMD,
-        figures_dir: str = FIGURES_DIR_BSMD,
+        results_dir: str = RESULTS_DIR,
+        figures_dir: str = FIGURES_DIR,
         data_loader: Callable[..., dict[str, Any]] | None = None,
         spatial_weight_type: str | None = None,
         use_static_triads: bool = True,
@@ -215,9 +215,9 @@ class BSMDAnalyzer(BaseAnalyzer):
             overlap (float, optional): Overlap ratio between FFT segments (0 to 1).
                                      Defaults to 0.5.
             results_dir (str, optional): Directory to save analysis results (HDF5 files).
-                                         Defaults to `RESULTS_DIR_BSMD` from `configs.py`.
+                                         Defaults to `RESULTS_DIR` from `core/config.py`.
             figures_dir (str, optional): Directory to save generated plots.
-                                         Defaults to `FIGURES_DIR_BSMD` from `configs.py`.
+                                         Defaults to `FIGURES_DIR` from `core/config.py`.
             data_loader (callable, optional): Custom function to load data from `file_path`.
                                               If None, `BaseAnalyzer` attempts to auto-detect.
                                               Defaults to None.

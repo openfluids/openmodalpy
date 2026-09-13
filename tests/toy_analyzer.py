@@ -16,7 +16,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from openmodalpy.core.base import BaseAnalyzer
-from openmodalpy.core.config import FIGURES_DIR_POD, RESULTS_DIR_POD
+from openmodalpy.core.config import FIGURES_DIR, RESULTS_DIR
 from openmodalpy.specs import display_name_for
 
 logger = logging.getLogger(__name__)
@@ -31,8 +31,8 @@ class ToyAnalyzer(BaseAnalyzer):
         self,
         file_path: str | None = None,
         *,
-        results_dir: str = RESULTS_DIR_POD,
-        figures_dir: str = FIGURES_DIR_POD,
+        results_dir: str = RESULTS_DIR,
+        figures_dir: str = FIGURES_DIR,
         data_loader: Any | None = None,
         spatial_weight_type: str | None = None,
         n_modes_save: int = 10,

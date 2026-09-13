@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- Names that nothing in the package used are removed:
+  - `openmodalpy.core.config`: `RESULTS_DIR_POD`, `RESULTS_DIR_SPOD`,
+    `RESULTS_DIR_DMD`, `RESULTS_DIR_BSMD`, `RESULTS_DIR_STPOD` and the five
+    matching `FIGURES_DIR_*` names. Each one was equal to `RESULTS_DIR` or
+    `FIGURES_DIR`. `openmodalpy.core` now exports `RESULTS_DIR` and
+    `FIGURES_DIR` in their place.
+  - `openmodalpy.core.config`: `CACHE_DIR`, `DATA_DIR`, `DATA_DIR_CAVITY`,
+    `DATA_DIR_JET`, `DATA_DIR_DNAMIX`, `DEFAULT_DATA_FILE`, `USE_LATEX`,
+    `FONT_FAMILY` and `FONT_SIZE`.
+  - `openmodalpy.core.io`: `load_jetles_data`, `load_mat_data`,
+    `get_weight_type` and `DNamiXNPZLoader`. Call
+    `load_data(path, loader_type="mat")` for a `.mat` file, and use
+    `DNamiDataLoader` directly.
+  - `openmodalpy.core.base`: `print_summary`, and the `load_jetles_data`,
+    `load_mat_data` and `load_data` re-exports. `load_data` stays in
+    `openmodalpy.core.io`.
+
 - `read_results` no longer reads the capitalised dataset names (`Modes`,
   `Eigenvalues`, `TimeCoefficients`, `Freq`, `St`, `Modes1`, `Modes2`,
   `Weights`, `Triads`) or the `x_coords`, `y_coords` and `z_coords` grid
