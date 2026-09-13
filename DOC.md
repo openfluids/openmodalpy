@@ -471,7 +471,7 @@ because the smallest eigenvalue falls below the solver's threshold
 
 Reach for `svd` when that matters:
 
-- delay-embedded / Hankel data (ST-POD’s case; already on this path)
+- delay-embedded / Hankel data (ST-POD's case; already on this path)
 - strongly anisotropic or stretched spatial weights, where the weighted
   condition number is large even when the raw field looks fine
 - nearly redundant snapshots from oversampled slow dynamics
