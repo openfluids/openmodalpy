@@ -12,14 +12,11 @@ import logging
 import os
 import time
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import h5py
 import numpy as np
 from numpy.typing import ArrayLike
-
-if TYPE_CHECKING:
-    pass
 
 from openmodalpy.core.config import (
     FFT_BACKEND,
