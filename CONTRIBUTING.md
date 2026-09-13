@@ -2,7 +2,7 @@
 
 Contributions are genuinely welcome, and that includes the ones that are not
 code. A bug report, a confusing docstring, a README paragraph that turned out to
-be wrong, a question that took you an hour to answer yourself — all of those are
+be wrong, a question that took you an hour to answer yourself. All of those are
 worth opening an [issue](https://github.com/openfluids/openmodalpy/issues) for.
 
 If you are unsure whether something is worth reporting, it probably is. Open the
@@ -46,7 +46,7 @@ decided to move it. Concretely:
   points or more) after your change. Measure with the command above, set
   `fail_under` just under what you measured, and say so in the pull request.
 - Nobody lowers the floor to land a change. If your change drops coverage
-  below the floor, the fix is tests for the new code — not a smaller number.
+  below the floor, the fix is tests for the new code, not a smaller number.
 - The floor is measured on Linux; treat the exact percentage as
   platform-specific and keep the margin in the pyproject comment honest.
 - The floor is aggregate-only, deliberately: coverage has no native
@@ -57,7 +57,7 @@ decided to move it. Concretely:
   Revisit per-module floors if the aggregate ever reaches 85%.
 
 If one fails for a reason you think is unrelated to your change, say so in the
-pull request rather than working around it — that is useful information, and
+pull request rather than working around it. That is useful information, and
 sometimes it is CI that is wrong.
 
 ## What makes a pull request easy to review
@@ -71,7 +71,7 @@ sometimes it is CI that is wrong.
 - **Draft PRs are fine.** Opening one early to ask "is this the right
   direction?" is welcome and costs nothing.
 
-Reviews may take a few days — one maintainer, research alongside. A nudge on a
+Reviews may take a few days. There is one maintainer, who also does research. A nudge on a
 quiet pull request is welcome, not annoying.
 
 ## Conventions
@@ -84,7 +84,7 @@ Only the ones that are actually enforced:
 - Anything touching the parallel path needs a test that runs serially too. A
   result that depends on worker count is a bug.
 - Resolve paths relative to `__file__`. No hardcoded absolute paths.
-- Formatting and import order are handled by `ruff` — do not hand-tune them.
+- `ruff` handles formatting and import order. Do not hand-tune them.
 - New user-facing behaviour gets a `CHANGELOG.md` entry.
 
 ## Conduct and licence
@@ -96,5 +96,5 @@ It is short.
 openmodalpy is licensed under Apache-2.0, and contributions are accepted under
 the same licence. See `LICENSE` and `NOTICE`.
 
-Found a security problem? Please do not open a public issue — see the
+Found a security problem? Please do not open a public issue. See the
 [security policy](https://github.com/openfluids/openmodalpy/security/policy).

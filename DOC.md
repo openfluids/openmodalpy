@@ -1,4 +1,4 @@
-# OpenModalPy — Technical Reference
+# OpenModalPy technical reference
 
 This document is the single reference for humans and LLMs working with the
 OpenModalPy codebase. It covers architecture, every supported method, the data
@@ -94,8 +94,8 @@ imports.
 
 **Plot methods are half of four analyzers.** In `pod.py`, `dmd.py`, `spod.py`
 and `stpod.py`, between 47% and 57% of the file is `plot_*` methods. They were
-left in place on purpose. Each one reads the analyzer's own attributes — modes,
-eigenvalues, frequencies, the grid — and calls the shared renderers in
+left in place on purpose. Each one reads the analyzer's own attributes, such as the modes,
+eigenvalues, frequencies and grid, and calls the shared renderers in
 `core/plotting.py` for the parts that are generic. Moving them to a fifth
 plotting module would turn attribute access into an argument list of ten or
 more items per call, and a reader looking for "how is a POD mode drawn" would
@@ -110,9 +110,9 @@ untested part of this codebase is the rendering, and the numbers now say so.
 functions. A reader opens them at a name, not at the top. Splitting a flat
 file of small functions moves the import lines and nothing else.
 
-The remaining case for a split is `bsmd.py`: its out-of-core `qhat` store —
-an `h5py` handle, a bin cache, and a `__del__` — is memory management inside a
-mathematical analyzer, and that is a genuine mixture of concerns. It is left as
+The remaining case for a split is `bsmd.py`. Its out-of-core `qhat` store
+holds an `h5py` handle, a bin cache and a `__del__`. That is memory management
+inside a mathematical analyzer, a real mixture of concerns. It is left as
 one file because the store's lifetime is the analyzer's lifetime, and a
 separate module would have to hand ownership of an open file handle across a
 module boundary. If it moves, it moves together with a test that a partially
@@ -143,7 +143,7 @@ with omp.blas_threads(0):       # scoped; restores the previous value
 
 Environment variable `OPENMODALPY_BLAS_THREADS` is parsed lazily on the first
 `get_blas_threads()` call (not at import time). `0` means this package applies
-no limit — an existing `OMP_NUM_THREADS` or outer `threadpoolctl` limiter still
+no limit. An existing `OMP_NUM_THREADS` or outer `threadpoolctl` limiter still
 applies. The effective count is written into every result file as
 `prov_blas_threads`.
 
@@ -183,11 +183,11 @@ thread as on eight.
 
 Every analyzer follows the same sequence:
 
-1. **Construct** — pass `file_path`, loader, weight type, method params
-2. **`load_and_preprocess()`** — load data → compute spatial weights → set derived params
-3. **Method-specific computation** — `perform_pod()`, `perform_dmd()`, `perform_spod()`, etc.
-4. **`save_results()`** — write HDF5 with modes, eigenvalues, metadata
-5. **Plot** — `plot_eigenvalues()`, `plot_modes()`, etc.
+1. **Construct.** Pass `file_path`, loader, weight type, method params
+2. **`load_and_preprocess()`.** Load data, compute spatial weights, set derived params
+3. **Method-specific computation.** `perform_pod()`, `perform_dmd()`, `perform_spod()`, etc.
+4. **`save_results()`.** Write HDF5 with modes, eigenvalues, metadata
+5. **Plot.** `plot_eigenvalues()`, `plot_modes()`, etc.
 
 The `commands.py` dispatch core (`analyze_from_spec`) automates steps 1–5 from
 a single `AnalyzeSpec` dataclass, which is built from a JSONC config file.
@@ -211,8 +211,8 @@ named lifts (`IdentityLift`, `DelayEmbeddingLift`, `BandFilteredLift`), a
 PSD-POD all call that solver; `lift_kind` metadata comes from `lift.kind`.
 
 **Spatial weights.** Every analyzer accepts `spatial_weight_type` in
-`{"uniform", "polar", "prescribed", "cell_volume"}` (anything else — including the former
-`"auto"` — raises at construction). Omitting the argument (`None`) resolves to
+`{"uniform", "polar", "prescribed", "cell_volume"}`. Any other value, the former
+`"auto"` included, raises at construction. Omitting the argument (`None`) resolves to
 `"uniform"`. Pass an array as `spatial_weights=` to prescribe a metric: the
 type becomes `"prescribed"`, and the vector is checked against the snapshot
 grid (`n_space`) in `load_and_preprocess` (length/shape, finite, non-negative,
@@ -221,7 +221,7 @@ non-zero total). `"prescribed"` without an array, or an array together with
 prescribes. Config/CLI still only expose the type string; prescribing a vector
 is a library argument.
 
-**Limitation — uniform W is not a domain integral.** With
+**Limitation: uniform W is not a domain integral.** With
 `spatial_weight_type="uniform"`, W is the all-ones vector, not cell volumes or
 grid spacing. Reported "energy" is therefore a **sum over mesh points**, not a
 domain integral, and is **mesh-resolution dependent**: refining the grid changes
@@ -252,7 +252,7 @@ Every analyzer expects a Python dict with these keys:
 `q`, `x`, `y` and `dt` are the only keys a caller must supply; a dict missing
 one of them raises `ValueError` at construction, naming the missing key(s).
 `Nx`, `Ny`, `Nz` and `Ns` are derived from the array shapes, using the same
-rule for a hand-built dict (`data=`) and for a file read from disk — see
+rule for a hand-built dict (`data=`) and for a file read from disk. See
 "Load once, loop over methods" below.
 
 ### The plug-in point for your own data
@@ -264,19 +264,19 @@ called yourself and handed straight in as `data=`. See "Your own format"
 below for a worked template.
 
 The `DataLoader` abstract base class and `DataInterfaceManager`
-(`core/io.py`) are internal — they are how the shipped readers (`.mat`,
+(`core/io.py`) are internal. They are how the shipped readers (`.mat`,
 `.npz`, `.h5`/`.hdf5`, dNami) are written, not a path a user is expected to
 subclass.
 
 ### Supported input formats
 
-- **MATLAB `.mat`** — auto-detected via `MATDataLoader`
-- **NumPy `.npz`** — plain contract layout via `GenericDataLoader`, or dNami-family
+- **MATLAB `.mat`**: auto-detected via `MATDataLoader`
+- **NumPy `.npz`**: plain contract layout via `GenericDataLoader`, or dNami-family
   consolidated/split layouts via `DNamiDataLoader` (auto-detected by key signature;
   an explicit `schema=` forces the dNami loader)
-- **HDF5 `.h5` / `.hdf5`** — plain contract layout via `GenericDataLoader`
-- **directory** of dNami-family split NPZ files — via `DNamiDataLoader`
-- **Nek5000 field files `.f0*`** — via `NekDataLoader`, which needs the optional
+- **HDF5 `.h5` / `.hdf5`**: plain contract layout via `GenericDataLoader`
+- **directory** of dNami-family split NPZ files: `DNamiDataLoader`
+- **Nek5000 field files `.f0*`**: `NekDataLoader`, which needs the optional
   `nek` extra (`uv pip install "openmodalpy[nek]"`). The extra installs pymech,
   which is GPL-3.0-or-later; the package itself is Apache-2.0 and imports pymech
   only when you read a Nek5000 file. See `NOTICE`. The loader reads the mesh with
@@ -284,7 +284,7 @@ subclass.
   Gauss-Lobatto-Legendre quadrature weight of each point times the determinant of
   the element Jacobian at that point. Each element gets its own Jacobian, so a mesh
   of unequal elements integrates as accurately as a uniform one.
-- **Custom loader** — any callable `(file_path: str) -> dict`, see "Your own
+- **Custom loader**: any callable `(file_path: str) -> dict`, see "Your own
   format" below
 
 The generic reader takes named datasets: `q` (as `(Ns, Nspace)` or `(Ns, Ny, Nx[, Nz])`,
@@ -294,21 +294,21 @@ If `x` and `y` are both 1-D and the same length as `Nspace` but their product do
 equal `Nspace`, the file is read as scattered points: `x`, `y` (and `z` if also 1-D of
 that length) pass through unchanged and `Nx`, `Ny`, `Nz` are reported as `Nspace`, `1`, `1`.
 When `t` is supplied it must sample uniformly (checked with `fftkit.describe_sampling`;
-relative jitter below 1e-12) and `dt` becomes the verified median step — a non-uniform
+relative jitter below 1e-12) and `dt` becomes the verified median step. A non-uniform
 `t` is refused with the observed spread unless the caller passes `resample_time=True`,
 which forwards the record through `fftkit.resample_uniform`.
 
 ### Load once, loop over methods
 
-Every analyzer also accepts an already-loaded dataset directly through `data=` —
-no file path and no reload from disk per method. Exactly one of `file_path` and
+Every analyzer also accepts an already-loaded dataset directly through `data=`,
+with no file path and no reload from disk per method. Exactly one of `file_path` and
 `data` is required; passing both or neither raises at construction. `data` must
 be a non-empty dict following the contract table above and is stored by
 reference, so one load can feed every analyzer. With `data=`, output files are
 named after the analyzer instead of the input path (`pod_64snapshots_pod.hdf5`)
-and the directories keep their usual defaults (`./results`, `./figures`). The
-spatial weights are recomputed by each analyzer — negligible on typical grids,
-but part of the per-method cost.
+and the directories keep their usual defaults (`./results`, `./figures`). Each
+analyzer recomputes the spatial weights. On typical grids that takes little time,
+but it adds to the per-method cost.
 
 ```python
 def my_loader(path):
@@ -346,9 +346,9 @@ keys are required, and how `q` must be flattened. It is exercised by
 rot.
 
 For a worked example of a shipped reader written against the internal
-`DataLoader` plug-in point instead — the pattern to follow only if you are
-contributing a reader to openmodalpy itself, not for everyday use — see
-`DNamiDataLoader` in `core/io.py`.
+`DataLoader` plug-in point instead, read
+`DNamiDataLoader` in `core/io.py`. Follow that pattern only when you
+contribute a reader to openmodalpy itself.
 
 ### Spatial weights
 
@@ -360,7 +360,7 @@ contributing a reader to openmodalpy itself, not for everyday use — see
 | `"cell_volume"` | Opt-in Cartesian-grid metric: trapezoid cell widths from 1-D axis coordinates |
 
 `"uniform"` is the all-ones vector (v0.5.0 behaviour): reported energies are
-mesh-point sums — see the limitation above. To integrate over the domain, opt
+mesh-point sums. See the limitation above. To integrate over the domain, opt
 in with `"cell_volume"` (`calculate_cell_volume_weights`): when the data dict
 carries 1-D strictly increasing `x`, `y` (and optional `z`) whose sizes
 multiply to `Nspace`, each axis contributes trapezoid cell widths (half the
@@ -397,7 +397,7 @@ other parameter by keyword only; a positional call past `file_path` raises
 
 ## Supported Methods
 
-### 1. POD — Proper Orthogonal Decomposition
+### 1. POD: Proper Orthogonal Decomposition
 
 **Class:** `PODAnalyzer` · **Lift:** identity on centered snapshots · **Operator:** covariance kernel eigenproblem
 
@@ -406,9 +406,9 @@ from openmodalpy import PODAnalyzer
 
 pod = PODAnalyzer(file_path="data.mat", n_modes_save=10)
 pod.run_analysis()
-# pod.modes          — (Nspace, n_modes)
-# pod.eigenvalues    — (n_modes,)
-# pod.time_coefficients — (Ns, n_modes)
+# pod.modes          (Nspace, n_modes)
+# pod.eigenvalues    (n_modes,)
+# pod.time_coefficients (Ns, n_modes)
 ```
 
 **Key facts:**
@@ -428,7 +428,7 @@ eigenvalues after the eigendecomposition:
 is discarded. Here \(\varepsilon\) is machine epsilon of the working real
 dtype (`np.finfo(float).eps` on the default real path), \(\lambda_{\max}\) is
 the largest eigenvalue, and \(n_{\mathrm{kernel}}\) is the dimension of the
-matrix that was actually factored — `n_samples` on the temporal branch
+matrix that was actually factored: `n_samples` on the temporal branch
 (`Ns < Nspace`) and on the complex PSD-POD path, `n_space` on the spatial
 branch. The same rule replaces the old absolute `1e-12` floor that mPOD used
 and the old keep-all behaviour that POD used, so the returned count is scale
@@ -437,7 +437,7 @@ same flow in metres).
 
 Returned modes always have unit weighted norm, and no returned eigenvalue is
 negative. When the data supports fewer modes than `n_modes_save` / `n_keep`,
-the solver returns the shorter basis — it does not pad with noise directions.
+the solver returns the shorter basis. It does not pad with noise directions.
 Code that indexes a fixed mode width should use `modes.shape[1]` (or the
 length of `eigenvalues`), not assume the request was filled.
 
@@ -483,7 +483,7 @@ pod.perform_pod()                 # default: correlation / Gram (eigh)
 pod.perform_pod(solver="svd")     # weighted snapshot SVD
 ```
 
-### 2. mPOD — Multiscale POD
+### 2. mPOD: Multiscale POD
 
 **Class:** `MPODAnalyzer` · **Lift:** temporal band filtering · **Operator:** POD per band
 
@@ -504,7 +504,7 @@ mpod.run_analysis()
 - Modes live in the same space as POD modes but are scale-separated
 - Reference: Mendez et al. (2019), JFM 870
 
-**Limitation — POD-per-band pool, not Mendez MRA.** Each band is POD'd
+**Limitation: POD-per-band pool, not Mendez MRA.** Each band is POD'd
 independently; band modes are concatenated and re-sorted by eigenvalue with no
 joint W-orthonormalization. Modes from different bands are not orthonormal
 across bands (`Φᵀ W Φ ≠ I` for the pooled set): cross-band inner products are
@@ -512,7 +512,7 @@ generally nonzero. Within a single band, POD orthonormality still holds. This is
 a simplification relative to the Mendez et al. multiresolution construction; do
 not treat the full mode matrix as a W-orthonormal basis.
 
-### 3. PSD-POD — Power-Spectral-Density POD
+### 3. PSD-POD: Power-Spectral-Density POD
 
 **Class:** `PSDPODAnalyzer` · **Lift:** pooled blockwise Fourier realizations · **Operator:** single second-order eigenproblem on the flattened Fourier ensemble
 
@@ -521,10 +521,10 @@ from openmodalpy import PSDPODAnalyzer
 
 psd = PSDPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5, n_modes_save=10)
 psd.run_analysis()
-# psd.eigenvalues        — (n_modes_save,)
-# psd.modes              — (Nspace, n_modes_save)
-# psd.time_coefficients  — (n_fourier_realizations, n_modes_save)
-# psd.freq, psd.St       — frequency and Strouhal axes from the Welch blocks
+# psd.eigenvalues        (n_modes_save,)
+# psd.modes              (Nspace, n_modes_save)
+# psd.time_coefficients  (n_fourier_realizations, n_modes_save)
+# psd.freq, psd.St       frequency and Strouhal axes from the Welch blocks
 ```
 
 **Key facts:**
@@ -534,7 +534,7 @@ psd.run_analysis()
 - Triggered via `method="psd-pod"` in config or by constructing `PSDPODAnalyzer` directly
 - `psd.plot_eigenvalues()`, `plot_cumulative_energy()`, `plot_modes()`, `plot_modes_3d()` save figures to the figures directory; `psd.load_results()` reloads a saved result file
 
-### 4. SPOD — Spectral POD
+### 4. SPOD: Spectral POD
 
 **Class:** `SPODAnalyzer` · **Lift:** blockwise Fourier transform · **Operator:** per-frequency covariance eigenproblem
 
@@ -543,11 +543,11 @@ from openmodalpy import SPODAnalyzer
 
 spod = SPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5)
 spod.run_analysis()
-# spod.eigenvalues       — (n_freq, n_blocks)
-# spod.modes             — (n_freq, Nspace, n_modes_kept)
-# spod.time_coefficients — (n_freq, n_blocks, n_modes_kept)
-# spod.St                — Strouhal number array
-# spod.freq              — frequency array (Hz)
+# spod.eigenvalues       (n_freq, n_blocks)
+# spod.modes             (n_freq, Nspace, n_modes_kept)
+# spod.time_coefficients (n_freq, n_blocks, n_modes_kept)
+# spod.St                Strouhal number array
+# spod.freq              frequency array (Hz)
 ```
 
 **Key facts:**
@@ -584,7 +584,7 @@ defaults to 10, and there is no way to tell that default from a value the user
 chose, so feeding it through would truncate every existing SPOD run to 10 modes
 without being asked.
 
-**Limitation — `dst` is a Strouhal step, not a frequency step.** After the
+**Limitation: `dst` is a Strouhal step, not a frequency step.** After the
 block FFT, SPOD normalizes by `sqrt(nblocks * dst)` where
 `dst = St[1] - St[0] = df · L / U` (not `df = fs / nfft`). Reported eigenvalues
 therefore **scale with U/L**. With the default L = U = 1 (and with the shipped
@@ -601,8 +601,8 @@ bin 3 → 18.0 and 4.5, bin 5 → 8.0. The numbers live in
 `tests/fixtures/reference/external_spod.json`; the comparison is
 `tests/test_external_spod.py`. The manufactured snapshot array is vendored in
 that fixture as JSON numbers. See [BLAS thread policy](#blas-thread-policy).
-PySPOD is not a dependency — the fixture is generated once, outside the repo,
-by `scripts/regen_external_spod.py`.
+PySPOD is not a dependency. The fixture comes from one run of
+`scripts/regen_external_spod.py`, outside the repo.
 
 The convention mapping is `λ_openmodalpy = λ_pyspod × nfft × dt / 2`.
 `nfft·dt` is the Strouhal-step division that PySPOD does not do; the 2 is
@@ -617,24 +617,24 @@ mode 0, **9.0e-7** at bin 3 mode 1, and **1.95e-3** at bin 5 mode 0.
 Constant-phase modes take coherent leakage from the other tone; the
 phase-ramped mode is orthogonal to that leakage. This is a window-definition
 difference, not a bug. The comparison therefore runs at
-`window_type="hamming"`, `window_norm="amplitude"` — amplitude recovers the
-closed form exactly (ratio 1.000000); power sits at 0.7337695 of it, which is
+`window_type="hamming"`, `window_norm="amplitude"`. Amplitude recovers the
+closed form exactly (ratio 1.000000), and power sits at 0.7337695 of it, which is
 exactly `0.54² / (0.54² + 0.5·0.46²)`. `fullspectrum` changes only the
 returned bin count (16 vs 9), not the values at bins 3 and 5.
 
 Which check is the tighter one on the clean field: the closed-form comparison
 runs at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is
 held at 5e-3 by the window difference above, so it corroborates the convention
-mapping and catches a convention mistake — dropping the Strouhal division moves
-the answer by 8×, the wrong window normalisation by 0.734 — but an error
+mapping and catches a convention mistake. Dropping the Strouhal division moves
+the answer by 8×, and the wrong window normalisation moves it by 0.734. An error
 smaller than 5e-3 is caught by the closed form, not by the external number.
 
 **The noisy case.** A second case, `noise_2e-1`, adds Gaussian noise at 0.2 of
 the field RMS from a seed recorded in the fixture. A noisy SPOD estimate has no
 closed form, so the vendored PySPOD number is the only thing asserting those
 eigenvalues. The bound is 1.6e-2, which is 2.5× the worst measured residual of
-6.36e-3 — the same margin the clean bound uses, looser because the window
-difference and the noise interact.
+6.36e-3. That is the same margin the clean bound uses. The bound itself is
+looser because the window difference and the noise interact.
 
 0.2 is the smallest level at which every occupied entry moves further from the
 clean closed form (1.25e-2, 2.21e-2, 4.43e-3) than the ~2e-3 window residual,
@@ -646,13 +646,13 @@ noisy bound is looser, so a shared error reds the clean assertions first. What
 it buys is that those three numbers have a check at all, and that a change
 affecting SPOD only on broadband input would have to get past it.
 
-Do not move the comparison to the noise-only sub-leading modes. They look ideal
-— machine zero on the clean field, real energy under noise — but the window
+Do not move the comparison to the noise-only sub-leading modes. They look ideal,
+with machine zero on the clean field and real energy under noise, but the window
 difference is coherent leakage, and on a low-energy mode the leakage *is* the
 signal. Measured disagreement there is 1.7e-2 to 1.6e-1, so a comparison would
 need a 40% bound and discriminate nothing.
 
-### 5. ST-POD — Delay-Embedded Space-Time POD
+### 5. ST-POD: Delay-Embedded Space-Time POD
 
 **Class:** `STPODAnalyzer` · **Lift:** delay/Hankel stacking · **Operator:** POD in delay space
 
@@ -670,7 +670,7 @@ stpod.run_analysis()
 - Uses `compute_reduced_svd` (ARPACK for large matrices)
 - Requires uniform dt
 
-### 6. DMD — Dynamic Mode Decomposition
+### 6. DMD: Dynamic Mode Decomposition
 
 **Class:** `DMDAnalyzer` · **Lift:** identity (shifted pairs) · **Operator:** LS or TLS regression
 
@@ -689,13 +689,13 @@ dmd.save_results()
 ```
 
 **Rank vs saved modes:**
-- `rank` — **required.** SVD truncation of the DMD operator (the reduced system
+- `rank`: **required.** SVD truncation of the DMD operator (the reduced system
   size). Pass a positive `int`, `"svht"`, or `"energy"`. Omitting it raises
   `ValueError`. There is no default: the previous silent default of
   `n_modes_save` coupled a plotting parameter to the operator rank, and on the
   shipped cylinder wake that choice moved the recovered shedding frequency by
   ~20×.
-- `n_modes_save` — how many modes are kept for save/plot after sorting by `|λ|`.
+- `n_modes_save`: how many modes are kept for save/plot after sorting by `|λ|`.
   Changing `n_modes_save` alone must not change eigenvalues.
 
 | `rank` | Criterion |
@@ -709,7 +709,7 @@ dmd.save_results()
 **smoothly** to `σ_min/σ_1 ≈ 4.5×10⁻⁴` and never approaches the machine floor
 (`rcond ≈ 2×10⁻¹³`). Keeping every direction above that floor (rank 399)
 produces **spurious modes with `|λ| > 1`** (growth outside the unit circle)
-that sort *first* by the amplitude ranking — recovered dominant frequency
+that sort *first* by the amplitude ranking. The recovered dominant frequency is
 **≈ 3.11 Hz** against true shedding **≈ 0.167 Hz**. Truncating at
 `rank=10`, `"svht"`, or `"energy"` all recover the physical shedding mode with
 `|λ| = 1`. A stability library that manufactures instabilities cannot guess an
@@ -718,7 +718,7 @@ untruncated rank. Full rank remains available only by passing an explicit large
 
 **Why the library does not default to SVHT either:** SVHT assumes a low-rank
 signal plus **i.i.d. Gaussian noise of constant variance**, and its
-median-based noise estimate requires the **true rank below n/2** — otherwise
+median-based noise estimate requires the **true rank below n/2**. Otherwise
 the median singular value is signal, not noise, and the criterion collapses the
 rank. Neither assumption holds for a typical deterministic fluid simulation with
 a smoothly decaying spectrum. SVHT is also computed from `X1` alone, while the
@@ -758,30 +758,30 @@ system built from five chosen eigenvalues. The numbers live in
 `tests/test_external_reference.py`. The fixture vendors the noiseless and noisy
 snapshot arrays as JSON numbers so a field change cannot be read as a DMD
 regression. See [BLAS thread policy](#blas-thread-policy). PyDMD is not a
-dependency — the fixture is generated once, outside the repo, by
-`scripts/regen_external_reference.py`.
+dependency. The fixture comes from one run of
+`scripts/regen_external_reference.py`, outside the repo.
 The TLS routes differ algebraically: openmodalpy splits the left singular
 vectors of stacked `[X1; X2]`; PyDMD projects both snapshot matrices onto its
-leading right singular vectors. Same estimator, different algebra — they agree
+leading right singular vectors. Same estimator, different algebra. They agree
 to ~1e-15 on noiseless data and only to ~3e-10 under 1e-3 rms noise. That
 residual is not a bug.
 
 **A second dataset: the shipped cylinder wake.** One dataset can be tuned
-against, so the fixture also carries `cylinder_wake` — a field the package
+against, so the fixture also carries `cylinder_wake`, a field the package
 ships and documents, 500 snapshots over 5000 spatial points against 40 over 12
 for the constructed system, at rank 6. The generator states the shedding
 Strouhal number in closed form, so this case anchors to a physical quantity as
 well as to PyDMD. The field is rebuilt on both sides rather than vendored: 2.5
 million float64 numbers do not belong in a JSON fixture, so the generator
 parameters plus five reduced statistics pin it. A checksum is deliberately not
-used — `np.sin` and `np.exp` can differ by one unit in the last place between
+used. `np.sin` and `np.exp` can differ by one unit in the last place between
 platforms, so the bits are not portable while the sums are.
 
 The comparison on that case is over the **physical modes**, the three carrying
 the most amplitude: the mean and the shedding pair. The full sorted set is not
 a well-posed quantity there. The spectrum spans 1.0 down to 1.6e-3, and where
 the truncation rank cuts into the noise floor both packages place spurious
-modes, differently — at rank 4 TLS openmodalpy puts one at `|λ| = 3.61` where
+modes, differently. At rank 4 TLS openmodalpy puts one at `|λ| = 3.61` where
 PyDMD puts one at 1.0, which makes the sorted-set error 3.6 while every
 physical mode still agrees to 1.6e-7. Those spurious modes carry amplitude
 1.1e-2 to 4.5e-2 against 57.8 for the mean and 3.35 for the shedding pair, and
@@ -792,7 +792,7 @@ recovers the documented St to 6.3e-5.
 The generator refuses to write this case if PyDMD's own shedding frequency
 misses the documented St.
 
-### 7. HODMD — Higher-Order DMD
+### 7. HODMD: Higher-Order DMD
 
 `hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations, not separate
 classes. The exact mapping is:
@@ -809,7 +809,7 @@ where `<d>` is the delay embedding depth (default: case `embedding_dim`).
 - Both LS-HODMD and TLS-HODMD supported
 - Reference: Le Clainche & Vega (2017), SIAM J. Appl. Dyn. Syst. 16
 
-### 8. BSMD — Bispectral Mode Decomposition
+### 8. BSMD: Bispectral Mode Decomposition
 
 **Class:** `BSMDAnalyzer` · **Lift:** Hadamard product of Fourier pairs · **Operator:** cross-bispectral eigenproblem
 
@@ -818,9 +818,9 @@ from openmodalpy import BSMDAnalyzer
 
 bsmd = BSMDAnalyzer(file_path="data.mat", nfft=256, overlap=0.5)
 bsmd.run_analysis()
-# bsmd.energy_map   — bispectral energy over (f1, f2)
-# bsmd.triads       — identified triadic frequency pairs
-# bsmd.eigenvalues  — coupling strength per triad
+# bsmd.energy_map   bispectral energy over (f1, f2)
+# bsmd.triads       identified triadic frequency pairs
+# bsmd.eigenvalues  coupling strength per triad
 ```
 
 **Key facts:**
@@ -829,7 +829,7 @@ bsmd.run_analysis()
 - Inspired by [Schmidt's MATLAB BMD](https://github.com/olivertschmidt/bmd)
 - Reference: Schmidt (2020), Nonlinear Dynamics 102
 
-**Limitation — default triad list is `ALL_TRIADS` with |p| ≤ 8.** The shipped
+**Limitation: default triad list is `ALL_TRIADS` with |p| ≤ 8.** The shipped
 static triad table only covers frequency-bin indices with absolute value at most
 8. At the default `nfft=128` that is the bottom 12.5% of the rfft spectrum;
 higher-frequency triads are not analysed unless you pass a custom
@@ -1135,7 +1135,7 @@ fraction of the smaller matrix dimension, which sends the solve to ARPACK, and
 `"dense"` otherwise. The two cost an order of magnitude apart on a delay-embedded
 case, so the field tells you why a run took the time it did.
 
-**Provenance** — every file written through `write_results` also carries a
+**Provenance.** Every file written through `write_results` also carries a
 `prov_*` block describing the software that produced it. Read it as
 `read_results(path).provenance` (prefix stripped). Files written before this
 exist report an empty mapping; missing keys never raise.
@@ -1317,12 +1317,12 @@ may optionally use SLEPc (`slepc4py`) for distributed eigensolvers.
 
 To add a new decomposition:
 
-1. **Variance-optimal method** — write a new `Lift` in
+1. **Variance-optimal method.** Write a new `Lift` in
    `core/decomposition.py` (or a thin wrapper), then call
    `weighted_second_order` with the appropriate metric and method.
-2. **Evolution-fit method** — write a new lift for paired data, then reuse the
+2. **Evolution-fit method.** Write a new lift for paired data, then reuse the
    SVD-based regression in `dmd.py`.
-3. **Interaction method** — write a new lift for higher-order objects, then
+3. **Interaction method.** Write a new lift for higher-order objects, then
    implement the coupling optimization.
 
 In all cases:
