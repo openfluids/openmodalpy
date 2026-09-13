@@ -285,6 +285,12 @@ exports, string dispatch and the docs before it went.
 
 ### Fixed
 
+- `DMDAnalyzer.load_results` on a file with no `amplitudes` dataset set
+  `amplitudes` to the magnitudes of the eigenvalues. Those are a different
+  quantity, so the amplitude plot showed eigenvalue magnitudes under the
+  amplitude label. `amplitudes` now stays an empty array, the value the
+  constructor sets, and the amplitude plot draws nothing.
+
 - DOC.md pointed to `commands.py` for `METHOD_REGISTRY`. It lives in `specs.py`.
 
 - `prov_blas` used to report a thread count too, read from the idle pool at

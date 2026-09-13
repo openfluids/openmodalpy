@@ -552,11 +552,9 @@ class DMDAnalyzer(BaseAnalyzer):
         """Assign loaded results and cap n_modes_save."""
         super()._assign_loaded_results(res)
 
-        # Load amplitudes (backward compatible).
-        if res.amplitudes is not None:
-            self.amplitudes = res.amplitudes
-        else:
-            self.amplitudes = np.abs(self.eigenvalues)
+        # A file without amplitudes keeps the empty array the constructor set.
+        # |eigenvalues| is a different quantity, so it does not stand in.
+        self.amplitudes = res.amplitudes if res.amplitudes is not None else np.array([])
 
         # Load continuous-time eigenvalues if present.
         if res.omega is not None:
