@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- `read_results` no longer reads the capitalised dataset names (`Modes`,
+  `Eigenvalues`, `TimeCoefficients`, `Freq`, `St`, `Modes1`, `Modes2`,
+  `Weights`, `Triads`) or the `x_coords`, `y_coords` and `z_coords` grid
+  names, and it no longer emits a `DeprecationWarning`. `LEGACY_ALIASES` is
+  removed. Only files that openmodalpy 0.3.0 or earlier wrote use these names.
+  Files from 0.4.0 and 0.5.0 load as before. In an older file, a capitalised
+  dataset now lands in `AnalysisResults.extra` under its own name. Run the
+  analysis again with this version to get a file with the current names.
+
 - Five module-level functions left `openmodalpy.core.base`. There are no
   re-exports, so `from openmodalpy.core.base import <name>` raises
   `ImportError` for each. The new paths:

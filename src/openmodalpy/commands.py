@@ -807,8 +807,7 @@ def load_example_payload(name: str, root: str | Path | None = None) -> dict[str,
 def inspect_results(path: str | Path) -> dict[str, Any]:
     """Inspect one result file or result directory and return a plain summary.
 
-    HDF5 paths go through :func:`openmodalpy.core.results.read_results` so
-    legacy capitalised dataset names appear under their canonical keys.
+    HDF5 paths go through :func:`openmodalpy.core.results.read_results`.
     """
     resolved = Path(path).expanduser().resolve()
     if resolved.is_dir():

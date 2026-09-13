@@ -1,15 +1,14 @@
 """Result contract: every producer writes the same dataset names and values.
 
-One reader (:func:`read_results`) loads any result file — including the old
-capitalised layout — into :class:`AnalysisResults`. Names and shapes alone are
-not enough: each in-memory array is compared element-wise with what comes back
-from the file. A regression gate greps this file for every producer name.
+One reader (:func:`read_results`) loads any result file into
+:class:`AnalysisResults`. Names and shapes alone are not enough: each
+in-memory array is compared element-wise with what comes back from the file. A
+regression gate greps this file for every producer name.
 """
 
 from __future__ import annotations
 
 import json
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -164,10 +163,7 @@ def test_result_contract_all_producers(tmp_path: Path) -> None:
     spod.save_results("spod.hdf5")
     spod_path = tmp_path / "spod.hdf5"
     _assert_canonical_keys(spod_path, {"modes", "eigenvalues", "freq", "st"})
-    # Inspect the raw datasets BEFORE reading. x_coords/y_coords/z_coords are
-    # LEGACY_ALIASES now, so a reintroduced duplicate would make read_results
-    # emit a DeprecationWarning — an error under this suite's filters — and the
-    # check would never be reached. Done here, it pins the writer on its own.
+    # Inspect the raw datasets BEFORE reading to pin the writer on its own.
     with h5py.File(spod_path, "r") as handle:
         raw_keys = set(handle.keys())
     assert not (raw_keys & {"x_coords", "y_coords", "z_coords"}), (
@@ -376,95 +372,6 @@ def test_read_results_handles_a_zero_dimensional_dataset(tmp_path: Path) -> None
     np.testing.assert_array_equal(res.modes, modes)
 
 
-def test_mixed_legacy_bsmd_file_resolves_every_key(tmp_path: Path) -> None:
-    """Pre-unification BSMD mix: Modes1/Modes2 + lowercase triads/eigenvalues.
-
-    Capitalised mode keys resolve and warn; already-canonical keys pass
-    through without a deprecation notice.
-    """
-    path = tmp_path / "mixed_legacy_bsmd.hdf5"
-    modes1 = np.ones((4, 2))
-    modes2 = 2.0 * np.ones((4, 2))
-    triads = np.arange(6.0).reshape(2, 3)
-    eigenvalues = np.array([1.0, 0.5])
-    with h5py.File(path, "w") as handle:
-        handle.create_dataset("Modes1", data=modes1)
-        handle.create_dataset("Modes2", data=modes2)
-        handle.create_dataset("triads", data=triads)
-        handle.create_dataset("eigenvalues", data=eigenvalues)
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        res = read_results(path)
-
-    assert res.modes1 is not None
-    assert res.modes2 is not None
-    np.testing.assert_array_equal(res.modes1, modes1)
-    np.testing.assert_array_equal(res.modes2, modes2)
-    assert res.triads is not None
-    assert res.eigenvalues is not None
-    np.testing.assert_array_equal(res.triads, triads)
-    np.testing.assert_array_equal(res.eigenvalues, eigenvalues)
-
-    dep = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    messages = [str(w.message) for w in dep]
-    assert any("Modes1" in m for m in messages)
-    assert any("Modes2" in m for m in messages)
-    assert not any("'triads'" in m for m in messages)
-    assert not any("'eigenvalues'" in m for m in messages)
-
-
-def test_read_results_legacy_layout_emits_deprecation(tmp_path: Path) -> None:
-    """A file written with the old capitalised SPOD keys still loads."""
-    legacy = tmp_path / "legacy_spod.hdf5"
-    rng = np.random.default_rng(1)
-    nfr, nsp, nmd = 5, 6, 2
-    with h5py.File(legacy, "w") as handle:
-        handle.create_dataset("Modes", data=rng.standard_normal((nfr, nsp, nmd)))
-        handle.create_dataset("Eigenvalues", data=rng.standard_normal((nfr, nmd)))
-        handle.create_dataset("TimeCoefficients", data=rng.standard_normal((nfr, nmd, 3)))
-        handle.create_dataset("Freq", data=np.linspace(0, 1, nfr))
-        handle.create_dataset("St", data=np.linspace(0, 2, nfr))
-        handle.create_dataset("Weights", data=np.ones(nsp))
-        handle.attrs["analysis_type"] = "spod"
-
-    with pytest.warns(DeprecationWarning, match="legacy name"):
-        res = read_results(legacy)
-
-    assert res.modes is not None and res.modes.shape == (nfr, nsp, nmd)
-    assert res.eigenvalues is not None and res.eigenvalues.shape == (nfr, nmd)
-    assert res.time_coefficients is not None
-    assert res.freq is not None and res.st is not None
-    assert res.W is not None and res.W.shape == (nsp,)
-
-
-def test_read_results_legacy_coords_spellings_map_to_canonical(tmp_path: Path) -> None:
-    """Older SPOD files that carried only x_coords/y_coords still read as x/y."""
-    legacy = tmp_path / "legacy_coords.hdf5"
-    x = np.linspace(0.0, 1.0, 4)
-    y = np.linspace(0.0, 1.0, 2)
-    with h5py.File(legacy, "w") as handle:
-        handle.create_dataset("modes", data=np.zeros((8, 2)))
-        handle.create_dataset("eigenvalues", data=np.ones(2))
-        handle.create_dataset("x_coords", data=x)
-        handle.create_dataset("y_coords", data=y)
-
-    # Match the text common to every legacy warning, not just x_coords: this
-    # file reads with filterwarnings=error, and pytest re-emits warnings that
-    # the match misses, so a narrower pattern turns the y_coords warning into
-    # an error. The specific key is asserted below instead.
-    with pytest.warns(DeprecationWarning, match="legacy name") as caught:
-        res = read_results(legacy)
-
-    assert res.x is not None
-    assert res.y is not None
-    np.testing.assert_array_equal(res.x, x)
-    np.testing.assert_array_equal(res.y, y)
-    assert "x_coords" not in res.extra
-    assert "y_coords" not in res.extra
-    assert any("x_coords" in str(w.message) for w in caught)
-
-
 def test_spod_load_results_rejects_a_file_without_modes(tmp_path: Path) -> None:
     """A file that is not a SPOD result must fail loudly, not load as empty arrays."""
     results_dir = tmp_path / "results"
@@ -485,13 +392,6 @@ def test_spod_load_results_rejects_a_file_without_modes(tmp_path: Path) -> None:
         analyzer.load_results("not_spod.hdf5")
 
 
-def _legacy_capitalised_file(path: Path, modes: np.ndarray, eigenvalues: np.ndarray, coeffs: np.ndarray) -> None:
-    with h5py.File(path, "w") as handle:
-        handle.create_dataset("Modes", data=modes)
-        handle.create_dataset("Eigenvalues", data=eigenvalues)
-        handle.create_dataset("TimeCoefficients", data=coeffs)
-
-
 def _analyzer_ctor_kwargs(results_dir: Path) -> dict:
     """Shared real-constructor kwargs for load_results tests (no half-built objects)."""
     field = _toy_field()
@@ -501,86 +401,6 @@ def _analyzer_ctor_kwargs(results_dir: Path) -> dict:
         data_loader=lambda _: field,
         spatial_weight_type="uniform",
     )
-
-
-def test_legacy_capitalised_file_loads_through_pod(tmp_path: Path) -> None:
-    """A pre-unification POD file with capitalised keys loads via the reader."""
-    results_dir = tmp_path / "results"
-    results_dir.mkdir()
-    rng = np.random.default_rng(2)
-    modes = rng.standard_normal((12, 2))
-    eigenvalues = np.array([3.0, 1.5])
-    coeffs = rng.standard_normal((8, 2))
-    _legacy_capitalised_file(results_dir / "legacy_pod.hdf5", modes, eigenvalues, coeffs)
-
-    analyzer = PODAnalyzer(
-        file_path="legacy_pod",
-        n_modes_save=2,
-        **_analyzer_ctor_kwargs(results_dir),
-    )
-
-    with pytest.warns(DeprecationWarning, match="legacy name"):
-        analyzer.load_results("legacy_pod.hdf5")
-
-    np.testing.assert_array_equal(analyzer.modes, modes)
-    np.testing.assert_array_equal(analyzer.eigenvalues, eigenvalues)
-    np.testing.assert_array_equal(analyzer.time_coefficients, coeffs)
-
-
-def test_legacy_capitalised_file_loads_through_stpod(tmp_path: Path) -> None:
-    """A pre-unification ST-POD file with capitalised keys loads via the reader."""
-    results_dir = tmp_path / "results"
-    results_dir.mkdir()
-    rng = np.random.default_rng(3)
-    modes = rng.standard_normal((18, 2))
-    eigenvalues = np.array([4.0, 2.0])
-    coeffs = rng.standard_normal((6, 2))
-    _legacy_capitalised_file(results_dir / "legacy_stpod.hdf5", modes, eigenvalues, coeffs)
-
-    analyzer = STPODAnalyzer(
-        file_path="legacy_stpod",
-        embedding_dim=3,
-        n_modes_save=2,
-        **_analyzer_ctor_kwargs(results_dir),
-    )
-
-    with pytest.warns(DeprecationWarning, match="legacy name"):
-        analyzer.load_results("legacy_stpod.hdf5")
-
-    np.testing.assert_array_equal(analyzer.modes, modes)
-    np.testing.assert_array_equal(analyzer.eigenvalues, eigenvalues)
-    np.testing.assert_array_equal(analyzer.time_coefficients, coeffs)
-    assert np.isnan(analyzer.total_energy)
-    assert np.isnan(analyzer.energy_captured_fraction)
-
-
-def test_legacy_capitalised_file_loads_through_dmd(tmp_path: Path) -> None:
-    """A pre-unification DMD file with capitalised keys loads via the reader."""
-    results_dir = tmp_path / "results"
-    results_dir.mkdir()
-    rng = np.random.default_rng(4)
-    modes = rng.standard_normal((12, 2)) + 1j * rng.standard_normal((12, 2))
-    eigenvalues = np.array([0.9 + 0.1j, 0.8 - 0.1j])
-    coeffs = rng.standard_normal((8, 2)) + 1j * rng.standard_normal((8, 2))
-    _legacy_capitalised_file(results_dir / "legacy_dmd.hdf5", modes, eigenvalues, coeffs)
-
-    analyzer = DMDAnalyzer(
-        file_path="legacy_dmd",
-        n_modes_save=2,
-        rank=2,
-        **_analyzer_ctor_kwargs(results_dir),
-    )
-
-    with pytest.warns(DeprecationWarning, match="legacy name"):
-        analyzer.load_results("legacy_dmd.hdf5")
-
-    np.testing.assert_array_equal(analyzer.modes, modes)
-    np.testing.assert_array_equal(analyzer.eigenvalues, eigenvalues)
-    np.testing.assert_array_equal(analyzer.time_coefficients, coeffs)
-    np.testing.assert_array_equal(analyzer.amplitudes, np.abs(eigenvalues))
-    assert analyzer._dmd_method == "ls"
-    assert analyzer._dmd_embedding_dim == 1
-    assert analyzer._dmd_named_variant == "dmd"
 
 
 def test_write_results_refuses_empty_modes(tmp_path: Path) -> None:

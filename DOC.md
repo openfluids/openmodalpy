@@ -532,7 +532,7 @@ psd.run_analysis()
 - Solves one global eigenproblem instead of per-frequency
 - Captures broadband coherent structures
 - Triggered via `method="psd-pod"` in config or by constructing `PSDPODAnalyzer` directly
-- `psd.plot_eigenvalues()`, `plot_cumulative_energy()`, `plot_modes()`, `plot_modes_3d()` save figures to the figures directory; `psd.load_results()` reloads a saved result file (0.4.0-layout files load with a `DeprecationWarning`)
+- `psd.plot_eigenvalues()`, `plot_cumulative_energy()`, `plot_modes()`, `plot_modes_3d()` save figures to the figures directory; `psd.load_results()` reloads a saved result file
 
 ### 4. SPOD — Spectral POD
 
@@ -1160,10 +1160,7 @@ exist report an empty mapping; missing keys never raise.
 | `prov_seed` | str | Analysis seed when present (`data_seed`/`seed`), else `none` |
 
 `save_results(self, filename=None)` is the uniform writer signature on every
-analyzer. Files written with the older capitalised names (`Modes`,
-`Eigenvalues`, `TimeCoefficients`, `Freq`, `St`, `Modes1`, `Modes2`, `Weights`)
-still load through `read_results`, which maps them onto the canonical fields
-and emits a `DeprecationWarning`.
+analyzer.
 
 ---
 

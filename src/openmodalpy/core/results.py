@@ -1,15 +1,9 @@
-"""Unified HDF5 result contract: one name table, one writer, one reader.
-
-Every analyzer writes the same dataset names for the same concepts. Older files
-that used capitalised names still load through :func:`read_results`, which maps
-legacy keys onto the canonical fields and emits a :class:`DeprecationWarning`.
-"""
+"""Unified HDF5 result contract: one name table, one writer, one reader."""
 
 from __future__ import annotations
 
 import glob
 import os
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -49,22 +43,6 @@ SHARED_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Pre-unification on-disk names → canonical names.
-LEGACY_ALIASES: dict[str, str] = {
-    "Modes": "modes",
-    "Eigenvalues": "eigenvalues",
-    "TimeCoefficients": "time_coefficients",
-    "Freq": "freq",
-    "St": "st",
-    "Modes1": "modes1",
-    "Modes2": "modes2",
-    "Weights": "W",
-    "Triads": "triads",
-    # Older SPOD files wrote the grid twice (x/y/z and x_coords/y_coords/z_coords).
-    "x_coords": "x",
-    "y_coords": "y",
-    "z_coords": "z",
-}
 
 _KNOWN_FIELD_NAMES: frozenset[str] = CANONICAL_RESULT_KEYS | SHARED_KEYS
 
@@ -187,34 +165,15 @@ def write_results(
 
 
 def read_results(path: str | Path) -> AnalysisResults:
-    """Load one result file into :class:`AnalysisResults`.
-
-    Accepts both the current lowercase layout and the pre-unification
-    capitalised names. Legacy keys emit a :class:`DeprecationWarning` that
-    names the file and the old key.
-    """
+    """Load one result file into :class:`AnalysisResults`."""
     path_str = str(Path(path).expanduser())
     fields: dict[str, np.ndarray] = {}
     attrs: dict[str, Any] = {}
 
     with h5py.File(path_str, "r") as handle:
         attrs = {key: _decode_attr(value) for key, value in handle.attrs.items()}
-        # Prefer canonical keys when both spellings are present.
         for key in handle.keys():
-            if key in LEGACY_ALIASES:
-                continue
             fields[key] = _read_dataset(handle[key])
-        for key in handle.keys():
-            if key not in LEGACY_ALIASES:
-                continue
-            canon = LEGACY_ALIASES[key]
-            warnings.warn(
-                f"{path_str}: dataset '{key}' is a legacy name; use '{canon}'",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if canon not in fields:
-                fields[canon] = _read_dataset(handle[key])
 
     result = AnalysisResults(path=path_str, attrs=attrs)
     for key, value in fields.items():
