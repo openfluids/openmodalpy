@@ -70,6 +70,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config run params now use `embedding_dim` in place of `delays`.
 - Saved DMD results now store `dmd_embedding_dim` in place of `dmd_delays`.
 - CLI flag `--delays` is removed. Use `--embedding-dim`.
+- `openmodalpy.core.base.spod_function` and
+  `openmodalpy.core.parallel.spod_single_frequency_optimized` are removed. Call
+  `openmodalpy.core.decomposition.spod_single_frequency` instead; the argument
+  order `(qhat, nblocks, dst, w)` and the results are unchanged, so a call that
+  passed `use_parallel=True` (the default) only drops that argument.
+  `spod_function` chose between two routes that reached the same body, and
+  `spod_single_frequency_optimized` forwarded its arguments and did nothing
+  else, so neither route ever gave a different answer. Measured: SPOD
+  eigenvalues, modes, time coefficients and frequencies on the shipped
+  cylinder-wake case are byte-identical before and after.
+- `nfft` and `overlap` are no longer accepted by `PODAnalyzer`,
+  `MPODAnalyzer`, `DMDAnalyzer`, or `STPODAnalyzer`. They never used these
+  Welch block-size settings; passing either now raises `TypeError`. Only
+  `SPODAnalyzer`, `PSDPODAnalyzer`, and `BSMDAnalyzer` form FFT blocks, and
+  keep `nfft`/`overlap` as their own constructor keywords.
+- `use_parallel` is no longer accepted by `PODAnalyzer`,
+  `MPODAnalyzer`, `DMDAnalyzer`, `STPODAnalyzer`, `SPODAnalyzer`, or
+  `PSDPODAnalyzer`; it never changed their result. `BSMDAnalyzer` keeps
+  `use_parallel`, since it really runs its triad loop in a thread pool.
+- `DMDAnalyzer.run_analysis()` and `BSMDAnalyzer.run_analysis()` now produce
+  figures by default; their docstrings previously promised no default plots.
+- `PSDPODAnalyzer.run_analysis()` now produces its standard figure set
+  (eigenvalues, cumulative energy, mode slices or 3-D views).
+- POD's default library figure set is the one the CLI always produced
+  (eigenvalues, volumetric-or-mode panels, time coefficients, cumulative
+  energy). The richer library-only defaults (reconstruction grid, pair-phase,
+  99.5% modes grid) remain available as explicit `plot_*` calls but are no
+  longer part of `run_analysis`.
+- `run_analysis(**kwargs)` forwards keyword arguments to the decomposition
+  call; the old per-plot keyword parameters (`plot_n_modes_spatial`,
+  `plot_modes_options`, `check_orthogonality`, ...) are gone. Pass plotting
+  choices through the plot methods themselves.
+- Every analyzer constructor now takes only `file_path` positionally; every
+  other parameter is keyword-only. The old positional slots meant different
+  things per class — `Analyzer(path, 256, 0.5)` bound to `nfft, overlap` on
+  `SPODAnalyzer` and `BSMDAnalyzer`, but to `results_dir, figures_dir` on
+  `PSDPODAnalyzer`, and a call like `Analyzer(path, 8, 10)` bound to
+  `embedding_dim, n_modes_save` on `STPODAnalyzer` but to `nfft, overlap` on
+  `BSMDAnalyzer`, with no error either way. A positional call past
+  `file_path` now raises `TypeError` immediately instead of silently
+  binding to the wrong parameter. `n_modes_save` stays absent from
+  `SPODAnalyzer` and `BSMDAnalyzer`: their mode count comes from the block
+  count and the triad count, not a chosen number.
+
+  Each row translates the same call. Read the old slot order from your own
+  code: the second positional argument was NOT the same parameter in every
+  class, which is the reason for this change.
+
+  | Class | Old positional call | New keyword call |
+  | --- | --- | --- |
+  | POD | `PODAnalyzer(path, rdir, fdir, loader, wtype, 10)` | `PODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10)` |
+  | mPOD | `MPODAnalyzer(path, rdir, fdir, loader, wtype, 10)` | `MPODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10)` |
+  | DMD | `DMDAnalyzer(path, rdir, fdir, loader, wtype, 10, 4)` | `DMDAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10, rank=4)` |
+  | ST-POD | `STPODAnalyzer(path, 8, 10)` | `STPODAnalyzer(path, embedding_dim=8, n_modes_save=10)` |
+  | SPOD | `SPODAnalyzer(path, 256, 0.5)` | `SPODAnalyzer(path, nfft=256, overlap=0.5)` |
+  | BSMD | `BSMDAnalyzer(path, 256, 0.5)` | `BSMDAnalyzer(path, nfft=256, overlap=0.5)` |
+  | PSD-POD | `PSDPODAnalyzer(path, rdir, fdir, loader, wtype, 256, 0.5)` | `PSDPODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, nfft=256, overlap=0.5)` |
+
+  Note the PSD-POD row. `PSDPODAnalyzer(path, 256, 0.5)` did NOT set `nfft`
+  and `overlap`: slots 2 and 3 were `results_dir` and `figures_dir`, so that
+  call set a directory named "256". If you wrote it, you had a defect. Give
+  `nfft` and `overlap` by keyword, and check which directories you meant.
 
 ### Removed
 
@@ -372,71 +434,6 @@ exports, string dispatch and the docs before it went.
   `novlap=80` against `nfft=8`, an overlap bigger than the block itself.
   It now raises `ValueError: Overlap must be between 0 (inclusive) and 1
   (exclusive).`, the same check and message `SPODAnalyzer` already used.
-
-### Breaking
-
-- `openmodalpy.core.base.spod_function` and
-  `openmodalpy.core.parallel.spod_single_frequency_optimized` are removed. Call
-  `openmodalpy.core.decomposition.spod_single_frequency` instead; the argument
-  order `(qhat, nblocks, dst, w)` and the results are unchanged, so a call that
-  passed `use_parallel=True` (the default) only drops that argument.
-  `spod_function` chose between two routes that reached the same body, and
-  `spod_single_frequency_optimized` forwarded its arguments and did nothing
-  else, so neither route ever gave a different answer. Measured: SPOD
-  eigenvalues, modes, time coefficients and frequencies on the shipped
-  cylinder-wake case are byte-identical before and after.
-- `nfft` and `overlap` are no longer accepted by `PODAnalyzer`,
-  `MPODAnalyzer`, `DMDAnalyzer`, or `STPODAnalyzer`. They never used these
-  Welch block-size settings; passing either now raises `TypeError`. Only
-  `SPODAnalyzer`, `PSDPODAnalyzer`, and `BSMDAnalyzer` form FFT blocks, and
-  keep `nfft`/`overlap` as their own constructor keywords.
-- `use_parallel` is no longer accepted by `PODAnalyzer`,
-  `MPODAnalyzer`, `DMDAnalyzer`, `STPODAnalyzer`, `SPODAnalyzer`, or
-  `PSDPODAnalyzer`; it never changed their result. `BSMDAnalyzer` keeps
-  `use_parallel`, since it really runs its triad loop in a thread pool.
-- `DMDAnalyzer.run_analysis()` and `BSMDAnalyzer.run_analysis()` now produce
-  figures by default; their docstrings previously promised no default plots.
-- `PSDPODAnalyzer.run_analysis()` now produces its standard figure set
-  (eigenvalues, cumulative energy, mode slices or 3-D views).
-- POD's default library figure set is the one the CLI always produced
-  (eigenvalues, volumetric-or-mode panels, time coefficients, cumulative
-  energy). The richer library-only defaults (reconstruction grid, pair-phase,
-  99.5% modes grid) remain available as explicit `plot_*` calls but are no
-  longer part of `run_analysis`.
-- `run_analysis(**kwargs)` forwards keyword arguments to the decomposition
-  call; the old per-plot keyword parameters (`plot_n_modes_spatial`,
-  `plot_modes_options`, `check_orthogonality`, ...) are gone. Pass plotting
-  choices through the plot methods themselves.
-- Every analyzer constructor now takes only `file_path` positionally; every
-  other parameter is keyword-only. The old positional slots meant different
-  things per class — `Analyzer(path, 256, 0.5)` bound to `nfft, overlap` on
-  `SPODAnalyzer` and `BSMDAnalyzer`, but to `results_dir, figures_dir` on
-  `PSDPODAnalyzer`, and a call like `Analyzer(path, 8, 10)` bound to
-  `embedding_dim, n_modes_save` on `STPODAnalyzer` but to `nfft, overlap` on
-  `BSMDAnalyzer`, with no error either way. A positional call past
-  `file_path` now raises `TypeError` immediately instead of silently
-  binding to the wrong parameter. `n_modes_save` stays absent from
-  `SPODAnalyzer` and `BSMDAnalyzer`: their mode count comes from the block
-  count and the triad count, not a chosen number.
-
-  Each row translates the same call. Read the old slot order from your own
-  code: the second positional argument was NOT the same parameter in every
-  class, which is the reason for this change.
-
-  | Class | Old positional call | New keyword call |
-  | --- | --- | --- |
-  | POD | `PODAnalyzer(path, rdir, fdir, loader, wtype, 10)` | `PODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10)` |
-  | mPOD | `MPODAnalyzer(path, rdir, fdir, loader, wtype, 10)` | `MPODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10)` |
-  | DMD | `DMDAnalyzer(path, rdir, fdir, loader, wtype, 10, 4)` | `DMDAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, n_modes_save=10, rank=4)` |
-  | ST-POD | `STPODAnalyzer(path, 8, 10)` | `STPODAnalyzer(path, embedding_dim=8, n_modes_save=10)` |
-  | SPOD | `SPODAnalyzer(path, 256, 0.5)` | `SPODAnalyzer(path, nfft=256, overlap=0.5)` |
-  | BSMD | `BSMDAnalyzer(path, 256, 0.5)` | `BSMDAnalyzer(path, nfft=256, overlap=0.5)` |
-  | PSD-POD | `PSDPODAnalyzer(path, rdir, fdir, loader, wtype, 256, 0.5)` | `PSDPODAnalyzer(path, results_dir=rdir, figures_dir=fdir, data_loader=loader, spatial_weight_type=wtype, nfft=256, overlap=0.5)` |
-
-  Note the PSD-POD row. `PSDPODAnalyzer(path, 256, 0.5)` did NOT set `nfft`
-  and `overlap`: slots 2 and 3 were `results_dir` and `figures_dir`, so that
-  call set a directory named "256". If you wrote it, you had a defect. Give
-  `nfft` and `overlap` by keyword, and check which directories you meant.
 
 ## [0.5.0] - 2026-08-18
 
