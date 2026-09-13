@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the mean energy of the k-th coefficient was not the k-th eigenvalue, and the
   coefficients times the modes did not return the field. On a rank-3 test case
   the measured coefficient energies were 22.1, 5.2 and 13.2 against
-  eigenvalues of 106.1, 26.3 and 11.8 — out of order as well as wrong in size.
+  eigenvalues of 106.1, 26.3 and 11.8. They were out of order and wrong in size.
   Both properties now hold to about 1e-15. Modes and eigenvalues are
   unchanged, so mode shapes and energy rankings from earlier runs stand; a
   saved `time_coefficients` array does not, and any reconstruction or phase
@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choices through the plot methods themselves.
 - Every analyzer constructor now takes only `file_path` positionally; every
   other parameter is keyword-only. The old positional slots meant different
-  things per class — `Analyzer(path, 256, 0.5)` bound to `nfft, overlap` on
+  things per class. `Analyzer(path, 256, 0.5)` bound to `nfft, overlap` on
   `SPODAnalyzer` and `BSMDAnalyzer`, but to `results_dir, figures_dir` on
   `PSDPODAnalyzer`, and a call like `Analyzer(path, 8, 10)` bound to
   `embedding_dim, n_modes_save` on `STPODAnalyzer` but to `nfft, overlap` on
@@ -335,8 +335,8 @@ exports, string dispatch and the docs before it went.
   stated in the file.
 - The test-suite coverage floor moved from a nominal 50% (24 points under the
   measured value, so real regressions stayed invisible) to a 72% ratchet read
-  from `pyproject.toml` by both local runs and CI. The ratchet policy — when
-  the floor moves and who moves it — is written down in CONTRIBUTING.
+  from `pyproject.toml` by both local runs and CI. CONTRIBUTING says when
+  the floor moves and who moves it.
 - The library entry point and the command line now execute ONE analysis
   sequence per method (`run_analysis`), so the two paths can no longer drift
   apart in plotting or save behaviour.
@@ -419,8 +419,8 @@ exports, string dispatch and the docs before it went.
   total measure (sum of all weights) was unchanged. To see whether your
   result moved, compare the old and new weight vectors for your grid:
   `W_new = calculate_polar_weights(x, r, use_parallel=False)` (import it with
-  `from openmodalpy.core.base import calculate_polar_weights`) against
-  `np.reshape(np.outer(Wx, Wy), (-1, 1))` built the old way — any
+  `from openmodalpy.core.weights import calculate_polar_weights`) against
+  `np.reshape(np.outer(Wx, Wy), (-1, 1))` built the old way. Any
   difference beyond round-off means your polar eigenvalues change with
   this release.
 - BSMD triad plots picked their order with a plain `argsort` on the
