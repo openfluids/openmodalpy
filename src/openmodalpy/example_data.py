@@ -211,7 +211,6 @@ def generate_dummy_data_like_jetles(
         Path to the generated dummy file.
     """
 
-    # Ensure directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Coordinates stored as 2-D arrays as in the real dataset

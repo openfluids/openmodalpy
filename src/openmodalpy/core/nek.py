@@ -144,8 +144,8 @@ class NekDataLoader(DataLoader):
             preview_ns (int | None): Load only the first preview_ns snapshots.
             field (str | None): Variable and component to load, e.g. "u_1" for
                                 first velocity component. Defaults to "u_1".
-            load_single (bool): Ignored; accepted for interface compatibility.
-            schema (dict | None): Ignored; accepted for interface compatibility.
+            load_single (bool): Ignored by this loader.
+            schema (dict | None): Ignored by this loader.
             **kwargs: Unexpected keywords raise TypeError.
 
         Returns:

@@ -748,9 +748,8 @@ def run_from_config(config_path: str | Path, *, dry_run: bool = False) -> list[R
         print("Dry run only; no analyses executed.")
         return []
 
-    # TODO: each spec
-    # still loads its case from disk. Cache the loader result per data source
-    # here and hand it through data= once the pipelines accept a cache.
+    # Each spec loads its case from disk again, also when two specs share one
+    # data source.
     outcomes = [analyze_from_spec(spec, dry_run=False) for spec in collection.analyses]
     return outcomes
 

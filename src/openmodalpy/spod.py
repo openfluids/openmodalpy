@@ -161,9 +161,9 @@ class SPODAnalyzer(BaseAnalyzer):
                 ``4*eps`` are clamped to 1. Implementation option, not a step
                 in Towne, Schmidt & Colonius (2018). Defaults to False.
             window_norm (str, optional): Normalization type for the window function ('amplitude' or 'power').
-                                         Defaults to `WINDOW_NORM` from `configs.py`.
+                                         Defaults to `WINDOW_NORM` from `core/config.py`.
             window_type (str, optional): Type of window function to use (e.g., 'hamming', 'hanning', 'sine').
-                                         Defaults to `WINDOW_TYPE` from `configs.py`.
+                                         Defaults to `WINDOW_TYPE` from `core/config.py`.
             data_loader (callable, optional): Custom function to load data from `file_path`.
                                               If None, `BaseAnalyzer` attempts to auto-detect.
                                               Defaults to None.
@@ -364,8 +364,8 @@ class SPODAnalyzer(BaseAnalyzer):
 
         n_keep = self._modes_to_keep()
 
-        # Initialize result arrays using num_freq_bins. Eigenvalues keep every
-        # block; modes and time coefficients keep the leading n_keep of them.
+        # Eigenvalues keep every block. Modes and time coefficients keep the
+        # leading n_keep of them.
         self.eigenvalues = np.zeros((num_freq_bins, self.nblocks))
         self.modes = np.zeros((num_freq_bins, num_space_points, n_keep), dtype=complex)  # Spatial modes
         self.time_coefficients = np.zeros(
@@ -593,11 +593,11 @@ class SPODAnalyzer(BaseAnalyzer):
             if np.any(L_plot[L_plot > 0]):
                 ax.set_ylim(L_plot[L_plot > 0].min() * 0.1, np.sum(L_plot, axis=1).max() * 2.0)
 
-        # Use settings from configs.py for saving
+        # FIG_FORMAT comes from core/config.py.
         plot_filename = os.path.join(
             self.figures_dir,
             f"{self.data_root}_SPOD_eigenvalues_nfft{self.nfft}_noverlap{self.overlap}.{FIG_FORMAT}",
-        )  # Corrected self.novlap
+        )
 
         # Save the figure
         plt.savefig(plot_filename, dpi=FIG_DPI)

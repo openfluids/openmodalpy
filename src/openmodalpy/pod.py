@@ -127,8 +127,8 @@ class PODAnalyzer(BaseAnalyzer):
             data (dict | None): Already-loaded dataset following the data
                 contract (see DOC.md). Given instead of ``file_path``.
         """
-        # Call BaseAnalyzer's __init__. POD forms no FFT blocks, so it takes
-        # no nfft/overlap/use_parallel; BaseAnalyzer sets its own dummy stamp.
+        # POD forms no FFT blocks, so it takes no nfft/overlap/use_parallel.
+        # BaseAnalyzer sets its own dummy stamp.
         super().__init__(
             file_path=file_path,
             results_dir=results_dir,

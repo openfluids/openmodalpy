@@ -182,8 +182,8 @@ class BaseAnalyzer:
         """
         self.file_path = file_path
 
-        # Exactly one input source. ``data`` is the documented in-memory path;
-        # assigning ``.data`` after construction stays as the legacy escape hatch.
+        # Exactly one input source. ``data`` is the documented in-memory path.
+        # A dict assigned to ``.data`` after construction also skips the loader.
         if data is not None:
             if file_path is not None:
                 raise ValueError("Pass file_path or data, not both: an analyzer takes exactly one input source.")
@@ -269,9 +269,8 @@ class BaseAnalyzer:
     def load_and_preprocess(self) -> None:
         """Load data and calculate weights."""
         # Load data from file only if not already provided. The constructor
-        # guarantees a non-empty dict whenever ``data=`` was given, so an empty
-        # dict here can only come from a legacy side-channel assignment, which
-        # keeps its old reload semantics.
+        # guarantees a non-empty dict whenever ``data=`` was given. An empty
+        # dict here means nothing was assigned to ``.data``, so the loader runs.
         if not self.data:
             if self.file_path is None:
                 raise ValueError("no file_path and no data were given")

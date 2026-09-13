@@ -266,7 +266,7 @@ def test_load_once_loop_over_methods(taylor_green_npz: str, tmp_path: Path) -> N
 
 
 def test_side_channel_data_assignment_still_works(taylor_green_npz: str, tmp_path: Path) -> None:
-    """The legacy ``analyzer.data = d`` escape hatch keeps skipping the loader."""
+    """Check that a dict assigned to ``analyzer.data`` skips the loader."""
 
     def _must_not_load(_path: str) -> dict[str, Any]:
         raise AssertionError("side-channel assignment must skip the loader")

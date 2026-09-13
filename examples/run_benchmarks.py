@@ -17,7 +17,7 @@ DEFAULT_CONFIG = Path(__file__).with_suffix(".jsonc")
 
 
 def run_single_case_cli(default_config: Path, description: str | None = None) -> None:
-    """Backward-compatible helper used by the per-case example wrappers."""
+    """Run one example case from its JSONC config. Each per-case wrapper calls it."""
     run_config_entrypoint(default_config=default_config, description=description)
 
 

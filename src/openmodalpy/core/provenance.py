@@ -135,11 +135,7 @@ def _git_sha() -> str:
         _GIT_SHA = "unavailable"
         return _GIT_SHA
 
-    try:
-        d = start
-    except Exception:
-        _GIT_SHA = "unavailable"
-        return _GIT_SHA
+    d = start
 
     for _ in range(16):
         git_dir = d / ".git"
