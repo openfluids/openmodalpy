@@ -184,6 +184,18 @@ class BSMDAnalyzer(BaseAnalyzer):
                       ``np.argmax(np.abs(eigvals))`` selects one. The number of
                       results therefore follows the triad list you pass as
                       ``static_triads``, and does not follow the block count.
+
+    Examples:
+        >>> from openmodalpy import BSMDAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 8, "Ny": 8, "Nt": 64})
+        >>> bsmd = BSMDAnalyzer(data=data, spatial_weight_type="uniform", nfft=16, overlap=0.5)
+        >>> bsmd.load_and_preprocess()
+        >>> bsmd.perform_bsmd()
+        >>> bsmd.triads.shape
+        (61, 3)
+        >>> bsmd.modes1.shape
+        (61, 64)
     """
 
     _METHOD_NAME = "bsmd"

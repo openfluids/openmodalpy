@@ -71,6 +71,14 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: uv run --group test --python "$PYTHON_VERSION" pytest -q
 
+      # The examples in the docstrings are executable. They run here so a
+      # changed signature or shape shows up as a failed example, not as
+      # documentation that quietly stopped being true.
+      - name: Run the docstring examples
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv run --group test --python "$PYTHON_VERSION" pytest -q --doctest-modules src/openmodalpy
+
   # Single coverage job (not matrix): keep CI minutes down. The floor lives in
   # pyproject.toml ([tool.coverage.report] fail_under) so local and CI numbers
   # cannot drift. Ubuntu + Python 3.14 only; see the ratchet note there.

@@ -59,6 +59,18 @@ class PSDPODAnalyzer(BaseAnalyzer):
         time_coefficients: projections of the Fourier ensemble, shape
             (n_fourier_realizations, n_modes_save)
         freq, St: frequency and Strouhal axes from the Welch blocks
+
+    Examples:
+        >>> from openmodalpy import PSDPODAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> psd = PSDPODAnalyzer(data=data, spatial_weight_type="uniform", nfft=16, overlap=0.5, n_modes_save=3)
+        >>> psd.load_and_preprocess()
+        >>> psd.perform_psd_pod()
+        >>> psd.modes.shape
+        (128, 3)
+        >>> psd.eigenvalues.shape
+        (3,)
     """
 
     _METHOD_NAME = "psd_pod"

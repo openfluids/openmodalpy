@@ -68,9 +68,17 @@ class STPODAnalyzer(BaseAnalyzer):
             Shape: (m, n_modes_save) where m = Ns - d + 1.
         temporal_mean (np.ndarray): Mean snapshot. Shape: (Nspace,).
 
-    Example:
-        >>> analyzer = STPODAnalyzer("data.npz", embedding_dim=20, n_modes_save=10)
-        >>> analyzer.run_analysis()
+    Examples:
+        >>> from openmodalpy import STPODAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> stpod = STPODAnalyzer(data=data, spatial_weight_type="uniform", embedding_dim=4, n_modes_save=3)
+        >>> stpod.load_and_preprocess()
+        >>> stpod.perform_stpod()
+        >>> stpod.modes.shape
+        (512, 3)
+        >>> stpod.eigenvalues.shape
+        (3,)
     """
 
     _METHOD_NAME = "stpod"

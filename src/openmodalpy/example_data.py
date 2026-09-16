@@ -159,7 +159,16 @@ GENERATORS: dict[str, Callable[..., dict[str, Any]]] = {
 
 
 def generate_example_dataset(name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Create one of the built-in synthetic example datasets."""
+    """Create one of the built-in synthetic example datasets.
+
+    Examples:
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("cylinder_wake", {"Nx": 32, "Ny": 16, "Nt": 20})
+        >>> sorted(data)
+        ['Ns', 'Nx', 'Ny', 'Nz', 'dt', 'metadata', 'q', 'seed', 'x', 'y', 'z']
+        >>> data["q"].shape
+        (20, 512)
+    """
     if name not in GENERATORS:
         raise ValueError(f"Unknown built-in generator '{name}'. Available: {sorted(GENERATORS)}")
     return GENERATORS[name](**(params or {}))

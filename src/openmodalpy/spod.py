@@ -102,6 +102,18 @@ class SPODAnalyzer(BaseAnalyzer):
                       SPOD makes one mode per Welch block at each frequency, so
                       the block count is the ceiling on ``n_modes_save``. Leave
                       ``n_modes_save`` unset to keep every block.
+
+    Examples:
+        >>> from openmodalpy import SPODAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> spod = SPODAnalyzer(data=data, spatial_weight_type="uniform", nfft=16, overlap=0.5, n_modes_save=2)
+        >>> spod.load_and_preprocess()
+        >>> spod.perform_spod()
+        >>> spod.modes.shape
+        (9, 128, 2)
+        >>> spod.freq.shape
+        (9,)
     """
 
     ############################################################

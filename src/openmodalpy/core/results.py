@@ -165,7 +165,22 @@ def write_results(
 
 
 def read_results(path: str | Path) -> AnalysisResults:
-    """Load one result file into :class:`AnalysisResults`."""
+    """Load one result file into :class:`AnalysisResults`.
+
+    Examples:
+        >>> from openmodalpy import PODAnalyzer, read_results
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> pod = PODAnalyzer(data=data, spatial_weight_type="uniform", n_modes_save=3)
+        >>> pod.load_and_preprocess()
+        >>> pod.perform_pod()
+        >>> pod.save_results("pod.hdf5")
+        >>> res = read_results("results/pod.hdf5")
+        >>> res.modes.shape
+        (128, 3)
+        >>> res.attrs["analysis_type"]
+        'pod'
+    """
     path_str = str(Path(path).expanduser())
     fields: dict[str, np.ndarray] = {}
     attrs: dict[str, Any] = {}

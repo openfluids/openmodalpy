@@ -72,7 +72,20 @@ def _pooled_mode_order(eigenvalues: np.ndarray, band_ids: np.ndarray) -> np.ndar
 
 
 class MPODAnalyzer(PODAnalyzer):
-    """Multiscale POD using non-overlapping temporal frequency bands."""
+    """Multiscale POD using non-overlapping temporal frequency bands.
+
+    Examples:
+        >>> from openmodalpy import MPODAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> mpod = MPODAnalyzer(data=data, spatial_weight_type="uniform", n_modes_save=3)
+        >>> mpod.load_and_preprocess()
+        >>> mpod.perform_mpod()
+        >>> mpod.modes.shape
+        (128, 3)
+        >>> len(mpod.mode_band_indices)
+        3
+    """
 
     _METHOD_NAME = "mpod"
 

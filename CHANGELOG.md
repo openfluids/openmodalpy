@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every analyzer class, `read_results` and `generate_example_dataset` now carry
+  a runnable example in the docstring. The examples build their input with
+  `generate_example_dataset`, so `help(PODAnalyzer)` shows a complete recipe
+  that needs no data file. CI runs them with
+  `pytest --doctest-modules src/openmodalpy`, so an example that stops matching
+  the code fails the build.
+
 ## [0.6.0] - 2026-09-13
 
 ### Breaking

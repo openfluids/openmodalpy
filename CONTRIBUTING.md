@@ -22,12 +22,18 @@ The same checks CI runs:
 
 ```bash
 uv run --group test pytest -q
+uv run --group test pytest -q --doctest-modules src/openmodalpy
 uv run --group lint ruff check .
 uv run --group lint ruff format --check .
 uv lock --check
 # Last step, after the local checks pass: refuse green while CI is red.
 scripts/check_ci_status.sh
 ```
+
+The examples in the docstrings run as doctests. Write them so they run: use
+`generate_example_dataset` for the input, keep the arrays small, and print a
+shape or a boolean rather than a float. Each example runs in its own temporary
+directory, so a saved file does not reach the repository.
 
 CI also enforces a coverage floor. The number lives in `pyproject.toml`
 (`[tool.coverage.report] fail_under`), so the same gate runs locally:

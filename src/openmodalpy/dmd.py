@@ -221,6 +221,18 @@ class DMDAnalyzer(BaseAnalyzer):
     The current implementation is intentionally narrow: raw snapshot pairs are
     regressed in Euclidean norm and the resulting modes are sorted by
     ``|lambda|``.
+
+    Examples:
+        >>> from openmodalpy import DMDAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> dmd = DMDAnalyzer(data=data, spatial_weight_type="uniform", rank=4, n_modes_save=3)
+        >>> dmd.load_and_preprocess()
+        >>> dmd.perform_dmd()
+        >>> dmd.modes.shape
+        (128, 3)
+        >>> dmd.eigenvalues.shape
+        (3,)
     """
 
     _METHOD_NAME = "dmd"

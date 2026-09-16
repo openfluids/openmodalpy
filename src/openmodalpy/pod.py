@@ -87,6 +87,18 @@ class PODAnalyzer(BaseAnalyzer):
         BaseAnalyzer: Provides common functionalities for data loading and preprocessing.
                       POD forms no FFT blocks, so it takes no `nfft`/`overlap`;
                       passing either raises `TypeError`.
+
+    Examples:
+        >>> from openmodalpy import PODAnalyzer
+        >>> from openmodalpy.example_data import generate_example_dataset
+        >>> data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+        >>> pod = PODAnalyzer(data=data, spatial_weight_type="uniform", n_modes_save=3)
+        >>> pod.load_and_preprocess()
+        >>> pod.perform_pod()
+        >>> pod.modes.shape
+        (128, 3)
+        >>> bool(pod.eigenvalues[0] >= pod.eigenvalues[1])
+        True
     """
 
     _METHOD_NAME = "pod"
