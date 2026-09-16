@@ -59,6 +59,27 @@ def packaged_examples_root() -> Traversable:
     return importlib.resources.files("openmodalpy.examples")
 
 
+def documentation_path() -> Path | Traversable:
+    """Return the path of the shipped technical reference, DOC.md.
+
+    The wheel carries DOC.md next to the package, so an installed copy can read
+    it with no network. A source checkout has it at the repository root
+    instead, the same split the example configs already use.
+    """
+    packaged = importlib.resources.files("openmodalpy") / "DOC.md"
+    if packaged.is_file():
+        return packaged
+    checkout = repo_root() / "DOC.md"
+    if checkout.is_file():
+        return checkout
+    raise FileNotFoundError("DOC.md is neither in the installed package nor in the source checkout.")
+
+
+def documentation_text() -> str:
+    """Return the text of the shipped technical reference."""
+    return documentation_path().read_text(encoding="utf-8")
+
+
 def normalize_method_name(name: str) -> str:
     """Map CLI-style names to canonical internal method IDs."""
     normalized = name.strip().lower().replace("-", "_")

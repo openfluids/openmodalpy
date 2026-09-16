@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `openmodalpy docs` prints the technical reference, and `openmodalpy docs
+  --path` prints where it is. DOC.md now ships inside the wheel, so an
+  installed copy answers both with no checkout and no network.
+- `--json` on `methods list`, `methods show`, `examples list` and
+  `results inspect`. A script or an assistant reads the fields instead of
+  parsing text meant for a terminal.
+- `llms.txt` at the repository root: a one-page map of the package for an AI
+  assistant, with the data contract, a runnable example, the analyzer classes,
+  the CLI and the four mistakes that give wrong numbers without raising.
+
 - Every analyzer class, `read_results` and `generate_example_dataset` now carry
   a runnable example in the docstring. The examples build their input with
   `generate_example_dataset`, so `help(PODAnalyzer)` shows a complete recipe

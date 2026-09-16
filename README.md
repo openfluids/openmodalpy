@@ -345,6 +345,30 @@ export FFTKIT_BACKEND=mkl      # or scipy, numpy, cupy, accelerate
   results noted as loudly as breaking changes to the API.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): setup and the checks CI runs.
 
+### Reading it from a program
+
+The reference travels with the package, so an installed copy needs no network:
+
+```bash
+openmodalpy docs           # print DOC.md
+openmodalpy docs --path    # print where it is
+```
+
+[`llms.txt`](llms.txt) is a one-page map of the same material for an AI
+assistant: the data contract, a runnable example, the analyzer classes and the
+mistakes that give wrong numbers without raising. Four commands also print
+JSON, so a script does not parse text meant for a terminal:
+
+```bash
+openmodalpy methods list --json
+openmodalpy methods show pod --json
+openmodalpy examples list --json
+openmodalpy results inspect results/pod.hdf5 --json
+```
+
+Every example in a docstring runs. `help(PODAnalyzer)` shows a complete recipe,
+and CI runs those examples, so one that stops matching the code fails the build.
+
 ## Contributing
 
 Contributions are welcome, and questions and bug reports count. See

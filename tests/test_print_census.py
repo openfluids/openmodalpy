@@ -13,7 +13,8 @@ from pathlib import Path
 # inclusive of the one removed SPOD qhat-guard print (spod.py was 31).
 PRINT_UPPER_BOUNDS: dict[str, int] = {
     "bsmd.py": 0,
-    "cli.py": 12,
+    # Every command writes through cli._emit, which holds the only print.
+    "cli.py": 1,
     "commands.py": 13,
     "core/base.py": 0,
     "core/io.py": 0,

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import sys
@@ -14,6 +15,8 @@ from openmodalpy.commands import (
     METHOD_REGISTRY,
     analyze_from_config,
     discover_examples,
+    documentation_path,
+    documentation_text,
     get_example_info,
     get_method_spec,
     inspect_results,
@@ -132,7 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     examples = subparsers.add_parser("examples", help="Inspect or execute bundled example configs.")
     examples_subparsers = examples.add_subparsers(dest="examples_command", required=True)
-    examples_subparsers.add_parser("list", help="List discovered example configs.")
+    examples_list = examples_subparsers.add_parser("list", help="List discovered example configs.")
+    examples_list.add_argument("--json", action="store_true", help="Print the list as JSON.")
     examples_show = examples_subparsers.add_parser("show", help="Show one example config.")
     examples_show.add_argument("name", type=str, help="Example name, e.g. cavity.")
     examples_run = examples_subparsers.add_parser("run", help="Run one discovered example config.")
@@ -141,14 +145,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     methods = subparsers.add_parser("methods", help="Inspect supported method families.")
     methods_subparsers = methods.add_subparsers(dest="methods_command", required=True)
-    methods_subparsers.add_parser("list", help="List supported methods.")
+    methods_list = methods_subparsers.add_parser("list", help="List supported methods.")
+    methods_list.add_argument("--json", action="store_true", help="Print the list as JSON.")
     methods_show = methods_subparsers.add_parser("show", help="Show one method.")
     methods_show.add_argument("name", type=str, help="Method name or alias.")
+    methods_show.add_argument("--json", action="store_true", help="Print the method as JSON.")
 
     results = subparsers.add_parser("results", help="Inspect saved result files or directories.")
     results_subparsers = results.add_subparsers(dest="results_command", required=True)
     results_inspect = results_subparsers.add_parser("inspect", help="Inspect one result path.")
     results_inspect.add_argument("path", type=Path, help="Path to a result file or directory.")
+    results_inspect.add_argument("--json", action="store_true", help="Print the summary as JSON.")
+
+    docs = subparsers.add_parser("docs", help="Print the shipped technical reference (DOC.md).")
+    docs.add_argument("--path", action="store_true", help="Print the path of the file instead of its text.")
 
     return parser
 
@@ -184,30 +194,57 @@ def _collect_overrides(args: argparse.Namespace) -> dict[str, Any]:
     return overrides
 
 
-def _print_methods_list() -> None:
-    for spec in list_methods():
-        print(f"{spec.cli_name:8s}  {spec.display_name:8s}  {spec.description}")
+def _emit(text: str) -> None:
+    """Write one line of command output to stdout.
+
+    Every command writes through this function, so the CLI has one place that
+    decides where its output goes. The library itself writes to a logger and
+    never to stdout.
+    """
+    print(text)
 
 
-def _print_method_show(name: str) -> None:
+def _print_json(payload: object) -> None:
+    """Print one payload as JSON. ``default=str`` renders a Path as its text."""
+    _emit(json.dumps(payload, indent=2, default=str))
+
+
+def _print_methods_list(as_json: bool) -> None:
+    specs = list_methods()
+    if as_json:
+        _print_json([dataclasses.asdict(spec) for spec in specs])
+        return
+    for spec in specs:
+        _emit(f"{spec.cli_name:8s}  {spec.display_name:8s}  {spec.description}")
+
+
+def _print_method_show(name: str, as_json: bool) -> None:
     spec = get_method_spec(name)
-    print(spec.display_name)
-    print("-" * len(spec.display_name))
-    print(spec.description)
+    if as_json:
+        _print_json(dataclasses.asdict(spec))
+        return
+    _emit(spec.display_name)
+    _emit("-" * len(spec.display_name))
+    _emit(spec.description)
     if spec.parameter_help:
-        print("Parameters:")
+        _emit("Parameters:")
         for key, text in spec.parameter_help.items():
-            print(f"  {key}: {text}")
-    print(f"Scope: {spec.implementation_scope}")
+            _emit(f"  {key}: {text}")
+    _emit(f"Scope: {spec.implementation_scope}")
 
 
-def _print_examples_list() -> None:
+def _print_examples_list(as_json: bool) -> None:
     examples = discover_examples()
+    if as_json:
+        # The payload of each example is its whole config; the list stays a
+        # summary, so the payload is left to `examples show`.
+        _print_json([{k: v for k, v in dataclasses.asdict(info).items() if k != "payload"} for info in examples])
+        return
     if not examples:
-        print("No example configs were found.")
+        _emit("No example configs were found.")
         return
     for info in examples:
-        print(f"{info.name:24s}  {info.kind:5s}  {info.description}")
+        _emit(f"{info.name:24s}  {info.kind:5s}  {info.description}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,13 +275,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "examples":
         if args.examples_command == "list":
-            _print_examples_list()
+            _print_examples_list(args.json)
             return 0
         if args.examples_command == "show":
             info = get_example_info(args.name)
-            print(f"# {info.title}")
-            print(f"path: {info.config_path}")
-            print(json.dumps(load_example_payload(args.name), indent=2))
+            _emit(f"# {info.title}")
+            _emit(f"path: {info.config_path}")
+            _emit(json.dumps(load_example_payload(args.name), indent=2))
             return 0
         if args.examples_command == "run":
             info = get_example_info(args.name)
@@ -253,14 +290,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "methods":
         if args.methods_command == "list":
-            _print_methods_list()
+            _print_methods_list(args.json)
             return 0
         if args.methods_command == "show":
-            _print_method_show(args.name)
+            _print_method_show(args.name, args.json)
             return 0
 
     if args.command == "results" and args.results_command == "inspect":
-        print_results_summary(inspect_results(args.path))
+        summary = inspect_results(args.path)
+        if args.json:
+            _print_json(summary)
+        else:
+            print_results_summary(summary)
+        return 0
+
+    if args.command == "docs":
+        _emit(str(documentation_path()) if args.path else documentation_text())
         return 0
 
     # Defensive fallback: required subparsers make this unreachable from argv.
