@@ -38,7 +38,7 @@ from openmodalpy.specs import (
 from openmodalpy.spod import SPODAnalyzer
 from openmodalpy.stpod import STPODAnalyzer
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "PODAnalyzer",
     "MPODAnalyzer",

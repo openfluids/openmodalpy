@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-17
+
 ### Added
 
 - `openmodalpy docs` prints the technical reference, and `openmodalpy docs
@@ -18,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `llms.txt` at the repository root: a one-page map of the package for an AI
   assistant, with the data contract, a runnable example, the analyzer classes,
   the CLI and the four mistakes that give wrong numbers without raising.
-
 - Every analyzer class, `read_results` and `generate_example_dataset` now carry
   a runnable example in the docstring. The examples build their input with
   `generate_example_dataset`, so `help(PODAnalyzer)` shows a complete recipe
@@ -1167,7 +1168,8 @@ First public release, distributed on PyPI as `openmodalpy`.
 - The bundled `openmodalpy.fft` subpackage. Import FFT helpers from `fftkit` instead:
   `get_fft_func`, `periodogram_rfft`, `find_peaks` and related functions.
 
-[Unreleased]: https://github.com/openfluids/openmodalpy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/openfluids/openmodalpy/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/openfluids/openmodalpy/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/openfluids/openmodalpy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/openfluids/openmodalpy/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/openfluids/openmodalpy/compare/v0.3.0...v0.4.0
