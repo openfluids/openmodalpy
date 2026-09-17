@@ -13,6 +13,15 @@ all of them, one config file runs any subset, and every method writes the same
 kind of result file. It runs on NumPy and SciPy. There is no compiled solver
 toolchain to install.
 
+![POD and SPOD of the shipped cylinder wake](https://raw.githubusercontent.com/openfluids/openmodalpy/main/assets/readme_cylinder_wake_pod_spod.png)
+
+One dataset, two methods, one check. (a) The leading POD mode of the bundled
+cylinder-wake generator. (b) Two modes hold 92 % of the energy, because a
+travelling wave needs a sine and a cosine. (c) The SPOD spectrum peaks at
+Strouhal 0.1667, and the dashed line is the 0.1671 the generator puts in by
+construction. `scripts/make_readme_figure.py` draws it from a run, so it cannot
+drift away from what the package does.
+
 ## Who this is for
 
 **You have snapshots and need a decomposition you can defend.** From a solver,
@@ -209,21 +218,23 @@ openmodalpy results inspect output.hdf5            # inspect a result file
 
 ## Bundled examples
 
-Nine configs ship with the package, each running every method on one case. Three build their data from a closed-form field and run with nothing
-to download. The others read a dataset from the path in their config, relative
-to the config file.
+Nine configs live in the repository, each running every method on one case.
+Four ship inside the wheel, marked below: three build their data from a
+closed-form field, and `run_benchmarks` runs those three in one go. The other
+five stay in the repository because they read a dataset from the path in their
+config, relative to the config file, and those datasets are not distributed.
 
 | Example | Data | Case |
 |---|---|---|
-| `double_gyre` | generated | time-periodic double gyre, forcing frequency known |
-| `cylinder_wake` | generated | von Karman cylinder wake, shedding Strouhal number known |
-| `taylor_green` | generated | decaying Taylor-Green vortex, decay rate and DMD eigenvalue known |
+| `double_gyre` (in the wheel) | generated | time-periodic double gyre, forcing frequency known |
+| `cylinder_wake` (in the wheel) | generated | von Karman cylinder wake, shedding Strouhal number known |
+| `taylor_green` (in the wheel) | generated | decaying Taylor-Green vortex, decay rate and DMD eigenvalue known |
 | `cavity` | `.mat` file | experimental PIV of an open cavity |
 | `jet` | `.mat` file | LES of a turbulent jet |
 | `jet_small` | `.mat` file | reduced jet LES, for quick runs |
 | `cylinder` | dNami NPZ directory | cylinder wake with spatial stride-2 loading |
 | `cylinder_wake_compressible` | dNamiX NPZ | compressible cylinder wake |
-| `run_benchmarks` | suite | runs the three generated cases in one go |
+| `run_benchmarks` (in the wheel) | suite | runs the three generated cases in one go |
 
 ```bash
 openmodalpy examples list

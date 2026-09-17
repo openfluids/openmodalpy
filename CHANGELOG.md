@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The README said nine example configs ship with the package. Four do. The
+  other five read datasets that are not distributed, so they stay in the
+  repository. The table now marks the four, and the README carries a figure of
+  a real run.
+
 ## [0.7.0] - 2026-09-17
 
 ### Added
