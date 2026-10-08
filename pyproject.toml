@@ -102,7 +102,7 @@ dev = [
     { include-group = "lint" },
 ]
 mutation = [
-    "mutmut==3.7.0",
+    "mutmut==3.8.0",
 ]
 
 [tool.hatch.version]
