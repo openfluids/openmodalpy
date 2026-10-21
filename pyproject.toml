@@ -212,3 +212,6 @@ only_mutate = [
 # tests/test_data_contract_derive_then_validate.py reads DOC.md.
 also_copy = ["scripts", "examples", "DOC.md"]
 pytest_add_cli_args_test_selection = ["tests/"]
+
+[tool.uv]
+exclude-newer = "7 days"
