@@ -215,3 +215,5 @@ pytest_add_cli_args_test_selection = ["tests/"]
 
 [tool.uv]
 exclude-newer = "7 days"
+# Security fixes younger than 7 days (Pillow 13.0.0, certifi 2026.10.19). Remove after 2026-10-26.
+exclude-newer-package = { pillow = false, certifi = false }
