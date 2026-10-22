@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Lint
+        run: uv run --group lint ruff check .
+
+      - name: Format
+        run: uv run --group lint ruff format --check .
+
+      - name: Lockfile
+        run: uv lock --check
+
+  # ruff, ruff format and `uv lock --check` are platform-independent by
+  # construction and stay in the Linux-only lint job above. mypy resolves
+  # sys.platform branches, os.PathLike and pathlib differently per OS, so
+  # it runs on all three here.
+  typecheck:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Type check
+        run: uv run --group lint --python 3.14 mypy src/openmodalpy
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          # macOS exercises the Accelerate FFT path fftkit selects on Darwin.
+          - os: macos-latest
+            python-version: "3.14"
+          # The package advertises "Operating System :: OS Independent", which was
+          # never tested. Windows is where that claim is most likely to break:
+          # path separators and HDF5/.mat file locking behave differently there.
+          - os: windows-latest
+            python-version: "3.14"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Run tests
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv run --group test --python "$PYTHON_VERSION" pytest -q
+
+      # The examples in the docstrings are executable. They run here so a
+      # changed signature or shape shows up as a failed example, not as
+      # documentation that quietly stopped being true.
+      - name: Run the docstring examples
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv run --group test --python "$PYTHON_VERSION" pytest -q --doctest-modules src/openmodalpy
+
+  # Single coverage job (not matrix): keep CI minutes down. The floor lives in
+  # pyproject.toml ([tool.coverage.report] fail_under) so local and CI numbers
+  # cannot drift. Ubuntu + Python 3.14 only; see the ratchet note there.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Coverage floor
+        run: uv run --group test --python 3.14 pytest -q --cov=openmodalpy
+
+  # Fastest analytic shipped suite: taylor_green (64×64×100). ~30s wall locally.
+  # Writes under results/ and figures/ (hdf5/figures gitignored); no commit risk on CI.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Analytic example end-to-end
+        env:
+          MPLBACKEND: Agg
+        run: |
+          MPLBACKEND=Agg uv run openmodalpy examples run taylor_green
+          test -f results/taylor_green/pod/taylor_green_100snapshots_pod.hdf5
+
+  # The package must import from a plain wheel install, with no dev group and no
+  # repository checkout on sys.path — this catches missing runtime dependencies
+  # that the editable dev environment would otherwise hide.
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Wheel must not ship the ruff indent wrapper
+        run: |
+          python3 -c "
+          import glob, sys, zipfile
+          whl = sorted(glob.glob('dist/*.whl'))[0]
+          bad = [n for n in zipfile.ZipFile(whl).namelist() if 'indent' in n]
+          if bad:
+              print('wheel contains unexpected indent path(s):', bad)
+              sys.exit(1)
+          print('ok: no indent file in', whl)
+          "
+
+      - name: Install wheel into a clean environment and import
+        run: |
+          uv venv /tmp/wheelcheck
+          uv pip install --python /tmp/wheelcheck dist/*.whl
+          cd /tmp
+          /tmp/wheelcheck/bin/python -c "import openmodalpy, fftkit; from openmodalpy.core.config import FFT_BACKEND; print(openmodalpy.__version__, fftkit.__version__, FFT_BACKEND)"
+
+      # The technical reference ships inside the package so an installed copy
+      # can print it with no checkout and no network.
+      - name: Installed wheel answers openmodalpy docs
+        run: |
+          cd /tmp
+          doc_path=$(/tmp/wheelcheck/bin/openmodalpy docs --path)
+          case "$doc_path" in
+            */site-packages/openmodalpy/DOC.md) echo "ok: $doc_path" ;;
+            *) echo "docs resolved outside the installed package: $doc_path"; exit 1 ;;
+          esac

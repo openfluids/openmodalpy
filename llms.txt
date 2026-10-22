@@ -1,0 +1,85 @@
+# openmodalpy
+
+> Modal decomposition of spatiotemporal data in Python: POD, mPOD, PSD-POD, SPOD, ST-POD, DMD, HODMD and BSMD, all on one data contract. Write one loader for your own data, then run every method on it.
+
+Install: `pip install openmodalpy` (the project itself uses `uv`). Python 3.11 or later. The package ships a `py.typed` marker, so type checkers and assistants get exact types for every public function.
+
+## The data contract
+
+Every analyzer takes the same dictionary. `q`, `x`, `y` and `dt` are required; a missing key raises `ValueError` at construction and names the key.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `q` | ndarray `(Ns, Nspace)` | snapshots: time first, flattened space second, C-order (`index = iy*Nx + ix`) |
+| `x`, `y` | ndarray | coordinates, 1-D or 2-D mesh |
+| `z` | ndarray or None | third coordinate for 3-D data |
+| `dt` | float | time step between snapshots |
+| `Nx`, `Ny`, `Nz`, `Ns` | int | optional; derived from the array shapes when absent |
+| `t` | ndarray | optional time vector; must sample uniformly |
+| `metadata` | dict | optional |
+
+## A complete run
+
+```python
+from openmodalpy import PODAnalyzer
+from openmodalpy.example_data import generate_example_dataset
+
+data = generate_example_dataset("double_gyre", {"Nx": 16, "Ny": 8, "Nt": 64})
+pod = PODAnalyzer(data=data, spatial_weight_type="uniform", n_modes_save=3)
+pod.load_and_preprocess()
+pod.perform_pod()
+pod.modes           # (Nspace, n_modes_save)
+pod.eigenvalues     # (n_modes_save,), decreasing
+```
+
+Every analyzer follows the same four steps: construct, `load_and_preprocess()`, `perform_<method>()`, then `save_results()` or a `plot_*` call. Pass `file_path=` instead of `data=` to read from disk. Exactly one of the two.
+
+## The methods
+
+| Class | Call | Solves |
+|---|---|---|
+| `PODAnalyzer` | `perform_pod()` | variance-optimal modes of the snapshot ensemble |
+| `MPODAnalyzer` | `perform_mpod()` | POD inside non-overlapping frequency bands |
+| `PSDPODAnalyzer` | `perform_psd_pod()` | POD of the pooled Fourier realizations |
+| `SPODAnalyzer` | `perform_spod()` | POD at each frequency of the Welch blocks |
+| `STPODAnalyzer` | `perform_stpod()` | POD in a delay-embedded space-time lift |
+| `DMDAnalyzer` | `perform_dmd()` | least-squares or total-least-squares evolution fit; `embedding_dim > 1` gives HODMD |
+| `BSMDAnalyzer` | `perform_bsmd()` | bispectral modes of triadic interactions |
+
+`rank` is required for DMD. `nfft` and `overlap` exist only on the three methods that form FFT blocks: SPOD, PSD-POD and BSMD.
+
+## Reading a result file
+
+```python
+from openmodalpy import read_results
+res = read_results("results/pod.hdf5")
+res.modes, res.eigenvalues, res.attrs
+```
+
+Every result file also carries a `prov_*` block: package versions, FFT backend, BLAS library, thread count, seed and git commit.
+
+## Command line
+
+```
+openmodalpy methods list          # every method with a one-line description
+openmodalpy methods show pod      # the parameters of one method
+openmodalpy examples list         # the configs bundled in the wheel
+openmodalpy analyze --method pod --config case.jsonc
+openmodalpy results inspect results/pod.hdf5
+```
+
+Add `--json` to `methods list`, `methods show`, `examples list` and `results inspect` for machine-readable output.
+
+## Documentation
+
+- [Technical reference](https://raw.githubusercontent.com/openfluids/openmodalpy/main/DOC.md): the data contract, every method with its shapes and limitations, the config format, the CLI, the output format and the extension path. Also installed with the package: `openmodalpy docs`.
+- [README](https://raw.githubusercontent.com/openfluids/openmodalpy/main/README.md): what the package is for and how to start.
+- [CHANGELOG](https://raw.githubusercontent.com/openfluids/openmodalpy/main/CHANGELOG.md): breaking changes per release. The package is before 1.0 and the API still moves.
+- [CONTRIBUTING](https://raw.githubusercontent.com/openfluids/openmodalpy/main/CONTRIBUTING.md): the checks a change must pass.
+
+## Things that are easy to get wrong
+
+- `q` is time-first, `(Ns, Nspace)`. A transposed array runs and gives wrong modes.
+- `spatial_weight_type="uniform"` is a vector of ones, so reported energy is a sum over mesh points, not an integral over the domain. On a stretched grid use `"cell_volume"`.
+- Every constructor parameter after `file_path` is keyword-only.
+- SPOD makes one mode per Welch block at each frequency, so the block count caps `n_modes_save`.

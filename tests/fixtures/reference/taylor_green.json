@@ -1,0 +1,21 @@
+{
+  "generator": "taylor_green",
+  "pod_energy_fractions": [
+    0.9999999999999998
+  ],
+  "dmd_abs_lambda": [
+    0.9701515036966298
+  ],
+  "dmd_phase": [
+    0.0
+  ],
+  "energy_captured_fraction": 0.9999999999999998,
+  "generator_params": {
+    "Nx": 64,
+    "Ny": 64,
+    "Nt": 100
+  },
+  "n_modes": 10,
+  "rtol": 1e-06,
+  "atol": 1e-12
+}

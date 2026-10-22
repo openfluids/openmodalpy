@@ -1,0 +1,32 @@
+{
+  "kind": "analysis-suite",
+  "name": "Compressible Cylinder Wake",
+  "description": "Compressible dNamiX cylinder wake dataset with all current OpenModalPy methods.",
+  "case": {
+    "name": "cylinder_wake_compressible",
+    "case_type": "experimental",
+    "description": "Compressible cylinder wake example.",
+    "data": {
+      "kind": "file",
+      "path": "../data/dnamix/snp1-947_u.npz"
+    },
+    "spatial_weight_type": "uniform",
+    "n_modes_save": 10,
+    "rank": 10,
+    "nfft": 128,
+    "overlap": 0.5,
+    "embedding_dim": 15,
+    "generate_plots": true,
+    "results_root": "../results/cylinder_wake_compressible",
+    "figures_root": "../figures/cylinder_wake_compressible"
+  },
+  "runs": [
+    { "id": "pod", "method": "pod" },
+    { "id": "mpod", "method": "mpod", "params": { "band_edges": [0.0, 0.15, 0.35, 1.0], "band_scale": "normalized_nyquist" } },
+    { "id": "dmd_ls", "method": "dmd", "params": { "method": "ls", "embedding_dim": 1 } },
+    { "id": "dmd_tls", "method": "dmd", "params": { "method": "tls", "embedding_dim": 1 } },
+    { "id": "spod", "method": "spod" },
+    { "id": "psd_pod", "method": "psd-pod" },
+    { "id": "bsmd", "method": "bsmd" }
+  ]
+}

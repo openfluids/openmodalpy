@@ -1,0 +1,1443 @@
+# OpenModalPy technical reference
+
+This document is the single reference for humans and LLMs working with the
+OpenModalPy codebase. It covers architecture, every supported method, the data
+contract, the configuration system, the CLI, and extension paths.
+
+---
+
+## Architecture
+
+```
+src/openmodalpy/
+├── __init__.py          # public exports: analyzers + set/get/blas_threads policy
+├── __main__.py          # python -m openmodalpy
+├── core/
+│   ├── base.py          # BaseAnalyzer: the shared lifecycle and its state
+│   ├── operators.py     # reduced SVD and its routing, blocksfft, sign convention
+│   ├── decomposition.py # lift / metric / weighted_second_order seam
+│   │                    #   (POD, mPOD, ST-POD, PSD-POD share this) and
+│   │                    #   spod_single_frequency, the SPOD eigenproblem
+│   ├── weights.py       # uniform, polar, prescribed and cell-volume weights
+│   ├── welch.py         # window, hop, scaling, and the windowed-block FFT
+│   ├── fftcache.py      # the stamp that says a saved FFT block cache is reusable
+│   ├── results.py       # HDF5 result contract: one name table, writer, reader
+│   ├── provenance.py    # versions, backend, threads, seed, git SHA in every file
+│   ├── plotting.py      # contour, slice and isometric rendering of modes
+│   ├── io.py            # MATDataLoader, DNamiDataLoader, GenericDataLoader,
+│   │                    #   DataInterfaceManager, _slice_block_in_time
+│   ├── nek.py           # Nek5000 reader with Gauss-Lobatto-Legendre weights
+│   ├── config.py        # FFT_BACKEND, FIG_DPI, directory defaults
+│   ├── threads.py       # process-wide BLAS thread policy (default 1)
+│   └── parallel.py      # polar weight and block-FFT entry points
+├── pod.py               # PODAnalyzer (variance-optimal, identity lift)
+├── mpod.py              # MPODAnalyzer (band-filtered POD)
+├── psd_pod.py           # PSDPODAnalyzer (pooled Fourier-ensemble POD)
+├── spod.py              # SPODAnalyzer (frequency-by-frequency POD)
+├── dmd.py               # DMDAnalyzer (LS/TLS, delay embedding, HODMD)
+├── bsmd.py              # BSMDAnalyzer (triadic bispectral decomposition)
+├── stpod.py             # STPODAnalyzer (delay-embedded POD via Hankel lift)
+├── commands.py          # dispatch core: analyze_from_spec, _run_pod_like,
+│                        #   _run_dmd, _run_spod, _run_bsmd, _run_psd_pod,
+│                        #   example discovery
+├── cli.py               # argparse frontend: analyze, run, methods, examples, results
+├── config_io.py         # load_jsonc, resolve_path, strip_jsonc_comments
+├── specs.py             # DataSourceSpec, CaseSpec, AnalyzeSpec, RunOutcome, etc.
+├── example_data.py      # built-in generators: double_gyre, taylor_green, cylinder_wake
+└── examples/            # packaged .jsonc configs shipped in the wheel
+```
+
+FFT backend dispatch lives in the external [`fftkit`](https://github.com/openfluids/fftkit)
+package: openmodalpy calls `rfft`, `irfft` and `rfftfreq`, and fftkit picks the backend
+among scipy/numpy/mkl/cupy. `core.config.FFT_BACKEND` re-exports the backend fftkit
+resolved. Override it with the `FFTKIT_BACKEND` environment variable. fftkit also has an
+`accelerate` backend, but that one supplies no `rfft`, so `FFTKIT_BACKEND=accelerate`
+stops the Welch transform.
+
+### Module size
+
+A target of 600 lines per module was set when eight modules were above 900 and
+the SPOD eigenproblem sat in a file called `base` inside a directory called
+`core`. Three rounds of splitting moved the shared numerics into
+`core/operators.py`, `core/decomposition.py`, `core/weights.py`,
+`core/welch.py`, `core/results.py`, `core/provenance.py` and
+`core/fftcache.py`. The equation for each method now lives in the module named
+for that method, or one import away from it: the import block of `spod.py`
+reads `from openmodalpy.core.decomposition import spod_single_frequency`, so
+the name of the eigenproblem is visible without opening `core/base.py`.
+
+Nine modules stay above 600 lines. The measurement, at the 2026-09-12 commit:
+
+| Module | Lines | Of which plot methods | What the rest is |
+|---|---|---|---|
+| `core/io.py` | 1451 | 0 | `DNamiDataLoader` 491, `MATDataLoader` 161, `_assemble_contract_data` 91, `derive_grid_and_snapshot_counts` 90 |
+| `pod.py` | 1354 | 772 (57%) | `PODAnalyzer`, whose `perform_pod` is 137 lines |
+| `bsmd.py` | 1117 | 214 (19%) | `BSMDAnalyzer`, including the out-of-core `qhat` store |
+| `dmd.py` | 1114 | 521 (47%) | `DMDAnalyzer`: LS, TLS, delay embedding, HODMD |
+| `core/base.py` | 1018 | 28 (3%) | `BaseAnalyzer` 866, `_fill_contract_counts` 53 |
+| `spod.py` | 940 | 460 (49%) | `SPODAnalyzer` |
+| `commands.py` | 889 | 0 | 37 top-level functions, longest 74 lines |
+| `stpod.py` | 824 | 405 (49%) | `STPODAnalyzer` |
+| `core/decomposition.py` | 635 | 0 | the lift/metric seam and `spod_single_frequency` |
+
+Each is above 600 for one of three reasons, and none of the three is fixed by
+a further split.
+
+**A class is one unit.** `BaseAnalyzer` is 866 of base.py's 1018 lines. Every
+analyzer subclasses it, and its methods share mutable state that the subclasses
+read and write. Cutting it into two classes does not reduce what a reader must
+hold; it adds an inheritance level or a delegation layer between the state and
+the code that uses it. The same holds for `DNamiDataLoader` at 491 lines and
+for each analyzer class. The 600-line rule measures files. The thing a reader
+must understand here is a class, and the file is already one class plus its
+imports.
+
+**Plot methods are half of four analyzers.** In `pod.py`, `dmd.py`, `spod.py`
+and `stpod.py`, between 47% and 57% of the file is `plot_*` methods. They were
+left in place on purpose. Each one reads the analyzer's own attributes, such as the modes,
+eigenvalues, frequencies and grid, and calls the shared renderers in
+`core/plotting.py` for the parts that are generic. Moving them to a fifth
+plotting module would turn attribute access into an argument list of ten or
+more items per call, and a reader looking for "how is a POD mode drawn" would
+have one more file to open, not one fewer. The measured cost of leaving them is
+visible instead in the coverage split: `pod.py` 78%, `core/plotting.py` 52%,
+against 97% for `core/decomposition.py` and 93% for `core/operators.py`. The
+untested part of this codebase is the rendering, and the numbers now say so.
+
+**`core/io.py` and `commands.py` are flat.** Neither has a nesting problem.
+`commands.py` is 37 top-level functions whose longest is 74 lines;
+`core/io.py` is four loader classes, a manager, and 28 module-level
+functions. A reader opens them at a name, not at the top. Splitting a flat
+file of small functions moves the import lines and nothing else.
+
+The remaining case for a split is `bsmd.py`. Its out-of-core `qhat` store
+holds an `h5py` handle, a bin cache and a `__del__`. That is memory management
+inside a mathematical analyzer, a real mixture of concerns. It is left as
+one file because the store's lifetime is the analyzer's lifetime, and a
+separate module would have to hand ownership of an open file handle across a
+module boundary. If it moves, it moves together with a test that a partially
+written cache is detected, which is what `core/fftcache.py` already does for
+the SPOD path.
+
+## FFT batching
+
+Welch sends one block at a time to the transform. A batched call, which would send all
+blocks together, stays out until a measured case asks for it. `pyproject.toml` carries a
+`gpu` extra, but it only pulls fftkit's CUDA wheel. No code path sends work to a GPU.
+
+## BLAS thread policy
+
+OpenModalPy pins the process-wide BLAS/OpenMP thread count for `svd` / `eigh` /
+`eig` so two runs on the same machine, same install, and same policy produce
+**bit-identical** arrays by default. The default is **1 thread** (reproducible);
+speed is opt-in.
+
+```python
+import openmodalpy as omp
+
+omp.get_blas_threads()          # 1 unless OPENMODALPY_BLAS_THREADS is set
+omp.set_blas_threads(4)         # process-wide; 0 means no limit from this package
+with omp.blas_threads(0):       # scoped; restores the previous value
+    ...
+```
+
+Environment variable `OPENMODALPY_BLAS_THREADS` is parsed lazily on the first
+`get_blas_threads()` call (not at import time). `0` means this package applies
+no limit. An existing `OMP_NUM_THREADS` or outer `threadpoolctl` limiter still
+applies. The effective count is written into every result file as
+`prov_blas_threads`.
+
+**What is guaranteed.** Given a fixed environment (same OS, same NumPy/SciPy
+build, same BLAS vendor and version, same policy), repeated runs are
+deterministic: reduction order inside the kernels does not wander with core
+count.
+
+**What is not guaranteed.** Bit-identical results across BLAS vendors (OpenBLAS
+vs MKL vs Accelerate) are not promised and are generally not achievable. Record
+`prov_blas_threads` and the package versions in the provenance block when
+comparing machines.
+
+**What to set when you want speed instead.** Measured on a 24-core Ryzen with
+OpenBLAS, on an idle machine, best of several runs:
+
+| solve | 1 thread | 8 threads | 24 threads |
+|---|---|---|---|
+| `eigh` 400x400 | 9.5 ms | 6.9 ms | 11.1 ms |
+| `eigh` 1000x1000 | 93.5 ms | 47.7 ms | 94.7 ms |
+| `eigh` 2000x2000 | 642 ms | 239 ms | 454 ms |
+| dense `svd` 3000x800 | 255 ms | 160 ms | 321 ms |
+| dense `svd` 80000x397 | 2.33 s | 1.19 s | 1.09 s |
+| ARPACK `svds`, k=10, 80000x397 | 0.318 s | 0.312 s | 0.400 s |
+
+Two things follow. Eight threads is the best of these three at every size, and
+it is never slower than one, down to `eigh` on a 20x20 matrix. More than eight
+is worse than one for small work, because the threads cost more than they save.
+
+The truncated route does not gain. ARPACK spends its time in matrix-vector
+products, which do not divide across cores the way a dense factorisation does,
+so a rank-10 `svds` stays near 0.32 s whatever you set. DMD and any other
+method that takes the iterative route therefore runs at the same speed on one
+thread as on eight.
+
+### Analyzer lifecycle
+
+Every analyzer follows the same sequence:
+
+1. **Construct.** Pass `file_path`, loader, weight type, method params
+2. **`load_and_preprocess()`.** Load data, compute spatial weights, set derived params
+3. **Method-specific computation.** `perform_pod()`, `perform_dmd()`, `perform_spod()`, etc.
+4. **`save_results()`.** Write HDF5 with modes, eigenvalues, metadata
+5. **Plot.** `plot_eigenvalues()`, `plot_modes()`, etc.
+
+The `commands.py` dispatch core (`analyze_from_spec`) automates steps 1–5 from
+a single `AnalyzeSpec` dataclass, which is built from a JSONC config file.
+
+### Design principle
+
+All analyzers share:
+- One **data contract** (snapshot matrix Q, coordinates, dt, spatial weights W)
+- One **metric layer** (W defines the inner product for orthogonality and energy)
+- One **lift** concept (the method-specific transformation of raw snapshots)
+
+They differ only in the **operator problem** solved on the lifted data:
+- Variance-optimal (eigendecomposition of weighted covariance/kernel)
+- Evolution-fit (SVD-based regression on paired snapshots)
+- Triadic interaction (cross-bispectral coupling optimization)
+
+The variance-optimal path is a single seam in `core/decomposition.py`:
+named lifts (`IdentityLift`, `DelayEmbeddingLift`, `BandFilteredLift`), a
+`SpatialMetric` (with `.tile(d)` for delay space), and
+`weighted_second_order(..., method="eigh"|"svd")`. POD, mPOD, ST-POD and
+PSD-POD all call that solver; `lift_kind` metadata comes from `lift.kind`.
+
+**Spatial weights.** Every analyzer accepts `spatial_weight_type` in
+`{"uniform", "polar", "prescribed", "cell_volume"}`. Any other value, the former
+`"auto"` included, raises at construction. Omitting the argument (`None`) resolves to
+`"uniform"`. Pass an array as `spatial_weights=` to prescribe a metric: the
+type becomes `"prescribed"`, and the vector is checked against the snapshot
+grid (`n_space`) in `load_and_preprocess` (length/shape, finite, non-negative,
+non-zero total). `"prescribed"` without an array, or an array together with
+`"uniform"`/`"polar"`, raises at construction. An array with no type still
+prescribes. Config/CLI still only expose the type string; prescribing a vector
+is a library argument.
+
+**Limitation: uniform W is not a domain integral.** With
+`spatial_weight_type="uniform"`, W is the all-ones vector, not cell volumes or
+grid spacing. Reported "energy" is therefore a **sum over mesh points**, not a
+domain integral, and is **mesh-resolution dependent**: refining the grid changes
+the numerical value even when the continuum field is unchanged. Comparing
+energies across resolutions requires care (or `spatial_weight_type="cell_volume"`
+on a Cartesian grid, described under Spatial weights below).
+
+---
+
+## Data Contract
+
+Every analyzer expects a Python dict with these keys:
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `q` | `ndarray (Ns, Nspace)` | yes | snapshot matrix (time × flattened spatial; C-order: `index = iy*Nx + ix`, plus `iz*Ny*Nx` per z-slab) |
+| `x` | `ndarray` | yes | x-coordinates (1D or 2D mesh) |
+| `y` | `ndarray` | yes | y-coordinates (1D or 2D mesh) |
+| `z` | `ndarray` or `None` | no | z-coordinates for 3D data |
+| `dt` | `float` | yes | time step between snapshots |
+| `Nx` | `int` | no | grid points in x (derived from the shapes of `q`, `x`, `y` when absent) |
+| `Ny` | `int` | no | grid points in y (derived from the shapes of `q`, `x`, `y` when absent) |
+| `Nz` | `int` | no | grid points in z (derived when absent; default 1) |
+| `Ns` | `int` | no | number of snapshots (derived from `q.shape[0]` when absent) |
+| `t` | `ndarray` | no | time vector |
+| `metadata` | `dict` | no | format info, var_name, plot_style, etc. |
+
+`q`, `x`, `y` and `dt` are the only keys a caller must supply; a dict missing
+one of them raises `ValueError` at construction, naming the missing key(s).
+`Nx`, `Ny`, `Nz` and `Ns` are derived from the array shapes, using the same
+rule for a hand-built dict (`data=`) and for a file read from disk. See
+"Load once, loop over methods" below.
+
+### The plug-in point for your own data
+
+There is one documented way to hand openmodalpy your own data: a plain
+callable `(path: str) -> dict` that returns a dict following the contract
+table above, given either as `data_loader=` (called once per `file_path`) or
+called yourself and handed straight in as `data=`. See "Your own format"
+below for a worked template.
+
+The `DataLoader` abstract base class and `DataInterfaceManager`
+(`core/io.py`) are internal. They are how the shipped readers (`.mat`,
+`.npz`, `.h5`/`.hdf5`, dNami) are written, not a path a user is expected to
+subclass.
+
+### Supported input formats
+
+- **MATLAB `.mat`**: auto-detected via `MATDataLoader`
+- **NumPy `.npz`**: plain contract layout via `GenericDataLoader`, or dNami-family
+  consolidated/split layouts via `DNamiDataLoader` (auto-detected by key signature;
+  an explicit `schema=` forces the dNami loader)
+- **HDF5 `.h5` / `.hdf5`**: plain contract layout via `GenericDataLoader`
+- **directory** of dNami-family split NPZ files: `DNamiDataLoader`
+- **Nek5000 field files `.f0*`**: `NekDataLoader`, which needs the optional
+  `nek` extra (`uv pip install "openmodalpy[nek]"`). The extra installs pymech,
+  which is GPL-3.0-or-later; the package itself is Apache-2.0 and imports pymech
+  only when you read a Nek5000 file. See `NOTICE`. The loader reads the mesh with
+  the field and returns `spatial_weights` for the spectral-element grid: the
+  Gauss-Lobatto-Legendre quadrature weight of each point times the determinant of
+  the element Jacobian at that point. Each element gets its own Jacobian, so a mesh
+  of unequal elements integrates as accurately as a uniform one.
+- **Custom loader**: any callable `(file_path: str) -> dict`, see "Your own
+  format" below
+
+The generic reader takes named datasets: `q` (as `(Ns, Nspace)` or `(Ns, Ny, Nx[, Nz])`,
+flattened C-order), `x`/`y` (required, passed through unchanged), optional `z`/`t`/`dt`,
+and optional integer `Nx`/`Ny`/`Nz`/`Ns` (derived from the array shapes when absent).
+If `x` and `y` are both 1-D and the same length as `Nspace` but their product does not
+equal `Nspace`, the file is read as scattered points: `x`, `y` (and `z` if also 1-D of
+that length) pass through unchanged and `Nx`, `Ny`, `Nz` are reported as `Nspace`, `1`, `1`.
+When `t` is supplied it must sample uniformly (checked with `fftkit.describe_sampling`;
+relative jitter below 1e-12) and `dt` becomes the verified median step. A non-uniform
+`t` is refused with the observed spread unless the caller passes `resample_time=True`,
+which forwards the record through `fftkit.resample_uniform`.
+
+### Load once, loop over methods
+
+Every analyzer also accepts an already-loaded dataset directly through `data=`,
+with no file path and no reload from disk per method. Exactly one of `file_path` and
+`data` is required; passing both or neither raises at construction. `data` must
+be a non-empty dict following the contract table above and is stored by
+reference, so one load can feed every analyzer. With `data=`, output files are
+named after the analyzer instead of the input path (`pod_64snapshots_pod.hdf5`)
+and the directories keep their usual defaults (`./results`, `./figures`). Each
+analyzer recomputes the spatial weights. On typical grids that takes little time,
+but it adds to the per-method cost.
+
+```python
+def my_loader(path):
+    return {"q": q, "x": x, "y": y, "dt": 0.01,
+            "Nx": 100, "Ny": 50, "Ns": q.shape[0]}
+
+d = my_loader("run_001")          # one load
+
+for cls, perform in ((PODAnalyzer, "perform_pod"),
+                     (SPODAnalyzer, "perform_spod"),
+                     (DMDAnalyzer, "perform_dmd")):
+    analyzer = cls(data=d)        # no file_path, no disk reload
+    analyzer.load_and_preprocess()
+    getattr(analyzer, perform)()
+```
+
+### Your own format
+
+Copy `examples/my_data_template.py`, edit `load_my_data` to read your own
+files, and pass its result through `data=`:
+
+```python
+from openmodalpy import PODAnalyzer
+from my_data_template import load_my_data  # your copy, renamed
+
+data = load_my_data("path/to/your/dataset")
+pod = PODAnalyzer(data=data)
+pod.load_and_preprocess()
+pod.perform_pod()
+```
+
+The template fills every contract key with a comment on what it is, which
+keys are required, and how `q` must be flattened. It is exercised by
+`tests/test_data_contract_derive_then_validate.py`, so it cannot silently
+rot.
+
+For a worked example of a shipped reader written against the internal
+`DataLoader` plug-in point instead, read
+`DNamiDataLoader` in `core/io.py`. Follow that pattern only when you
+contribute a reader to openmodalpy itself.
+
+### Spatial weights
+
+| Type | When to use |
+|------|------------|
+| `"uniform"` | Cartesian grids, single-component data (also the default when omitted) |
+| `"polar"` | Cylindrical grids (jet nozzle coordinates) |
+| `"prescribed"` | Caller-supplied metric via `spatial_weights=` |
+| `"cell_volume"` | Opt-in Cartesian-grid metric: trapezoid cell widths from 1-D axis coordinates |
+
+`"uniform"` is the all-ones vector (v0.5.0 behaviour): reported energies are
+mesh-point sums. See the limitation above. To integrate over the domain, opt
+in with `"cell_volume"` (`calculate_cell_volume_weights`): when the data dict
+carries 1-D strictly increasing `x`, `y` (and optional `z`) whose sizes
+multiply to `Nspace`, each axis contributes trapezoid cell widths (half the
+neighbouring spacing at boundary points) and POD/SPOD energies become
+resolution-invariant domain integrals, including on stretched grids. Without
+usable 1-D coordinates (absent, mesh-shaped arrays, or scattered points) it
+raises instead of falling back silently. Non-monotone 1-D coordinates are
+refused with an error, never sorted silently.
+
+`"polar"` on scattered points (1-D `x`, `y` of length `Nspace`) weights each
+point by its radius, `w_i = |y_i|`, the cylindrical Jacobian at the point;
+like scattered `"uniform"`, it carries no cell measure. Grid input (2-D
+`x`/`y`, or 1-D axes whose product is `Nspace`) is unchanged, and its weights
+are flattened in the same contract order as `calculate_cell_volume_weights`
+(`index = iy*Nx + ix`).
+
+On a 3-D polar grid, `z` is azimuth theta in radians, not a Cartesian
+coordinate; weights are sectors of the (x, r) annulus (`Wx * Wr *
+Delta-theta / (2*pi)`), and a `z` range beyond one revolution (2*pi) raises. `z` must cover one full revolution (sampled half-open or with both 0 and 2*pi given); a wrap gap much larger than the regular spacing -- a partial wedge -- also raises.
+
+Cell volumes are opt-in because trapezoid widths suit a wall-bounded stretched
+axis but not a periodic one. On a periodic axis equal weights are exact
+(Euler–Maclaurin: the boundary terms cancel), while trapezoid weights lose one
+cell of measure; a channel DNS (periodic x and z, stretched y) would get its
+streamwise and spanwise energies wrong by one cell. The library cannot tell
+the two cases apart from coordinates alone, so the user chooses.
+
+---
+
+Every analyzer constructor below takes `file_path` positionally and every
+other parameter by keyword only; a positional call past `file_path` raises
+`TypeError`. Upgrading from an older positional call: see the table under
+"Breaking" for the `[Unreleased]` entry in CHANGELOG.md.
+
+## Supported Methods
+
+### 1. POD: Proper Orthogonal Decomposition
+
+**Class:** `PODAnalyzer` · **Lift:** identity on centered snapshots · **Operator:** covariance kernel eigenproblem
+
+```python
+from openmodalpy import PODAnalyzer
+
+pod = PODAnalyzer(file_path="data.mat", n_modes_save=10)
+pod.run_analysis()
+# pod.modes          (Nspace, n_modes)
+# pod.eigenvalues    (n_modes,)
+# pod.time_coefficients (Ns, n_modes)
+```
+
+**Key facts:**
+- Modes are W-orthogonal, ranked by captured weighted variance
+- Uses method of snapshots (kernel eigenproblem) when Ns < Nspace
+- Mean is subtracted before decomposition
+
+### Non-positive eigenvalues and rank-deficient input
+
+POD, mPOD and PSD-POD share one relative cutoff on the correlation (Gram)
+eigenvalues after the eigendecomposition:
+
+\[
+\lambda \le n_{\mathrm{kernel}}\,\varepsilon\,\lambda_{\max}
+\]
+
+is discarded. Here \(\varepsilon\) is machine epsilon of the working real
+dtype (`np.finfo(float).eps` on the default real path), \(\lambda_{\max}\) is
+the largest eigenvalue, and \(n_{\mathrm{kernel}}\) is the dimension of the
+matrix that was actually factored: `n_samples` on the temporal branch
+(`Ns < Nspace`) and on the complex PSD-POD path, `n_space` on the spatial
+branch. The same rule replaces the old absolute `1e-12` floor that mPOD used
+and the old keep-all behaviour that POD used, so the returned count is scale
+invariant (a flow expressed in millimetres yields the same mode count as the
+same flow in metres).
+
+Returned modes always have unit weighted norm, and no returned eigenvalue is
+negative. When the data supports fewer modes than `n_modes_save` / `n_keep`,
+the solver returns the shorter basis. It does not pad with noise directions.
+Code that indexes a fixed mode width should use `modes.shape[1]` (or the
+length of `eigenvalues`), not assume the request was filled.
+
+**This cutoff is the numerical rank of the correlation matrix, NOT of the
+snapshot data.** Measured: a mode at singular-value ratio \(10^{-8}\)
+(eigenvalue ratio \(10^{-16}\)) is recovered exactly by the SVD route
+(correlation 1.000000, `matrix_rank` 3) while its Gram eigenvalue is
+indistinguishable from the noise floor. The snapshot / Gram route cannot
+resolve below \(\lambda / \lambda_{\max} \sim n\,\varepsilon\). Do not read the
+number of returned eigenvalues as the rank of the snapshot matrix itself.
+
+**The two solver routes.** POD defaults to `solver="eigh"`: it factors
+the correlation / Gram kernel. Pass `solver="svd"` (or, from a config,
+`params: {solver: "svd"}`) to factor the weighted snapshot matrix instead.
+ST-POD already uses the SVD route internally and has no user knob.
+
+The routes are numerically distinct and never bitwise identical.
+Disagreement on shipped cases (200 to 500 snapshots, 3200 to 5000 spatial points)
+is order \(\lambda_{\max} \cdot \varepsilon\), about 1e-14 on eigenvalues of order
+70. This is the expected consequence of two algorithms, not a defect. Both routes
+are \(O(n_{s}^{2}\,n_{x})\); only the constant differs, with `eigh` cheaper when
+\(n_{\mathrm{samples}} \ll n_{\mathrm{space}}\). On well-separated modes both
+return the same leading subspace.
+
+Prefer `solver="svd"` for ill-conditioned data (large condition number \(\kappa\))
+because the eigh route squares the condition number when forming the covariance.
+The SVD error grows as \(\kappa\), but the eigh error grows as \(\kappa^{2}\).
+Past \(\kappa \approx 10^{7}\), eigh starts returning fewer modes than requested
+because the smallest eigenvalue falls below the solver's threshold
+\(\kappa^{2} \cdot \varepsilon\).
+
+Reach for `svd` when that matters:
+
+- delay-embedded / Hankel data (ST-POD's case; already on this path)
+- strongly anisotropic or stretched spatial weights, where the weighted
+  condition number is large even when the raw field looks fine
+- nearly redundant snapshots from oversampled slow dynamics
+- mid-spectrum eigenvector quality, which degrades from squaring before the
+  hard \(n\,\varepsilon\) floor is hit
+
+```python
+pod.perform_pod()                 # default: correlation / Gram (eigh)
+pod.perform_pod(solver="svd")     # weighted snapshot SVD
+```
+
+### 2. mPOD: Multiscale POD
+
+**Class:** `MPODAnalyzer` · **Lift:** temporal band filtering · **Operator:** POD per band
+
+```python
+from openmodalpy import MPODAnalyzer
+
+mpod = MPODAnalyzer(
+    file_path="data.mat", n_modes_save=10,
+    band_edges=[0.0, 0.15, 0.35, 1.0],  # normalized Nyquist
+    band_scale="normalized_nyquist",
+)
+mpod.run_analysis()
+```
+
+**Key facts:**
+- Partitions temporal frequency axis into non-overlapping bands
+- Current implementation uses rectangular (brick-wall) filters
+- Modes live in the same space as POD modes but are scale-separated
+- Reference: Mendez et al. (2019), JFM 870
+
+**Limitation: POD-per-band pool, not Mendez MRA.** Each band is POD'd
+independently; band modes are concatenated and re-sorted by eigenvalue with no
+joint W-orthonormalization. Modes from different bands are not orthonormal
+across bands (`Φᵀ W Φ ≠ I` for the pooled set): cross-band inner products are
+generally nonzero. Within a single band, POD orthonormality still holds. This is
+a simplification relative to the Mendez et al. multiresolution construction; do
+not treat the full mode matrix as a W-orthonormal basis.
+
+### 3. PSD-POD: Power-Spectral-Density POD
+
+**Class:** `PSDPODAnalyzer` · **Lift:** pooled blockwise Fourier realizations · **Operator:** single second-order eigenproblem on the flattened Fourier ensemble
+
+```python
+from openmodalpy import PSDPODAnalyzer
+
+psd = PSDPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5, n_modes_save=10)
+psd.run_analysis()
+# psd.eigenvalues        (n_modes_save,)
+# psd.modes              (Nspace, n_modes_save)
+# psd.time_coefficients  (n_fourier_realizations, n_modes_save)
+# psd.freq, psd.St       frequency and Strouhal axes from the Welch blocks
+```
+
+**Key facts:**
+- Uses same Welch-block preprocessing as SPOD
+- Solves one global eigenproblem instead of per-frequency
+- Captures broadband coherent structures
+- Triggered via `method="psd-pod"` in config or by constructing `PSDPODAnalyzer` directly
+- `psd.plot_eigenvalues()`, `plot_cumulative_energy()`, `plot_modes()`, `plot_modes_3d()` save figures to the figures directory; `psd.load_results()` reloads a saved result file
+
+### 4. SPOD: Spectral POD
+
+**Class:** `SPODAnalyzer` · **Lift:** blockwise Fourier transform · **Operator:** per-frequency covariance eigenproblem
+
+```python
+from openmodalpy import SPODAnalyzer
+
+spod = SPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5)
+spod.run_analysis()
+# spod.eigenvalues       (n_freq, n_blocks)
+# spod.modes             (n_freq, Nspace, n_modes_kept)
+# spod.time_coefficients (n_freq, n_blocks, n_modes_kept)
+# spod.St                Strouhal number array
+# spod.freq              frequency array (Hz)
+```
+
+**Key facts:**
+- Frequency-by-frequency POD of Welch-block spectral ensemble
+- Block length controls bias-variance tradeoff of spectral estimator
+- Caches FFT blocks in HDF5 for reuse
+- Strouhal normalization via `characteristic_length` and `characteristic_velocity` params
+- Reference: Towne, Schmidt & Colonius (2018), JFM 847
+
+**Mode count and `n_modes_save`.** SPOD solves one eigenproblem per frequency
+over the Welch blocks, so it makes exactly `n_blocks` modes at each frequency.
+Without `n_modes_save` it keeps all of them, and `modes` is the largest array
+SPOD makes: `n_freq × Nspace × n_blocks` complex numbers.
+
+```python
+spod = SPODAnalyzer(file_path="data.mat", nfft=256, overlap=0.5, n_modes_save=5)
+```
+
+`n_modes_save` keeps the leading modes at each frequency and cuts `modes` and
+`time_coefficients` on their last axis. Eigenvalues keep every block, because
+the spectrum figure draws one line per block and they cost a few kilobytes. A
+value above the block count keeps every block and reports a `RuntimeWarning`
+naming both numbers; the block count is not known until the record is loaded,
+so that check runs in `perform_spod`, not in the constructor.
+
+Note the axis order of `time_coefficients`: the block axis comes **before** the
+mode axis, because the per-frequency eigenproblem is solved in block space.
+Both axes have length `n_blocks` when nothing is truncated, so code that
+assumed the other order kept working until `n_modes_save` made them differ.
+
+`n_modes_save` is a library option only. The CLI and the JSONC config do not
+pass it to SPOD, so `--n-modes` has no effect on an SPOD run. The config field
+defaults to 10, and there is no way to tell that default from a value the user
+chose, so feeding it through would truncate every existing SPOD run to 10 modes
+without being asked.
+
+**Limitation: `dst` is a Strouhal step, not a frequency step.** After the
+block FFT, SPOD normalizes by `sqrt(nblocks * dst)` where
+`dst = St[1] - St[0] = df · L / U` (not `df = fs / nfft`). Reported eigenvalues
+therefore **scale with U/L**. With the default L = U = 1 (and with the shipped
+generators), this coincides with a pure frequency-step weight; any other
+characteristic scales silently rescale the energy axis.
+
+#### External cross-check
+
+SPOD eigenvalues are compared to vendored numbers from **PySPOD 2.0.0**
+(Python 3.12, NumPy 2.5.2, SciPy 1.18.0) on the manufactured field from
+`tests/test_spod_oracle.py` (nfft 16, 8 blocks, zero overlap, dt 0.5, 4
+spatial points, tones at bins 3 and 5). The closed form is `(A/2)**2 / dst`:
+bin 3 → 18.0 and 4.5, bin 5 → 8.0. The numbers live in
+`tests/fixtures/reference/external_spod.json`; the comparison is
+`tests/test_external_spod.py`. The manufactured snapshot array is vendored in
+that fixture as JSON numbers. See [BLAS thread policy](#blas-thread-policy).
+PySPOD is not a dependency. The fixture comes from one run of
+`scripts/regen_external_spod.py`, outside the repo.
+
+The convention mapping is `λ_openmodalpy = λ_pyspod × nfft × dt / 2`.
+`nfft·dt` is the Strouhal-step division that PySPOD does not do; the 2 is
+PySPOD's interior-bin doubling, which openmodalpy does not do. PySPOD's
+eigenvalue is independent of dt (measured 4.503960 at dt 0.5, 1.0 and 2.0).
+
+The windows cannot be reconciled. PySPOD hard-codes the symmetric Hamming
+`0.54 − 0.46·cos(2πx/(N−1))` and offers no other window (`n_dft` must be an
+int). openmodalpy uses `scipy.signal.get_window(..., fftbins=True)`, the
+periodic Hamming. After the mapping, the residual is **1.09e-3** at bin 3
+mode 0, **9.0e-7** at bin 3 mode 1, and **1.95e-3** at bin 5 mode 0.
+Constant-phase modes take coherent leakage from the other tone; the
+phase-ramped mode is orthogonal to that leakage. This is a window-definition
+difference, not a bug. The comparison therefore runs at
+`window_type="hamming"`, `window_norm="amplitude"`. Amplitude recovers the
+closed form exactly (ratio 1.000000), and power sits at 0.7337695 of it, which is
+exactly `0.54² / (0.54² + 0.5·0.46²)`. `fullspectrum` changes only the
+returned bin count (16 vs 9), not the values at bins 3 and 5.
+
+Which check is the tighter one on the clean field: the closed-form comparison
+runs at `(nfft + nblocks)·eps`. The mapped PySPOD comparison is
+held at 5e-3 by the window difference above, so it corroborates the convention
+mapping and catches a convention mistake. Dropping the Strouhal division moves
+the answer by 8×, and the wrong window normalisation moves it by 0.734. An error
+smaller than 5e-3 is caught by the closed form, not by the external number.
+
+**The noisy case.** A second case, `noise_2e-1`, adds Gaussian noise at 0.2 of
+the field RMS from a seed recorded in the fixture. A noisy SPOD estimate has no
+closed form, so the vendored PySPOD number is the only thing asserting those
+eigenvalues. The bound is 1.6e-2, which is 2.5× the worst measured residual of
+6.36e-3. That is the same margin the clean bound uses. The bound itself is
+looser because the window difference and the noise interact.
+
+0.2 is the smallest level at which every occupied entry moves further from the
+clean closed form (1.25e-2, 2.21e-2, 4.43e-3) than the ~2e-3 window residual,
+which is what stops the closed form being a substitute. The generator refuses
+to write a case that fails that test.
+
+This case does not catch a different bug: both cases run the same code and the
+noisy bound is looser, so a shared error reds the clean assertions first. What
+it buys is that those three numbers have a check at all, and that a change
+affecting SPOD only on broadband input would have to get past it.
+
+Do not move the comparison to the noise-only sub-leading modes. They look ideal,
+with machine zero on the clean field and real energy under noise, but the window
+difference is coherent leakage, and on a low-energy mode the leakage *is* the
+signal. Measured disagreement there is 1.7e-2 to 1.6e-1, so a comparison would
+need a 40% bound and discriminate nothing.
+
+### 5. ST-POD: Delay-Embedded Space-Time POD
+
+**Class:** `STPODAnalyzer` · **Lift:** delay/Hankel stacking · **Operator:** POD in delay space
+
+```python
+from openmodalpy import STPODAnalyzer
+
+stpod = STPODAnalyzer(file_path="data.mat", embedding_dim=10, n_modes_save=10)
+stpod.run_analysis()
+```
+
+**Key facts:**
+- Constructs block-Hankel matrix from centered snapshots
+- Metric in lifted space: I_d ⊗ W
+- Modes live in C^{d·Nx}; visualization extracts delay-index-0 block
+- Uses `compute_reduced_svd` (ARPACK for large matrices)
+- Requires uniform dt
+
+### 6. DMD: Dynamic Mode Decomposition
+
+**Class:** `DMDAnalyzer` · **Lift:** identity (shifted pairs) · **Operator:** LS or TLS regression
+
+```python
+from openmodalpy import DMDAnalyzer
+
+dmd = DMDAnalyzer(file_path="data.mat", n_modes_save=10, rank=10)
+dmd.load_and_preprocess()
+dmd.perform_dmd(method="ls", embedding_dim=1)        # standard DMD
+dmd.perform_dmd(method="tls", embedding_dim=1)       # TLS-DMD
+dmd.perform_dmd(method="ls", embedding_dim=4,
+                named_variant="hodmd")          # HODMD
+dmd.perform_dmd(method="tls", embedding_dim=4,
+                named_variant="tls_hodmd")      # TLS-HODMD
+dmd.save_results()
+```
+
+**Rank vs saved modes:**
+- `rank`: **required.** SVD truncation of the DMD operator (the reduced system
+  size). Pass a positive `int`, `"svht"`, or `"energy"`. Omitting it raises
+  `ValueError`. There is no default: the previous silent default of
+  `n_modes_save` coupled a plotting parameter to the operator rank, and on the
+  shipped cylinder wake that choice moved the recovered shedding frequency by
+  ~20×.
+- `n_modes_save`: how many modes are kept for save/plot after sorting by `|λ|`.
+  Changing `n_modes_save` alone must not change eigenvalues.
+
+| `rank` | Criterion |
+|--------|-----------|
+| `int` | Explicit rank, floored by the relative cut `s_j > rcond * s[0]` (`rcond = max(shape) * eps`, as in `numpy.linalg.pinv`). Never exceeds what the data supports. |
+| `"svht"` | Gavish & Donoho (2014) optimal hard threshold, unknown-noise variant: `τ = ω(β) · median(s)` with `ω(β) = λ(β)/√μ_β`, `μ_β` the Marchenko–Pastur median, and `β = min(shape)/max(shape)`. On data with no coherent signal (flat singular spectrum) this can return `effective_rank == 0`: empty eigenvalues and modes, plus a `RuntimeWarning`, because `τ` then exceeds `σ₁`. That is the honest outcome, not a crash. |
+| `"energy"` | Smallest `r` with cumulative `s²` fraction ≥ `energy_fraction` (config key `energy_fraction`, analyzer default `0.999`; `None` in config leaves that default alone). |
+
+**Why there is no default rank:** On the shipped cylinder wake
+(`Nx=40, Ny=24, Nt=400`, so `X1` is 960×399) the singular spectrum decays
+**smoothly** to `σ_min/σ_1 ≈ 4.5×10⁻⁴` and never approaches the machine floor
+(`rcond ≈ 2×10⁻¹³`). Keeping every direction above that floor (rank 399)
+produces **spurious modes with `|λ| > 1`** (growth outside the unit circle)
+that sort *first* by the amplitude ranking. The recovered dominant frequency is
+**≈ 3.11 Hz** against true shedding **≈ 0.167 Hz**. Truncating at
+`rank=10`, `"svht"`, or `"energy"` all recover the physical shedding mode with
+`|λ| = 1`. A stability library that manufactures instabilities cannot guess an
+untruncated rank. Full rank remains available only by passing an explicit large
+`int`.
+
+**Why the library does not default to SVHT either:** SVHT assumes a low-rank
+signal plus **i.i.d. Gaussian noise of constant variance**, and its
+median-based noise estimate requires the **true rank below n/2**. Otherwise
+the median singular value is signal, not noise, and the criterion collapses the
+rank. Neither assumption holds for a typical deterministic fluid simulation with
+a smoothly decaying spectrum. SVHT is also computed from `X1` alone, while the
+DMD operator error depends on content of `X2` outside `range(X1)`. So `"svht"`
+ships selectable and documented, not as a silent default. No automatic criterion
+is free of trade-offs; choose a rank, and report `effective_rank` with the
+criterion you used.
+
+**Key facts:**
+- Eigenvalues encode frequency (angle) and growth/decay (modulus)
+- LS regression assumes noise only in Z+; TLS allows errors on both sides
+- TLS only beats LS on noisy data at `embedding_dim=1`. Measured over 200 seeds on
+  A = [[0.9, 0.1], [-0.1, 0.8]] with noise at 3e-2 of the clean peak, TLS lands
+  closer to the true eigenvalues in 177/200 runs at `embedding_dim=1`, with a median
+  error ratio of 0.311. At `embedding_dim=3` the margin is almost gone (104/200, median
+  0.882), and at `embedding_dim=5` LS is better on average (95/200, median 1.051).
+  Delay embedding stacks shifted copies of one record, so the noise repeats
+  across the Hankel rows. TLS assumes the errors in the two snapshot matrices
+  are independent, and the Hankel structure breaks that assumption.
+- Implementation uses broadcasting (`/ s_r`) instead of `np.diag(1/s_r)`
+- `named_variant` parameter sets metadata; avoids monkey-patching
+- Explicit large `rank` forces the dense SVD path when `min(X1.shape) ≥ 256`
+- DMD does **not** subtract the temporal mean and does **not** apply the spatial
+  weights `W` in the regression. Both are recorded in the saved metadata
+  (`uses_mean_subtraction=False`, `uses_spatial_metric_in_regression=False`).
+  On a field with a large steady offset (for example the shipped cylinder wake),
+  the mean shows up as a near-unit-circle mode (`|λ| ≈ 1`) with no separate warning.
+  If you want a fluctuation-only DMD, center the snapshots yourself before the fit.
+- Reference: Schmid (2010), JFM 656; Tu et al. (2014), JCD 1; Hemati et al. (2017), TCFD 31; Gavish & Donoho (2014), IEEE TIT
+
+#### External cross-check
+
+LS and TLS eigenvalues are compared to vendored numbers from **PyDMD 2025.8.1**
+(Python 3.12, NumPy 2.5.2, SciPy 1.18.0) on a 12-space, 40-snapshot linear
+system built from five chosen eigenvalues. The numbers live in
+`tests/fixtures/reference/external_dmd.json`; the comparison is
+`tests/test_external_reference.py`. The fixture vendors the noiseless and noisy
+snapshot arrays as JSON numbers so a field change cannot be read as a DMD
+regression. See [BLAS thread policy](#blas-thread-policy). PyDMD is not a
+dependency. The fixture comes from one run of
+`scripts/regen_external_reference.py`, outside the repo.
+The TLS routes differ algebraically: openmodalpy splits the left singular
+vectors of stacked `[X1; X2]`; PyDMD projects both snapshot matrices onto its
+leading right singular vectors. Same estimator, different algebra. They agree
+to ~1e-15 on noiseless data and only to ~3e-10 under 1e-3 rms noise. That
+residual is not a bug.
+
+**A second dataset: the shipped cylinder wake.** One dataset can be tuned
+against, so the fixture also carries `cylinder_wake`, a field the package
+ships and documents, 500 snapshots over 5000 spatial points against 40 over 12
+for the constructed system, at rank 6. The generator states the shedding
+Strouhal number in closed form, so this case anchors to a physical quantity as
+well as to PyDMD. The field is rebuilt on both sides rather than vendored: 2.5
+million float64 numbers do not belong in a JSON fixture, so the generator
+parameters plus five reduced statistics pin it. A checksum is deliberately not
+used. `np.sin` and `np.exp` can differ by one unit in the last place between
+platforms, so the bits are not portable while the sums are.
+
+The comparison on that case is over the **physical modes**, the three carrying
+the most amplitude: the mean and the shedding pair. The full sorted set is not
+a well-posed quantity there. The spectrum spans 1.0 down to 1.6e-3, and where
+the truncation rank cuts into the noise floor both packages place spurious
+modes, differently. At rank 4 TLS openmodalpy puts one at `|λ| = 3.61` where
+PyDMD puts one at 1.0, which makes the sorted-set error 3.6 while every
+physical mode still agrees to 1.6e-7. Those spurious modes carry amplitude
+1.1e-2 to 4.5e-2 against 57.8 for the mean and 3.35 for the shedding pair, and
+a growth rate no bounded field can support. Measured: LS agrees to 2.8e-15,
+TLS to 1.9e-6 against a TLS–LS split of 3.4e-5, and the shedding frequency
+recovers the documented St to 6.3e-5.
+
+The generator refuses to write this case if PyDMD's own shedding frequency
+misses the documented St.
+
+### 7. HODMD: Higher-Order DMD
+
+`hodmd` and `tls-hodmd` are `DMDAnalyzer` parameterizations, not separate
+classes. The exact mapping is:
+
+- `method="hodmd"` ⟹ `perform_dmd(embedding_dim=<d>, method="ls")`
+- `method="tls-hodmd"` ⟹ `perform_dmd(embedding_dim=<d>, method="tls")`
+
+where `<d>` is the delay embedding depth (default: case `embedding_dim`).
+
+**Key facts:**
+- Delay-embeds snapshots into Hankel vectors before forming pairs
+- Captures dynamics that appear nonlinear in original coordinates
+- Requires uniform dt (non-uniform sampling corrupts the Hankel lift)
+- Both LS-HODMD and TLS-HODMD supported
+- Reference: Le Clainche & Vega (2017), SIAM J. Appl. Dyn. Syst. 16
+
+### 8. BSMD: Bispectral Mode Decomposition
+
+**Class:** `BSMDAnalyzer` · **Lift:** Hadamard product of Fourier pairs · **Operator:** cross-bispectral eigenproblem
+
+```python
+from openmodalpy import BSMDAnalyzer
+
+bsmd = BSMDAnalyzer(file_path="data.mat", nfft=256, overlap=0.5)
+bsmd.run_analysis()
+# bsmd.energy_map   bispectral energy over (f1, f2)
+# bsmd.triads       identified triadic frequency pairs
+# bsmd.eigenvalues  coupling strength per triad
+```
+
+**Key facts:**
+- Identifies nonlinear triadic interactions (f1 + f2 = f3)
+- Uses dominant eigenpair as practical approximation to numerical-radius problem
+- Inspired by [Schmidt's MATLAB BMD](https://github.com/olivertschmidt/bmd)
+- Reference: Schmidt (2020), Nonlinear Dynamics 102
+
+**Limitation: default triad list is `ALL_TRIADS` with |p| ≤ 8.** The shipped
+static triad table only covers frequency-bin indices with absolute value at most
+8. At the default `nfft=128` that is the bottom 12.5% of the rfft spectrum;
+higher-frequency triads are not analysed unless you pass a custom
+`static_triads` list. Bound: every component must satisfy
+`|p| <= min(nfft // 2, n_loaded - 1)` (rfft Nyquist and the bins actually
+loaded in `qhat`). With no bins loaded, analysis refuses with a message that
+says so rather than quoting a negative bound. The default list
+(`static_triads=None`) is **warned and filtered** when any triad falls outside that bound; if filtering leaves none,
+analysis raises `ValueError`. A user-supplied list raises `ValueError` naming
+every offender. Dynamic triad selection (`use_static_triads=False`) is not
+implemented and raises `NotImplementedError`.
+
+---
+## Output shapes from load_results
+
+After running an analysis, the shapes of the returned arrays depend on the method.
+All shapes are measured with uniform spatial weights unless otherwise noted.
+Here Nspace is the number of spatial grid points, Ns is the number of snapshots,
+n_modes is the number of kept modes, and n_freq is the number of frequency bins.
+
+| Method | modes | eigenvalues/eigs | time_coefficients |
+|--------|-------|------------------|--------------------|
+| POD | (Nspace, n_modes) | (n_modes,) | (Ns, n_modes) |
+| MPOD | (Nspace, n_modes) | (n_modes,) | (Ns, n_modes) |
+| PSD-POD | (Nspace, n_modes) | (n_modes,) | (n_blocks·n_freq, n_modes) |
+| SPOD | (n_freq, Nspace, n_modes) | (n_freq, n_blocks) | (n_freq, n_blocks, n_modes) |
+| DMD | (Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
+| HODMD | (d·Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
+| TLS-HODMD | (d·Nspace, n_modes) | omega (n_modes,) | (Ns, n_modes) |
+| ST-POD | (d·Nspace, n_modes) | (n_modes,) | (Ns-d+1, n_modes) |
+
+Notes: **HODMD and TLS-HODMD** use delay embedding depth d (parameter `embedding_dim`).
+SPOD eigenvalues store one row per frequency bin with one entry per Welch block.
+PSD-POD stacks its blocks and frequencies on one axis, so the first axis of its
+time coefficients is `n_blocks * n_freq`, where `n_freq = nfft/2 + 1`.
+BSMD has a distinct output structure; refer to its docstring.
+
+---
+
+
+## Configuration System
+
+### JSONC config structure
+
+```jsonc
+{
+  // Suite metadata
+  "name": "My analysis suite",
+  "description": "Optional description",
+
+  // Case definition (shared across all runs)
+  "case": {
+    "name": "case_name",           // used for output directory names
+    "case_type": "experimental",   // or "analytical"
+    "data": {
+      "kind": "file",              // "file", "generator", or "dnami"
+      "path": "../data/file.mat"   // relative to this config file
+    },
+    "spatial_weight_type": "uniform",  // "uniform", "polar", or "cell_volume" (library also accepts "prescribed" + spatial_weights=)
+    "n_modes_save": 10,
+    "rank": 10,                    // DMD only (required): positive int | "svht" | "energy"
+    "energy_fraction": 0.999,      // DMD only: cumulative s² target when rank is "energy" (analyzer default 0.999)
+    "nfft": 128,                   // FFT block size (SPOD/BSMD/PSD-POD)
+    "overlap": 0.5,                // block overlap fraction
+    "embedding_dim": 10,           // delay depth (ST-POD/HODMD)
+    "generate_plots": true,
+    "results_root": "../results/case_name",
+    "figures_root": "../figures/case_name"
+  },
+
+  // Runs: each gets its own subdirectory under results/figures root
+  "runs": [
+    { "id": "pod",      "method": "pod" },
+    { "id": "mpod",     "method": "mpod",
+      "params": { "band_edges": [0, 0.15, 0.35, 1.0],
+                  "band_scale": "normalized_nyquist" } },
+    { "id": "dmd_ls",   "method": "dmd",
+      "params": { "method": "ls", "embedding_dim": 1 } },
+    { "id": "dmd_tls",  "method": "dmd",
+      "params": { "method": "tls", "embedding_dim": 1 } },
+    { "id": "hodmd",    "method": "hodmd",
+      "params": { "embedding_dim": 4 } },
+    { "id": "tls_hodmd","method": "tls-hodmd",
+      "params": { "embedding_dim": 4 } },
+    { "id": "spod",     "method": "spod" },
+    { "id": "psd_pod",  "method": "psd-pod" },
+    { "id": "bsmd",     "method": "bsmd" },
+    { "id": "stpod",    "method": "stpod" }
+  ]
+}
+```
+
+### Data source kinds
+
+| Kind | Required fields | Description |
+|------|----------------|-------------|
+| `"file"` | `path` | Load from `.mat` or `.npz` file |
+| `"generator"` | `name`, `params` | Generate at runtime (`double_gyre`, `taylor_green`, `cylinder_wake`) |
+| `"dnami"` | `path`, `schema` | Schema-driven dNami NPZ loader (consolidated or split layout) |
+
+### Method aliases
+
+| CLI/config name | Internal ID |
+|----------------|-------------|
+| `psd-pod` | `psd_pod` |
+| `tls-hodmd` | `tls_hodmd` |
+
+All other method names work as-is: `pod`, `mpod`, `dmd`, `hodmd`, `spod`, `bsmd`, `stpod`.
+
+---
+
+## CLI Reference
+
+```
+openmodalpy analyze <method> --config <path.jsonc> [options]
+openmodalpy run --config <path.jsonc> [--dry-run]
+openmodalpy methods list
+openmodalpy methods show <name>
+openmodalpy examples list
+openmodalpy examples show <name>
+openmodalpy examples run <name> [--dry-run]
+openmodalpy results inspect <path>
+```
+
+### analyze options
+
+| Flag | Description |
+|------|-------------|
+| `--config` | Path to JSONC case config (required) |
+| `--run-id` | Custom output subdirectory name |
+| `--dry-run` | Preview without executing |
+| `--no-plots` | Disable figure generation |
+| `--n-modes` | Override n_modes_save |
+| `--nfft` | Override FFT block size |
+| `--overlap` | Override overlap fraction |
+| `--embedding-dim` | Override delay embedding dimension (DMD, HODMD, ST-POD) |
+| `--method ls\|tls` | DMD regression model |
+| `--band-edges` | mPOD band edges (comma-separated) |
+| `--band-scale` | mPOD band scale (`hz` or `normalized_nyquist`) |
+| `--results-dir` | Override results root |
+| `--figures-dir` | Override figures root |
+| `--weight-type` | Override spatial weight type |
+
+---
+
+## Implementation Notes
+
+### SVD strategy
+
+`compute_reduced_svd(X, rank)` in `core/base.py`:
+- If `rank < min(X.shape)` and `min(X.shape) >= 256`: uses `scipy.sparse.linalg.svds` (ARPACK, truncated)
+- Otherwise: uses `np.linalg.svd(X, full_matrices=False)` (dense LAPACK)
+
+Shared by DMD, HODMD, and ST-POD.
+
+### DMD broadcasting
+
+The exact DMD operator `A_tilde = U_r* Z+ V_r Sigma_r^{-1}` is computed as:
+```python
+atilde = (u_r.conj().T @ X2 @ v_r) / s_r  # broadcasting, not np.diag
+modes = X2 @ (v_r / s_r) @ w              # same trick for mode recovery
+```
+
+### SPOD FFT caching
+
+SPOD caches blockwise FFT results in the HDF5 output file under the
+`FFTBlocks` dataset. Subsequent SPOD runs on the same data with the same
+`nfft`/`overlap` skip the FFT computation. `perform_spod()` forms the blocks
+itself on first use; PSD-POD and BSMD do the same, so no separate
+`compute_fft_blocks()` call is needed after `load_and_preprocess()`.
+
+### Delay embedding
+
+`_delay_embed(X, d)` in `dmd.py` builds the Hankel matrix with pre-allocated
+output (avoids `np.vstack` of d temporary arrays):
+```python
+out = np.empty((n * d, cols), dtype=X.dtype)
+for i in range(d):
+    out[i * n : (i + 1) * n, :] = X[:, i : i + cols]
+```
+
+---
+
+## Built-in Generators
+
+| Name | Function | Parameters | Ground truth |
+|------|----------|-----------|-------------|
+| `double_gyre` | `generate_double_gyre()` | Nx, Ny, Nt, A, epsilon, period, t_max | Known period T, frequency f₀=1/T |
+| `taylor_green` | `generate_taylor_green()` | Nx, Ny, Nt, nu, U0, L | Exact decay: λ = e^{-2νΔt}, rank-1 |
+| `cylinder_wake` | `generate_cylinder_wake()` | Nx, Ny, Nt, Re, D, U_inf, seed | Known St = 0.212(1 - 21.2/Re) |
+
+All three generators, plus `generate_example_dataset` and the discovered-example
+accessors `get_example_info`/`load_example_payload`, are exported from the top-level
+`openmodalpy` package. Each generator returns its ground truth in `metadata` (keys like
+`expected_freq`, `St`, `f_shed`, `dmd_eigenvalue`, `decay_rate`), so a user can check the
+package against its own stated truth without any file on disk:
+
+```python
+from openmodalpy import PODAnalyzer, generate_double_gyre
+
+data = generate_double_gyre(Nx=80, Ny=40, Nt=200)
+pod = PODAnalyzer(data=data, n_modes_save=5)
+pod.run_analysis(plots=False)
+
+fractions = pod.eigenvalues / pod.total_energy
+print(fractions)  # leading mode energy fractions
+```
+
+### Reproducibility
+
+**What an external user can reproduce from the wheel alone.** The four
+example configs that ship in the sdist/wheel are generator-backed and need no
+external data files:
+
+- `double_gyre.jsonc`
+- `taylor_green.jsonc`
+- `cylinder_wake.jsonc`
+- `run_benchmarks.jsonc`
+
+**What is not distributed.** These configs live in the source tree for local
+development but are excluded from the package (`pyproject.toml` sdist/wheel
+exclude list) because they point at benchmark datasets that are not shipped:
+
+- `cavity.jsonc`
+- `cylinder.jsonc`
+- `cylinder_wake_compressible.jsonc`
+- `jet.jsonc`
+- `jet_small.jsonc`
+
+An independent check of the three analytic generators (without plots) is the
+committed JSON under `tests/fixtures/reference/`. Each fixture stores:
+
+- **POD energy fractions** normalised by the **pre-truncation** total energy
+  (recoverable as `sum(kept λ) / energy_captured_fraction`). The fractions
+  therefore sum to `energy_captured_fraction` (the share of total energy held
+  by the retained modes), not to 1. That makes a leak into modes beyond the
+  retained set visible. The full leading-`n_modes` tail is kept even when
+  entries sit at ~1e-16 (honest structure on a rank-1 field).
+- **DMD** `|λ|` and phase after **canonical ordering**: magnitudes descending;
+  eigenvalues whose consecutive `|λ|` agree within the fixture `rtol` form a
+  group sorted by phase ascending. The analyzer still emits conjugate pairs in
+  LAPACK order; the reference layer reorders only for the golden file so the
+  comparison is portable across BLAS/LAPACK emission order.
+- `energy_captured_fraction`, `rtol`, and `atol` on the same small fixed grid
+  stated in the file.
+
+Shared definition (regen and test): `tests/reference_helpers.py`. Regenerate with:
+
+```bash
+uv run python scripts/regen_reference_fixtures.py
+```
+
+The comparison test is `tests/test_reference_fixtures.py`; it reads the
+tolerance from each fixture (never a literal in the test). Taylor–Green's
+recorded `dmd_abs_lambda[0]` is also checked against the generator closed form
+`metadata["dmd_eigenvalue"]` (`exp(-2νΔt)`), so that quantity is not golden-only.
+
+**Tolerance.** On a single-thread BLAS policy (the package default), three
+in-process re-runs of each generator produced a measured relative spread of
+0.0 for POD energy fractions and DMD |λ|, and an absolute phase spread of 0.0.
+The fixtures use `rtol=1e-6` and `atol=1e-12`: a large margin above that
+measured zero, still far below a 1 % change. Note that `pytest` alone checks
+agreement, not sensitivity: confirming the fixtures still *discriminate* means
+perturbing a recorded spectrum (1 % on a magnitude, additively on a phase) and
+watching the suite go red. Bit-identical results across BLAS
+vendors are not promised; see [BLAS thread policy](#blas-thread-policy).
+
+---
+
+## Output Format
+
+Every analyzer writes the same HDF5 dataset names for the same concepts
+(lowercase). The single module `openmodalpy.core.results` owns the name table,
+the writer, and the generic reader:
+
+```python
+from openmodalpy import read_results
+
+res = read_results("path/to/result.hdf5")
+# res.modes, res.eigenvalues, res.time_coefficients, res.freq, res.st, ...
+# res.attrs["analysis_type"]
+```
+
+**Canonical datasets** (present when the method produces them):
+
+| Name | Methods |
+|------|---------|
+| `modes`, `eigenvalues`, `time_coefficients` | POD, mPOD, ST-POD, DMD, SPOD, PSD-POD |
+| `freq`, `st` | SPOD, PSD-POD |
+| `amplitudes`, `omega` | DMD |
+| `modes1`, `modes2`, `triads` | BSMD |
+| `x`, `y`, `z`, `W`, `temporal_mean`, `energy_map` | when available (already uniform) |
+| `FFTBlocks` | SPOD/BSMD FFT cache (name unchanged on purpose) |
+
+**Attributes**: `analysis_type`, `nfft`, `overlap`, `dt`, `Ns`,
+`Nx`, `Ny`, `spatial_weight_type`, method-specific metadata. For POD, mPOD,
+DMD and ST-POD, `nfft` is 1 and `overlap` is 0.0: those methods never form an
+FFT block, so the pair is a stamp, not a setting.
+
+DMD also records `dmd_variant`, `dmd_method`, `dmd_embedding_dim`, `dmd_named_variant`
+and `dmd_svd_route`. The route is `"iterative"` when the truncation rank is a small
+fraction of the smaller matrix dimension, which sends the solve to ARPACK, and
+`"dense"` otherwise. The two cost an order of magnitude apart on a delay-embedded
+case, so the field tells you why a run took the time it did.
+
+**Provenance.** Every file written through `write_results` also carries a
+`prov_*` block describing the software that produced it. Read it as
+`read_results(path).provenance` (prefix stripped). Files written before this
+exist report an empty mapping; missing keys never raise.
+
+| Attribute | Type | Meaning |
+|-----------|------|---------|
+| `prov_openmodalpy_version` | str | Running package `__version__` (metadata fallback) |
+| `prov_python_version` | str | Running CPython X.Y.Z |
+| `prov_numpy_version` | str | Installed NumPy version |
+| `prov_scipy_version` | str | Installed SciPy version |
+| `prov_h5py_version` | str | Installed h5py version |
+| `prov_fftkit_version` | str | Installed fftkit version |
+| `prov_fft_backend` | str | `fftkit.DEFAULT_BACKEND` at write time |
+| `prov_blas_threads` | int | Effective BLAS thread limit used by kernels (`0` = no package limit / observation failed) |
+| `prov_blas` | str | One entry per bound BLAS/LAPACK threadpool, `"<internal_api> <version> threads=<n> (<user_api>)"`, joined with `"; "` |
+| `prov_platform` | str | `platform.platform()` at write time |
+| `prov_machine` | str | `platform.machine()` at write time |
+| `prov_hdf5_version` | str | HDF5 C library version (`h5py.version.hdf5_version`), distinct from `prov_h5py_version` |
+| `prov_config_sha256` | str | SHA-256 of analysis attrs (not data); excludes `prov_*` |
+| `prov_created_utc` | str | UTC write timestamp (`YYYY-MM-DDTHH:MM:SSZ`) |
+| `prov_git_sha` | str | openmodalpy package checkout HEAD when available, else `unavailable` |
+| `prov_seed` | str | Analysis seed when present (`data_seed`/`seed`), else `none` |
+
+`save_results(self, filename=None)` is the uniform writer signature on every
+analyzer.
+
+---
+
+## Testing
+
+Key test categories:
+
+| File | What it tests |
+|------|--------------|
+| `test_pod.py` | POD eigenvalues, mode shapes, energy convergence |
+| `test_mpod.py` | Band filtering, frequency separation |
+| `test_dmd.py` | Exact DMD, TLS, embedding_dim, HODMD metadata, roundtrip |
+| `test_stpod.py` | Delay embedding, Hankel shape, validation |
+| `test_spod_plot.py` | SPOD plotting paths |
+| `test_bsmd_core.py` | BSMD triad detection, energy map |
+| `test_cli_commands.py` | CLI dispatch, config parsing, dry-run, PSD-POD metadata |
+| `test_provenance.py` | Provenance block on all five analyzers; hash/prov-independence; never-raise; backend; unknown threads=0; legacy empty view |
+| `test_dnami_loader.py` | NPZ loading, schema handling |
+| `test_weights.py` | Polar and uniform weight computation |
+| `test_reference_fixtures.py` | POD/DMD spectra vs committed analytic fixtures |
+| `test_external_reference.py` | Vendored PyDMD eigenvalues (LS/TLS; constructed system noiseless and noisy, plus the shipped cylinder wake) |
+| `test_external_spod.py` | Vendored PySPOD eigenvalues (mapped Hamming, closed form) |
+
+Run all: `uv run pytest tests/ -q`
+
+To count them: `uv run pytest -q --collect-only`
+
+### Mutation testing
+
+Coverage says which lines the tests run. It does not say whether the tests
+FAIL when the numbers are wrong. Mutation testing answers that question. It
+changes one operator or constant in the source, then runs the suite. A mutant
+is "killed" if the suite goes red. A mutant that "survived" is a change to the
+numerical core that no test detects.
+
+The scope is deliberately narrow. `pyproject.toml` (`[tool.mutmut]`) mutates
+`core/decomposition.py` and `core/welch.py` only. Plotting, CLI and IO code is
+not mutated, because surviving mutants there are expected and hide the signal.
+
+Run it by hand:
+
+```bash
+scripts/mutation.sh mutation-report.txt
+```
+
+The run takes approximately an hour, because it runs the full suite once per
+mutant. Do not put it on the per-push path. The `mutation` workflow runs it on
+demand (`workflow_dispatch`) and on the first day of each month. On a shared
+machine, take the heavy-run lock in the caller:
+
+```bash
+timeout 5400 flock -w 900 ~/.heavy.lock scripts/mutation.sh mutation-report.txt
+```
+
+mutmut forks one test process per mutant, up to `--max-children`. The default
+is the CPU count, which saturates a shared box. The script caps it at 4. Set
+`MUTMUT_MAX_CHILDREN` to change the cap. Memory, not cores, is usually the
+binding limit: each child loads the full test process, and a 24-core machine
+with 15 GB of RAM needs `MUTMUT_MAX_CHILDREN=2`.
+
+mutmut copies the source into `mutants/` and runs the tests from there.
+Two things follow. Delete `mutants/` before a run, because a copy left by an
+earlier one can hold files a later refactor moved or removed, and the run then
+fails at collection instead of on a mutant. And a test that reads a repo-root
+path through `Path(__file__).parents[1]` resolves that path inside `mutants/`,
+so whatever it reads must be listed in `also_copy` in `[tool.mutmut]`;
+`source_paths` copies the package alone.
+
+#### Recorded baseline
+
+Run of 2026-09-09, on the two scoped files, 810 mutants:
+
+| Status | Count |
+|--------|------|
+| killed | 745 |
+| survived | 65 |
+| timeout | 0 |
+
+The kill rate is 92%. The previous entry here recorded 2026-08-27 and stood
+for eleven days and four refactors, because the harness could not complete a
+run in between: a stale `mutants/` tree and a too-narrow `also_copy` both
+failed it at collection. Both are fixed, and the note above says how to avoid
+them.
+
+Where the 65 survivors sit:
+
+| Function | Survivors |
+|----------|----------|
+| `_solve_svd` | 8 |
+| `BandFilteredLift.mask` | 7 |
+| `windowed_block_fft` (welch) | 6 |
+| `_solve_eigh` | 5 |
+| `SpatialMetric.__init__` | 5 |
+| `welch_nblocks` (welch) | 4 |
+| `weighted_second_order` | 4 |
+| `_row_mean_to_std_ratio` | 4 |
+| `BandFilteredLift.apply` | 4 |
+| `SpatialMetric.tile` | 3 |
+| the remaining 15 | 1 or 2 each |
+
+Two causes are expected, and one is not. A mutant in a solver route can
+survive because a different route gives the same answer to the stated
+tolerance. A mutant in a threshold constant can survive because no test sits
+close enough to the threshold to see the change. The second cause is a real
+gap in the suite. Treat this table as the number to improve, and compare a
+later run against it.
+
+Where the count moved, and what it cost:
+
+| Run | Mutants | Survived | Kill rate |
+|-----|---------|----------|-----------|
+| 2026-08-27 (last completed before the harness broke) | 812 | 109 | 86% |
+| 2026-09-07, harness repaired | 810 | 116 | 85.7% |
+| after the rank-floor and solver-route claims | 810 | 86 | 89.4% |
+| after the complex empty path and `num_modes` | 810 | 65 | 92.0% |
+
+#### What a surviving mutant is worth, and what a killed one is not
+
+Three of the four gaps closed above were a claim the suite had never made,
+not a line it had never run:
+
+- `_working_eps` returns the same number from both of its branches on
+  float64, so no float64 test can tell a correct implementation from one that
+  ignores the dtype. On float32 the two answers are 5.4e8 apart.
+- The return for a spectrum with no significant mode was never reached, on
+  the real path or the complex one, so its array shapes and its dtype were
+  free to be wrong.
+- `spod_single_frequency` offers `num_modes` and nothing in the package
+  passes it, because the SPOD loop truncates for itself after the call.
+
+The reverse also holds, and it is the sharper lesson. Fixing a real bug in
+the PSD-POD time coefficients on 2026-09-09 changed the mutation score by
+nothing at all: the survivor set before and after was identical, mutant for
+mutant. The line was already covered, by a test that restated the same wrong
+formula. Mutation testing finds a line no test constrains. It cannot find a
+line that every test agrees with and all of them are wrong. For that, assert
+a property the implementation does not mention: an energy identity, a
+reconstruction, a known analytical limit.
+
+---
+
+## Dependencies
+
+**Runtime:** `numpy`, `scipy`, `matplotlib`, `h5py`, `tqdm`
+
+**Dev:** `pytest`, `ruff`
+
+**No external solvers.** All linear algebra uses NumPy/SciPy. Future versions
+may optionally use SLEPc (`slepc4py`) for distributed eigensolvers.
+
+---
+
+## Extension Paths
+
+To add a new decomposition:
+
+1. **Variance-optimal method.** Write a new `Lift` in
+   `core/decomposition.py` (or a thin wrapper), then call
+   `weighted_second_order` with the appropriate metric and method.
+2. **Evolution-fit method.** Write a new lift for paired data, then reuse the
+   SVD-based regression in `dmd.py`.
+3. **Interaction method.** Write a new lift for higher-order objects, then
+   implement the coupling optimization.
+
+In all cases:
+- Subclass `BaseAnalyzer`
+- Register in `METHOD_REGISTRY` in `specs.py`
+- Add a `_run_*` function and a dispatch entry in `analyze_from_spec`
+- Add a JSONC example config
+- Add tests
+
+### Adding an Analyzer
+
+A new analyzer subclasses `BaseAnalyzer` and performs a modal decomposition
+on loaded data. The structure is:
+
+**Constructor**: Initialize via `super().__init__()`, then set `n_modes_save`,
+declare `modes`, `eigenvalues`, `time_coefficients` as empty arrays, and set
+`analysis_type` to a short string (used in filenames and logging). The base
+constructor accepts `file_path` or `data` (one only), plus `results_dir`,
+`figures_dir`, `data_loader`, `spatial_weight_type`, and `spatial_weights`. The
+base manages data loading and weight calculation. Pass those through to the base;
+do not override `load_and_preprocess` unless you have domain-specific logic.
+
+**Decomposition method**: Implement `perform_<method>()` and set
+`_perform_name = "perform_<method>"` as a class variable. This method reads
+`self.data["q"]` (the loaded snapshot matrix, time × space), populates
+`self.modes`, `self.eigenvalues`, and `self.time_coefficients`, then calls
+`self._resync_mode_count()` to truncate to `n_modes_save`. The base `run_analysis`
+method will call your `perform_<method>` after loading and before plotting.
+
+**Algorithm metadata**: Implement `_get_algorithm_metadata()` to return a dict
+describing the method for the provenance block (optional: describe the lift kind,
+normalization, or any tuning). The base uses this when writing results.
+
+**Results I/O**: The base class provides `save_results()` and
+`load_results()` that handle all HDF5 I/O. Implement `_result_payload()` to return
+a dict of arrays (modes, eigenvalues, time_coefficients, coordinates, etc.) and
+their metadata; the base writes these through the unified writer. If your method
+needs custom logic after the file closes (SPOD writes its FFT cache stamp here),
+override `_after_write(save_path)`. The base provides `_result_filename()` for
+harmonized naming and `_assign_loaded_results()` for unpacking the file back
+into the instance; override these only if your method stores non-standard fields.
+
+**Plotting**: Implement `_plot_run(run_id)` to save figures. Plot the
+eigenvalues in log scale, the spatial modes (via `_maybe_plot_volumetric_modes`
+if the data is 3D, or `plot_modes` for 2D), and the time coefficients. Use
+`display_name_for(self.analysis_type)` for titles and axis labels. Save via
+`fig.savefig(path, dpi=100, bbox_inches="tight")` and close with `plt.close`.
+
+**Base provides**: `load_and_preprocess()` (load, compute spatial weights W),
+`run_analysis()` (orchestrate the full load–decompose–save–plot sequence),
+`_resync_mode_count()` (truncate to `n_modes_save`), and helpers like
+`_maybe_plot_volumetric_modes()`. The base also manages all I/O, logging, and
+the data dict contract (with automatic Nx, Ny, Nz, Ns derivation if absent).
+
+**Method registration** (for CLI access): Add an entry to `METHOD_REGISTRY` in
+`specs.py:107` with the method ID, display name, and help text. Note that
+`METHOD_REGISTRY` carries no analyzer class; it is a reference only for the CLI.
+Add a dispatch lambda in `analyze_from_spec` (commands.py:626) that instantiates
+your analyzer and calls `run_analysis`. For pod-like methods (identity lift,
+second-order), the generic `_run_pod_like(spec, AnalyzerCls, ...)` helper at
+commands.py:466 can drive the analysis; SPOD, PSD-POD, DMD, and BSMD each have
+their own runners because they need Welch blocks or special parameters.
+
+**What is clumsy here**: `METHOD_REGISTRY` holds no class reference, and the
+dispatch is a hand-written dict of lambdas keyed by method name. To reach the
+CLI you must edit shipped code in three places: an import in `commands.py`, an
+entry in `METHOD_REGISTRY`, and a lambda in the dispatch dict. Nothing keeps
+those three in step, so a method can be registered and still have no dispatch
+entry. Reaching the round-trip test in `tests/test_one_loader_every_method.py`
+needs none of this, because that test holds the analyzer class directly.
+
+**Testing**: Run the new analyzer through `load_and_preprocess()`, then
+`perform_<method>()`, then `save_results()`. Load the results into a fresh
+instance via `load_results()` and verify all arrays round-trip bit-exactly via
+`np.testing.assert_array_equal()`. This ensures the HDF5 I/O is lossless.
+Verify provenance via the `_assert_provenance_block` helper in
+`tests/test_provenance.py`.
+
+See `tests/toy_analyzer.py` for a complete minimal example: a toy decomposition
+that takes the first k snapshots as modes and their norms as eigenvalues. The
+class is 113 lines and the file is 137. Six of those lines cover saving and
+loading, because the base does the work. When the toy was written, the same two
+jobs took 55 lines that every analyzer wrote again.
+
+
+**What a new analyzer must implement:**
+
+- `_METHOD_NAME` (class variable): The short name of the method. It names
+  the method in log lines, and it is the default stem of the result file
+  when the caller passes data instead of a file path.
+- `_perform_name` (class variable): The string name of the perform method,
+  e.g. `"perform_pod"`.
+- The perform method itself (e.g., `perform_pod()`): Reads `self.data["q"]`,
+  computes and sets `self.modes`, `self.eigenvalues`, `self.time_coefficients`,
+  and calls `self._resync_mode_count()`.
+- `_get_algorithm_metadata()`: Returns a dict with method metadata for the
+  provenance block (e.g., lift type, window function).
+- `_result_payload()`: Returns (datasets_dict, attributes_dict) of the arrays
+  to save and their metadata. The base writes these to HDF5.
+- `_plot_run(run_id)`: Saves figure files to `self.figures_dir`. Plot the
+  eigenvalues, spatial modes, and time coefficients.
+
+**What the base provides for free (override only if needed):**
+
+- `save_results()` and `load_results()`: Handle all HDF5 I/O automatically.
+- `_result_filename()`: Generates a harmonized filename from data_root, nfft,
+  overlap, and analysis_type. Override to customize naming.
+- `_required_result_fields()`: Returns the tuple of required dataset names
+  (modes, eigenvalues, etc.). Returned fields trigger a missing-field check
+  at load time. Override to enforce method-specific fields.
+- `_assign_loaded_results()`: Unpacks a loaded AnalysisResults object and
+  assigns its fields to self. Override for non-standard fields or post-processing.
+- `_after_write(save_path)`: Called after the result file closes. Does nothing
+  by default. Override to write method-specific metadata (e.g., SPOD's FFT
+  cache stamp).
+- `load_and_preprocess()`, `run_analysis()`: Orchestrate the full pipeline.
+- `_resync_mode_count()`: Truncates modes, eigenvalues, and time_coefficients
+  to `n_modes_save`.

@@ -1,0 +1,38 @@
+{
+  "kind": "analysis-suite",
+  "name": "Taylor-Green Vortex",
+  "description": "Decaying Taylor-Green vortex with all supported modal runs.",
+  "case": {
+    "name": "taylor_green",
+    "case_type": "analytical",
+    "description": "Taylor-Green vortex example.",
+    "data": {
+      "kind": "generator",
+      "name": "taylor_green",
+      "params": {
+        "Nx": 64,
+        "Ny": 64,
+        "Nt": 100
+      }
+    },
+    "spatial_weight_type": "uniform",
+    "n_modes_save": 10,
+    "rank": 10,
+    "nfft": 32,
+    "overlap": 0.5,
+    "embedding_dim": 10,
+    "generate_plots": true
+  },
+  "runs": [
+    { "id": "pod", "method": "pod" },
+    { "id": "mpod", "method": "mpod", "params": { "band_edges": [0.0, 0.15, 0.35, 1.0], "band_scale": "normalized_nyquist" } },
+    { "id": "dmd_ls", "method": "dmd", "params": { "method": "ls", "embedding_dim": 1 } },
+    { "id": "dmd_tls", "method": "dmd", "params": { "method": "tls", "embedding_dim": 1 } },
+    { "id": "hodmd", "method": "hodmd", "params": { "embedding_dim": 4 } },
+    { "id": "tls_hodmd", "method": "tls-hodmd", "params": { "embedding_dim": 4 } },
+    { "id": "spod", "method": "spod" },
+    { "id": "psd_pod", "method": "psd-pod" },
+    { "id": "bsmd", "method": "bsmd" },
+    { "id": "stpod", "method": "stpod" }
+  ]
+}

@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Without this, only the workflow action pins were tracked and Python
+  # dependency drift was invisible: the runtime floors in pyproject.toml
+  # (numpy, scipy, fftkit, h5py) would silently rot behind upstream releases.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-dev-tooling:
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "pytest*"
+          - "hypothesis"
