@@ -388,7 +388,7 @@ Contributions are welcome, and questions and bug reports count. See
 
 ## License
 
-Apache-2.0. Originally developed by Ricardo A S Frantz. See [LICENSE](LICENSE)
+Apache-2.0. Originally developed by Ricardo Frantz. See [LICENSE](LICENSE)
 and [NOTICE](NOTICE) for terms and attribution.
 
 ## Disclaimer
